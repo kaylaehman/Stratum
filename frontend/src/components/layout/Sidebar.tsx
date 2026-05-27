@@ -1,4 +1,4 @@
-import { LayoutDashboard, HardDrive, GitBranch, Container, FileText, Shield, Activity, Settings, ScrollText } from 'lucide-react'
+import { LayoutDashboard, HardDrive, GitBranch, Container, FileText, Shield, Activity, Settings, ScrollText, Database } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 
 interface NavItem {
@@ -12,6 +12,7 @@ const navItems: NavItem[] = [
   { icon: <GitBranch size={14} />, label: 'Resources', to: '/resources' },
   { icon: <HardDrive size={14} />, label: 'Nodes', to: '/nodes' },
   { icon: <Container size={14} />, label: 'Containers', to: '/containers' },
+  { icon: <Database size={14} />, label: 'Volumes', to: '/volumes' },
   { icon: <FileText size={14} />, label: 'Filesystem', to: '/filesystem' },
   { icon: <ScrollText size={14} />, label: 'Logs', to: '/logs' },
   { icon: <Shield size={14} />, label: 'Security', to: '/security' },

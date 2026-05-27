@@ -13,6 +13,7 @@ import Resources from './pages/Resources'
 import Logs from './pages/Logs'
 import Security from './pages/Security'
 import Activity from './pages/Activity'
+import Volumes from './pages/Volumes'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -79,6 +80,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Activity />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/volumes"
+          element={
+            <AuthGuard>
+              <Volumes />
             </AuthGuard>
           }
         />

@@ -569,3 +569,30 @@ export interface ActivityFilters {
   to?: string
   q?: string
 }
+
+// Volume Health types (Sub-project 7 / Feature 7)
+
+export interface VolumeSamplePoint {
+  sampled_at: string
+  size_bytes: number
+}
+
+export type VolumeStatus = 'attached' | 'unused' | 'unknown'
+
+export interface VolumeView {
+  node_id: string
+  name: string
+  driver: string
+  mountpoint: string
+  created_at: string
+  size_bytes: number
+  ref_count: number
+  status: VolumeStatus
+  attached_containers: string[]
+  over_threshold: boolean
+  samples: VolumeSamplePoint[]
+}
+
+export interface VolumesResponse {
+  volumes: VolumeView[]
+}
