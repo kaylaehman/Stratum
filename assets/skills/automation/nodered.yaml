@@ -1,0 +1,143 @@
+id: nodered
+name: Node-RED
+version: "1.0"
+container_match:
+  image_patterns:
+    - "nodered/node-red"
+  port_hints: [1880]
+category: automation
+description: Visual programming tool for wiring together hardware, APIs, and services
+docs_url: https://hub.docker.com/r/nodered/node-red
+
+common_issues:
+  - id: data-directory-permission-denied
+    name: Permission denied on /data mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to flow files"
+      - "Node-RED crashes on startup"
+    trigger_conditions:
+      - log_pattern: "permission denied.*data"
+      - log_pattern: "EACCES.*flow"
+    steps:
+      - id: step-1
+        description: Check current ownership of the /data directory on host
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display detailed ownership and permission information
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively fix ownership of /data directory to UID 1000
+        type: fix
+        command: "chown -R 1000:1000 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Fix directory permissions to allow read/write
+        type: fix
+        command: "chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership and permissions are now correct
+        type: check
+        command: "stat {config_path} | grep -E 'Uid|Access'"
+        expected_output: "Uid:"
+    resolution: |
+      The /data directory ownership or permissions were mismatched with the Node-RED container's running user (UID 1000). This prevented the container from reading/writing flow definitions and configuration files. Ownership has been corrected and permissions set appropriately. Node-RED should now be able to persist data properly.
+
+  - id: dashboard-ui-not-accessible
+    name: Dashboard UI not accessible or showing 404
+    symptoms:
+      - "Cannot access Node-RED at http://localhost:1880"
+      - "Dashboard returns 404 Not Found"
+      - "UI port not responding"
+      - "Logs show port binding errors"
+    trigger_conditions:
+      - log_pattern: "listen.*error"
+      - log_pattern: "address.*in use"
+    steps:
+      - id: step-1
+        description: Verify Node-RED is listening on port 1880
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 1880"
+        expected_output: "LISTEN.*1880"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 1880 is published in container config
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '1880'"
+        expected_output: "1880"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Node-RED logs for startup errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|started' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Restart Node-RED to reinitialize the UI server
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify UI is accessible after restart
+        type: check
+        command: "sleep 5 && curl -s -o /dev/null -w '%{http_code}' http://{container_name}:1880"
+        expected_output: "200"
+    resolution: |
+      Port 1880 mapping or Node-RED UI initialization was not correct. The container has been restarted to force the Node-RED server to reinitialize. The UI should now be accessible at http://localhost:1880. If the issue persists, check your docker-compose ports configuration.
+
+default_config:
+  compose_template: |
+    services:
+      nodered:
+        image: nodered/node-red:latest
+        container_name: nodered
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./nodered_data}:/data
+        ports:
+          - "1880:1880/tcp"
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for /data (flows, configuration, user data)
+      default: "./nodered_data"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /data
+      purpose: Node-RED flows, configuration, installed nodes, and user settings
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Node-RED is a visual programming environment for wiring together hardware, APIs, and services. The container runs as UID 1000 by default.
+
+  Critical setup:
+  - /data: MUST be a persistent volume or bind mount; without it, flows and configuration are lost on restart.
+  - Port 1880: Make sure the port is exposed to the network where you want to access the UI.
+
+  First-run setup:
+  1. After first start, browse to http://localhost:1880
+  2. Create flows using the visual editor
+  3. Configure nodes by double-clicking and setting properties
+  4. Enable authentication in Settings > Security if desired
+
+  Common gotchas:
+  - Flows lost after restart: Verify /data is mounted as a persistent volume.
+  - UI not loading: Check port 1880 is properly exposed and the container is running.
+  - Permission denied: Ensure host volume owner is UID 1000.
+  - Flows not executing: Check node dependencies are installed and nodes are connected correctly.

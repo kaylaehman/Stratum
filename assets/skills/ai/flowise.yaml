@@ -1,0 +1,209 @@
+id: flowise
+name: Flowise LLM Orchestrator
+version: "1.0"
+container_match:
+  image_patterns:
+    - "flowiseai/flowise"
+  port_hints: [3000]
+category: ai
+description: Drag-and-drop visual builder for LLM workflows and AI applications
+docs_url: https://hub.docker.com/r/flowiseai/flowise
+
+common_issues:
+  - id: auth-login-failed
+    name: Cannot log in or login page shows blank
+    symptoms:
+      - "Login fails with error"
+      - "Username or password incorrect"
+      - "Login page loads but fields don't respond"
+      - "White screen on login attempt"
+    trigger_conditions:
+      - log_pattern: "authentication.*failed"
+      - log_pattern: "unauthorized"
+    steps:
+      - id: step-1
+        description: Check if Flowise backend is running and responsive
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:3000/health | grep -o 'ok'"
+        expected_output: "ok"
+        on_fail: step-2
+      - id: step-2
+        description: Check container logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Restart Flowise to reinitialize authentication
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Wait for container to fully initialize
+        type: check
+        command: "sleep 10 && docker exec {container_name} curl -s http://localhost:3000/health"
+    resolution: |
+      Flowise has been restarted to reinitialize authentication. The default login credentials should now work. If using FLOWISE_USERNAME and FLOWISE_PASSWORD environment variables, ensure they are set correctly in the container configuration. If the issue persists, check that the database volume is persistent and not being recreated on restart.
+
+  - id: database-connection-failed
+    name: Database initialization or connection failed
+    symptoms:
+      - "SQLite database error"
+      - "Cannot create database file"
+      - "SQLITE_CANTOPEN"
+      - "Permission denied writing to database"
+    trigger_conditions:
+      - log_pattern: "SQLITE_CANTOPEN"
+      - log_pattern: "database.*error"
+      - log_pattern: "permission denied.*db"
+    steps:
+      - id: step-1
+        description: Check if database volume is mounted and accessible
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Type}}:{{.Destination}} {{end}}' | grep -i data"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check database directory ownership and permissions
+        type: check
+        command: "stat {data_path} | grep -E 'Uid:|Access:'"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display current permissions on database directory
+        type: inform
+        command: ""
+      - id: step-4
+        description: Ensure proper ownership of data directory for Flowise process
+        type: fix
+        command: "chown -R 1000:1000 {data_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Flowise to reinitialize database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify database was initialized successfully
+        type: check
+        command: "docker logs {container_name} | grep -i 'database.*initialized\\|listening'"
+    resolution: |
+      The database directory ownership has been corrected and Flowise has been restarted. The SQLite database should now initialize properly and persist data across restarts. If database errors continue, ensure the volume mount points to a location with sufficient disk space and that the filesystem itself is not corrupted.
+
+  - id: port-already-in-use
+    name: Port 3000 is already in use
+    symptoms:
+      - "Address already in use"
+      - "bind: address already in use"
+      - "EADDRINUSE"
+      - "Port 3000 is already allocated"
+    trigger_conditions:
+      - log_pattern: "EADDRINUSE"
+      - log_pattern: "already in use"
+    steps:
+      - id: step-1
+        description: Check what process is using port 3000
+        type: check
+        command: "ss -tlnp | grep 3000"
+        expected_output: ""
+      - id: step-2
+        description: Display detailed port information
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify Flowise container port binding
+        type: check
+        command: "docker inspect {container_name} --format='{{range .NetworkSettings.Ports}}{{.}}{{end}}'"
+        expected_output: ""
+      - id: step-4
+        description: Use alternative port mapping to resolve conflict
+        type: inform
+        command: ""
+    resolution: |
+      Port 3000 is in use by another process or service. Options: (1) Stop the conflicting service, (2) Map Flowise to a different port in docker-compose (e.g., 3001:3000), or (3) If another Flowise container is running, stop it. Update your compose configuration and restart the container on the new port.
+
+  - id: out-of-memory
+    name: Container running out of memory
+    symptoms:
+      - "Out of memory"
+      - "Container killed OOMKilled"
+      - "Process exited abnormally"
+      - "Memory usage constantly at 100%"
+    trigger_conditions:
+      - log_pattern: "OOMKilled"
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage of Flowise
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Check for memory limits in container configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{.HostConfig.Memory}}'"
+        expected_output: ""
+      - id: step-3
+        description: Display memory and resource constraints
+        type: inform
+        command: ""
+      - id: step-4
+        description: Increase memory limit in compose configuration
+        type: fix
+        command: "echo 'Add deploy.resources.limits.memory setting to compose file and redeploy'"
+        requires_approval: true
+    resolution: |
+      Flowise has insufficient memory allocated. Increase the memory limit in your docker-compose.yml using `deploy.resources.limits.memory` or upgrade your host system. For a typical Flowise instance, 1-2GB of RAM is recommended. Large workflows with multiple LLM calls may require more.
+
+default_config:
+  compose_template: |
+    services:
+      flowise:
+        image: flowiseai/flowise:latest
+        container_name: flowise
+        restart: unless-stopped
+        environment:
+          PORT: 3000
+          FLOWISE_USERNAME: ${FLOWISE_USERNAME:-admin}
+          FLOWISE_PASSWORD: ${FLOWISE_PASSWORD:-changeme}
+          LOG_LEVEL: info
+        volumes:
+          - ${DATA_PATH:-./data}:/root/.flowise
+        ports:
+          - "3000:3000/tcp"
+  required_vars:
+    - name: FLOWISE_USERNAME
+      description: Login username for Flowise
+      default: "admin"
+    - name: FLOWISE_PASSWORD
+      description: Login password for Flowise
+      default: "changeme"
+    - name: DATA_PATH
+      description: Host path for persistent Flowise data (workflows, database)
+      default: "./data"
+  known_mounts:
+    - container_path: /root/.flowise
+      purpose: Flowise workflows, SQLite database, and configuration
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Flowise is a drag-and-drop LLM orchestration platform that allows building conversational AI applications and workflows visually without coding.
+
+  Default credentials: Change FLOWISE_USERNAME and FLOWISE_PASSWORD from defaults immediately for security.
+
+  Data persistence: The /root/.flowise volume stores all workflows, database (SQLite), and API keys. Mount this to persistent storage to preserve work across restarts.
+
+  Port: Flowise listens on port 3000 by default. Change via PORT environment variable if needed.
+
+  LLM integration: Configure LLM API keys (OpenAI, Anthropic, etc.) within the Flowise UI after login. These are stored encrypted in the database volume.
+
+  Common gotchas:
+  - Login fails: Verify FLOWISE_USERNAME and FLOWISE_PASSWORD match what you set.
+  - Workflows disappear: Ensure /root/.flowise volume is mounted to persistent storage.
+  - Out of memory: Flowise uses memory for in-flight workflows; increase container memory limit if needed.

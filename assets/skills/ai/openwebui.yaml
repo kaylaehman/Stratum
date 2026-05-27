@@ -1,0 +1,277 @@
+id: openwebui
+name: Open WebUI - LLM Chat Interface
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/open-webui/open-webui"
+    - "open-webui/open-webui"
+  port_hints: [8080]
+category: ai
+description: Web-based chat interface for Ollama and OpenAI-compatible APIs with user authentication
+docs_url: https://github.com/open-webui/open-webui
+
+common_issues:
+  - id: cannot-reach-ollama
+    name: Cannot connect to Ollama backend
+    symptoms:
+      - "Error: Unable to connect to Ollama"
+      - "Failed to fetch models from Ollama"
+      - "Connection refused when accessing Ollama"
+      - "No models available in chat interface"
+      - "Ollama connection error in logs"
+    trigger_conditions:
+      - log_pattern: "Unable to connect.*Ollama"
+      - log_pattern: "connection refused"
+      - log_pattern: "Failed to fetch models"
+    steps:
+      - id: step-1
+        description: Verify Ollama container is running and accessible
+        type: check
+        command: "docker ps --filter name=ollama --format '{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check if Ollama service is responding
+        type: check
+        command: "curl -s http://ollama:11434/api/status 2>&1 | head -c 50"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display current Ollama backend configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify network connectivity between containers
+        type: check
+        command: "docker inspect {container_name} --format='{{json .NetworkSettings.Networks}}' | grep -o '\"IPAddress\":\"[^\"]*\"' | head -1"
+        expected_output: "IPAddress"
+      - id: step-5
+        description: Check Open WebUI environment variables for Ollama config
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}}{{println}}{{end}}' | grep -i ollama"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display recommendation to set OLLAMA_BASE_URL environment variable
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart Open WebUI to reconnect to Ollama
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify models are now available in Open WebUI
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'model\\|ollama' | tail -5"
+    resolution: |
+      Open WebUI requires network access to Ollama on port 11434. If both services are in Docker and on the same network, use the Ollama container name as hostname (e.g., http://ollama:11434). Set the OLLAMA_BASE_URL environment variable in the compose file to ensure Open WebUI connects correctly. The service has been restarted; models should now appear in the chat interface. If using Ollama on a remote host, ensure the URL points to that host's IP:port and the firewall allows the connection.
+
+  - id: auth-signup-disabled
+    name: Cannot create new user accounts or signup disabled
+    symptoms:
+      - "Signup button missing or disabled"
+      - "Cannot register new user"
+      - "Only one user account exists"
+      - "403 Forbidden on signup endpoint"
+      - "All users locked out"
+    trigger_conditions:
+      - log_pattern: "signup disabled"
+      - log_pattern: "403"
+    steps:
+      - id: step-1
+        description: Check current signup configuration in Open WebUI
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}}{{println}}{{end}}' | grep -i signup"
+        expected_output: ""
+      - id: step-2
+        description: Verify number of existing users in database
+        type: check
+        command: "docker exec {container_name} ls -la /app/backend/data/ 2>/dev/null | wc -l"
+        expected_output: ""
+      - id: step-3
+        description: Check database status and user table
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'user\\|auth\\|database' | tail -5"
+        expected_output: ""
+      - id: step-4
+        description: Display current signup policy setting
+        type: inform
+        command: ""
+      - id: step-5
+        description: Enable signup in environment variables if disabled
+        type: fix
+        command: "docker exec {container_name} sed -i 's/WEBUI_AUTH_TRUSTED_EMAIL_HEADER_AUTOFILL=.*/WEBUI_AUTH_TRUSTED_EMAIL_HEADER_AUTOFILL=true/' /app/.env 2>/dev/null || echo 'Manual config update needed'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Open WebUI to apply auth configuration changes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify signup is now enabled
+        type: check
+        command: "sleep 5 && curl -s http://localhost:8080 | grep -i signup | head -1"
+    resolution: |
+      Open WebUI signup settings control whether new accounts can be registered. If signup is disabled and you need to add users, update the WEBUI_AUTH environment variables in your compose file or container. Common settings are WEBUI_AUTH_TRUSTED_EMAIL_HEADER_AUTOFILL (auto-create users from reverse proxy headers) and general signup enable/disable flags. Consult the Open WebUI documentation for your version to set the correct variables. The service has been restarted; new user registration should now be possible.
+
+  - id: high-memory-usage
+    name: Container consuming excessive memory or crashing due to OOM
+    symptoms:
+      - "Out of memory - container killed"
+      - "OOMKilled"
+      - "Memory usage near 100%"
+      - "Application becomes unresponsive"
+      - "Container restarts unexpectedly"
+    trigger_conditions:
+      - log_pattern: "OOM"
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage of Open WebUI
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Check container memory limits
+        type: check
+        command: "docker inspect {container_name} --format='Memory limit: {{.HostConfig.Memory}} bytes'"
+        expected_output: ""
+      - id: step-3
+        description: Display recent logs for memory-related errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'memory\\|oom\\|heap' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Check number of active sessions and models loaded
+        type: inform
+        command: ""
+      - id: step-5
+        description: Increase container memory limit in compose file
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Open WebUI with increased memory allocation
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor memory usage after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      Open WebUI can consume significant memory depending on the number of simultaneous users and message history size. The default memory limit may be insufficient for production use. Update your compose file to increase the memory limit (e.g., `memory: 4g`) and ensure your host has adequate free RAM. The container has been restarted. If memory usage remains high, consider clearing old chat histories or reducing the number of concurrent sessions. You can also offload model serving to a separate Ollama instance to reduce Open WebUI's memory footprint.
+
+  - id: database-corruption
+    name: Database errors or chat history lost
+    symptoms:
+      - "Database error: locked"
+      - "Unable to save chat history"
+      - "Chat messages not appearing"
+      - "Application crashes with database error"
+      - "Previous chats disappeared"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "database.*locked"
+    steps:
+      - id: step-1
+        description: Check if database file is accessible and not corrupted
+        type: check
+        command: "docker exec {container_name} ls -la /app/backend/data/ 2>/dev/null | head -10"
+        expected_output: ""
+      - id: step-2
+        description: Check database-related errors in logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'database\\|sqlite\\|error' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Verify database permissions
+        type: check
+        command: "docker exec {container_name} stat /app/backend/data/webui.db 2>/dev/null | grep Access"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display database file status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Create backup of current database before attempting repair
+        type: fix
+        command: "docker exec {container_name} cp /app/backend/data/webui.db /app/backend/data/webui.db.backup.$(date +%s)"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Open WebUI to attempt automatic database recovery
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify application is responding and database is accessible
+        type: check
+        command: "sleep 5 && curl -s http://localhost:8080 | head -c 50"
+    resolution: |
+      SQLite database corruption can occur due to ungraceful shutdowns or concurrent access. A backup of the database has been created. Open WebUI has been restarted and will attempt automatic recovery. If the issue persists, you may need to restore from the backup file. For production deployments, consider using PostgreSQL instead of SQLite to reduce lock contention and improve reliability. Ensure the `/app/backend/data/` directory is on reliable storage and backed up regularly.
+
+default_config:
+  compose_template: |
+    services:
+      open-webui:
+        image: ghcr.io/open-webui/open-webui:latest
+        container_name: open-webui
+        restart: unless-stopped
+        environment:
+          OLLAMA_BASE_URL: http://ollama:11434
+          WEBUI_AUTH: "true"
+          WEBUI_AUTH_TRUSTED_EMAIL_HEADER_AUTOFILL: "true"
+          TZ: ${TZ:-UTC}
+        ports:
+          - "8080:8080"
+        volumes:
+          - ${DATA_PATH:-./data}:/app/backend/data
+        networks:
+          - stratum
+        depends_on:
+          - ollama
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for chat history and database storage
+      default: "./data"
+    - name: TZ
+      description: Timezone for timestamps
+      default: "UTC"
+  known_mounts:
+    - container_path: /app/backend/data
+      purpose: SQLite database, chat history, and application configuration
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Open WebUI is a web-based chat interface compatible with Ollama and OpenAI-compatible APIs. It provides user authentication, chat history persistence, and model management.
+
+  Backend integration: Configure OLLAMA_BASE_URL to point to your Ollama instance (e.g., http://ollama:11434 for Docker containers on same network, or http://192.168.1.100:11434 for remote hosts).
+
+  Database: Uses SQLite by default for simplicity. For multi-user production deployments with high concurrency, consider configuring PostgreSQL via DATABASE_URL environment variable instead.
+
+  Authentication: WEBUI_AUTH enables user signup and login. Set WEBUI_AUTH_TRUSTED_EMAIL_HEADER_AUTOFILL to auto-create users from reverse proxy headers (useful behind nginx auth or similar).
+
+  Port binding: Default 8080; customize with -p flag or PORT environment variable.
+
+  Integration with Stratum: Can be exposed through Stratum's UI or accessed directly. Recommend reverse proxy (nginx, Traefik) with HTTPS for security, especially if exposed to the internet.
+
+  Performance: Memory usage scales with number of concurrent users and message history size. Start with 2GB; increase if experiencing OOM errors.
+
+  Backup: Chat history and user accounts are stored in /app/backend/data/webui.db. Back up this directory regularly. For production, use PostgreSQL for better durability and concurrent access.
+
+  Common gotchas:
+  - Cannot reach Ollama: Verify OLLAMA_BASE_URL is correct and both containers are on the same Docker network.
+  - Signup disabled: Check WEBUI_AUTH and related environment variables; restart after changes.
+  - High memory usage: Monitor with `docker stats`; consider PostgreSQL for production; reduce concurrent users or chat history.
+  - Database locked/corrupted: Restart container; create backup; restore if necessary; switch to PostgreSQL for reliability.

@@ -1,0 +1,289 @@
+id: kavita
+name: Kavita Ebook and Comic Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "kizaing/kavita"
+  port_hints: [5000]
+category: ebooks
+description: Full-featured server for reading comics, manga, ebooks, and light novels with advanced features
+
+docs_url: https://hub.docker.com/r/kizaing/kavita
+
+common_issues:
+  - id: library-not-detected
+    name: Library not scanning or showing items
+    symptoms:
+      - "No books or comics appear in library"
+      - "Library shows 0 items"
+      - "Scan completes with no results"
+      - "Added files not appearing after rescan"
+    trigger_conditions:
+      - log_pattern: "scan"
+      - log_pattern: "library"
+      - log_pattern: "0 items"
+    steps:
+      - id: step-1
+        description: Verify library path is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check if library directory contains files
+        type: check
+        command: "find {library_path} -type f | wc -l"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display library directory contents
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify supported file types exist (pdf, epub, cbz, cbr, etc)
+        type: check
+        command: "find {library_path} -type f \\( -name '*.pdf' -o -name '*.epub' -o -name '*.cbz' -o -name '*.cbr' \\) | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Trigger library scan via Kavita API
+        type: fix
+        command: "docker exec {container_name} curl -X POST 'http://localhost:5000/api/library/scan'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor scan progress in logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'scan\\|processing' | tail -5"
+    resolution: |
+      Library scan has been triggered. Kavita will index all supported file types (PDF, EPUB, CBZ, CBR, MOBI, AZW3, etc.). Depending on library size, this may take several minutes. Ensure your library contains files in supported formats and the path is correctly configured. Check Kavita logs for any errors during scanning.
+
+  - id: permission-denied-files
+    name: Permission denied accessing library files
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot read files"
+      - "Access denied in logs"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of library directory
+        type: check
+        command: "stat {library_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check container running UID
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: ""
+      - id: step-4
+        description: Make library readable by all users
+        type: fix
+        command: "chmod -R o+rx {library_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify permissions updated
+        type: check
+        command: "stat {library_path}"
+    resolution: |
+      Library directory permissions have been updated. Kavita should now be able to read files. For proper security, consider creating a dedicated user for Kavita and chowning the library to that user. Ensure all files within the library directory are also readable by the Kavita process.
+
+  - id: web-ui-unavailable
+    name: Cannot access web interface on port 5000
+    symptoms:
+      - "Connection refused on port 5000"
+      - "Cannot reach web UI"
+      - "Timeout when accessing localhost:5000"
+      - "Port 5000 not listening"
+    trigger_conditions:
+      - log_pattern: "address already in use"
+      - log_pattern: "port.*in use"
+    steps:
+      - id: step-1
+        description: Check if Kavita is listening on port 5000
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 5000"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Verify port is published in Docker
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '5000'"
+        expected_output: "5000"
+        on_fail: step-3
+      - id: step-3
+        description: Display port configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if another process is using port 5000 on host
+        type: check
+        command: "ss -tlnp | grep 5000"
+        expected_output: ""
+      - id: step-5
+        description: Restart Kavita to reinitialize web server
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify web server is listening after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -tlnp | grep 5000"
+    resolution: |
+      Kavita web server has been restarted and should now be accessible on port 5000. If the issue persists, verify no other service is using port 5000, check firewall rules, and ensure the container port mapping is correct in docker-compose.
+
+  - id: pdf-extraction-slow
+    name: PDF processing or page extraction is very slow
+    symptoms:
+      - "PDFs take long time to open"
+      - "Page rendering is slow"
+      - "High CPU usage when opening PDF"
+      - "Memory usage spikes with PDFs"
+    trigger_conditions:
+      - log_pattern: "pdf"
+      - log_pattern: "slow"
+    steps:
+      - id: step-1
+        description: Check CPU and memory usage of container
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Check Kavita logs for PDF processing errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'pdf\\|extract' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Display PDF processing status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Clear image cache to force re-extraction
+        type: fix
+        command: "docker exec {container_name} rm -rf {config_path}/cache/*"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor performance after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      Kavita cache has been cleared and the container restarted. PDF processing should improve. Kavita extracts and caches PDF pages for faster viewing. Large or complex PDFs may require additional processing time initially. Ensure your host has sufficient CPU and RAM (1GB+ recommended for comfortable operation).
+
+  - id: authentication-failed
+    name: Login or session issues
+    symptoms:
+      - "Cannot log in"
+      - "Session expires immediately"
+      - "Redirects to login repeatedly"
+      - "Authentication errors"
+    trigger_conditions:
+      - log_pattern: "auth"
+      - log_pattern: "login"
+      - log_pattern: "unauthorized"
+    steps:
+      - id: step-1
+        description: Check if user database is accessible
+        type: check
+        command: "docker exec {container_name} ls -la {config_path} | grep -i database"
+        expected_output: ""
+      - id: step-2
+        description: Verify database integrity
+        type: check
+        command: "docker exec {container_name} file {config_path}/*"
+        expected_output: ""
+      - id: step-3
+        description: Display authentication status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Clear session and cache files
+        type: fix
+        command: "docker exec {container_name} rm -rf {config_path}/cache/* {config_path}/sessions/*"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Kavita
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify login functionality
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      Session and cache have been cleared and Kavita restarted. Try logging in again with your credentials. If authentication still fails, verify your username and password are correct. The database may need rebuilding if issues persist; check Kavita documentation for database reset procedures.
+
+default_config:
+  compose_template: |
+    services:
+      kavita:
+        image: kizaing/kavita:latest
+        container_name: kavita
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/kavita/config
+          - ${LIBRARY_PATH:-./media}:/media:ro
+        ports:
+          - "5000:5000/tcp"
+  required_vars:
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /kavita/config (Kavita database and settings)
+      default: "./config"
+    - name: LIBRARY_PATH
+      description: Host path for /media (library with books and comics, read-only)
+      default: "./media"
+  known_mounts:
+    - container_path: /kavita/config
+      purpose: Kavita database, user settings, and cache
+      recommended_permissions: "755"
+      owner: "1000:1000"
+    - container_path: /media
+      purpose: Digital library (ebooks, PDFs, comics, manga, light novels)
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Kavita is a comprehensive digital library server supporting multiple formats: PDF, EPUB, MOBI, AZW3, CBZ, CBR, 7Z, and more.
+
+  Library location: Can contain a mix of books, comics, and manga. Use read-only mount for data protection.
+
+  Supported formats: Ebooks (PDF, EPUB, MOBI, AZW3), Comics (CBZ, CBR, 7Z), Manga.
+
+  User management: Create users to track reading progress per user and control library access.
+
+  Features: Reading lists, bookmarks, series tracking, webtoons support, download support for offline reading.
+
+  Performance: Kavita caches extracted pages and metadata. Larger libraries benefit from more RAM (1GB+ recommended).
+
+  Series organization: Automatically groups items into series based on folder structure and filenames. Organize library by series folders for best results.
+
+  Common gotchas:
+  - Library not scanning: Ensure library contains supported file types and correct mount path.
+  - Permission denied: Verify library is readable by Kavita container user.
+  - Slow PDF/image processing: Check CPU and RAM; clear cache and restart.
+  - Authentication issues: Restart container to reset sessions and caches.

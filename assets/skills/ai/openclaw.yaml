@@ -1,0 +1,236 @@
+id: openclaw
+name: OpenClaw Multi-Channel AI Control Plane
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/openclaw/openclaw"
+  port_hints: [8080]
+category: ai
+description: Multi-channel AI control plane for orchestrating Claude API calls and routing across different AI backends
+docs_url: https://github.com/openclaw/openclaw
+
+common_issues:
+  - id: anthropic-api-key-missing
+    name: Anthropic API key not configured or invalid
+    symptoms:
+      - "API key missing or invalid"
+      - "Authentication failed"
+      - "Unauthorized access to Anthropic API"
+      - "401 Unauthorized from upstream API"
+      - "Cannot authenticate with Anthropic"
+    trigger_conditions:
+      - log_pattern: "API key.*missing"
+      - log_pattern: "401.*Unauthorized"
+      - log_pattern: "authentication.*failed"
+    steps:
+      - id: step-1
+        description: Check if ANTHROPIC_API_KEY environment variable is set in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}}{{println}}{{end}}' | grep -i anthropic"
+        expected_output: "ANTHROPIC_API_KEY"
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables related to API configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify API key value is not empty or truncated
+        type: check
+        command: "docker exec {container_name} printenv ANTHROPIC_API_KEY 2>/dev/null | wc -c"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display recommendation to set ANTHROPIC_API_KEY in compose file
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart OpenClaw to apply new API key configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify container can now authenticate with Anthropic API
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'authenticated\\|connected\\|success' | tail -3"
+    resolution: |
+      OpenClaw requires a valid Anthropic API key to communicate with the Claude API. The ANTHROPIC_API_KEY environment variable has been checked and the container has been restarted. Ensure your API key is set in the docker-compose file under the `environment` section. The key should be a valid token obtained from https://console.anthropic.com/. If using secrets manager, verify the secret is injected correctly at runtime. Authentication should now succeed on the next API request.
+
+  - id: api-connection-failed
+    name: Cannot connect to Anthropic API or upstream model service
+    symptoms:
+      - "Connection refused to API endpoint"
+      - "HTTP error connecting to Anthropic"
+      - "Model unavailable"
+      - "Request timeout to upstream service"
+      - "Network unreachable"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "HTTP.*error"
+      - log_pattern: "timeout"
+      - log_pattern: "unreachable"
+    steps:
+      - id: step-1
+        description: Verify container is running and healthy
+        type: check
+        command: "docker ps --filter name={container_name} --format '{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check container exit code and last status
+        type: check
+        command: "docker inspect {container_name} --format='{{.State.ExitCode}} {{.State.Status}}'"
+        expected_output: "0 running"
+        on_fail: step-3
+      - id: step-3
+        description: Display recent logs for connection errors
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify container can reach external API endpoints
+        type: check
+        command: "docker exec {container_name} curl -s -I https://api.anthropic.com 2>&1 | head -3"
+        expected_output: ""
+      - id: step-5
+        description: Check for network connectivity issues or firewall blocks
+        type: check
+        command: "docker exec {container_name} ping -c 1 api.anthropic.com 2>&1 | grep -E 'received|unreachable|name or service'"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display network troubleshooting steps and firewall recommendations
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart OpenClaw to reset connection state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify API connectivity after restart
+        type: check
+        command: "sleep 5 && docker logs {container_name} 2>&1 | grep -i 'connected\\|ready\\|api' | tail -3"
+    resolution: |
+      OpenClaw was unable to establish a connection to the Anthropic API or configured upstream model service. The container has been restarted to reset the connection state. Verify that:
+      1. Your host has outbound internet connectivity to api.anthropic.com (HTTPS port 443)
+      2. No firewall or proxy is blocking the connection
+      3. The ANTHROPIC_API_KEY is valid and the account has active credits
+      4. If using a custom API endpoint or proxy, verify the base URL is correctly configured
+      The service should now attempt to reconnect and establish a working connection to the Anthropic API.
+
+  - id: model-rate-limited
+    name: API requests are being rate-limited by Anthropic
+    symptoms:
+      - "Rate limit exceeded"
+      - "429 Too Many Requests"
+      - "Requests per minute limit reached"
+      - "Quota exceeded"
+      - "Please retry after X seconds"
+    trigger_conditions:
+      - log_pattern: "429"
+      - log_pattern: "rate.*limit"
+      - log_pattern: "quota.*exceeded"
+    steps:
+      - id: step-1
+        description: Check Anthropic API rate limit status in logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i '429\\|rate.*limit\\|quota' | tail -5"
+        expected_output: ""
+      - id: step-2
+        description: Display account quota information
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check request volume and patterns
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -E 'request|api.*call' | wc -l"
+        expected_output: ""
+      - id: step-4
+        description: Display rate limit mitigation strategies
+        type: inform
+        command: ""
+      - id: step-5
+        description: Apply request batching or queue delays if configurable
+        type: inform
+        command: ""
+    resolution: |
+      Your Anthropic API account has hit a rate limit. This typically occurs when making too many requests in a short time window. Review your account usage at https://console.anthropic.com/account/usage to see current rate limits and usage. Consider:
+      1. Spreading requests over time (implement request queuing with delays)
+      2. Using batch processing if available for lower-priority workloads
+      3. Upgrading your Anthropic API plan for higher rate limits
+      4. Contacting Anthropic support if you believe the limits are incorrect
+      Wait for the rate limit window to reset (usually 60 seconds) before retrying requests.
+
+default_config:
+  compose_template: |
+    services:
+      openclaw:
+        image: ghcr.io/openclaw/openclaw:latest
+        container_name: openclaw
+        restart: unless-stopped
+        environment:
+          ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+          PORT: "8080"
+          LOG_LEVEL: "info"
+          TZ: ${TZ:-UTC}
+        ports:
+          - "8080:8080"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/app/config
+          - ${DATA_PATH:-./data}:/app/data
+        networks:
+          - stratum
+  required_vars:
+    - name: ANTHROPIC_API_KEY
+      description: Anthropic API key for Claude model access (obtain from https://console.anthropic.com/)
+      default: ""
+    - name: CONFIG_PATH
+      description: Host path for OpenClaw configuration and state files
+      default: "./config"
+    - name: DATA_PATH
+      description: Host path for persistent data storage
+      default: "./data"
+    - name: TZ
+      description: Timezone for timestamps and scheduling
+      default: "UTC"
+  known_mounts:
+    - container_path: /app/config
+      purpose: OpenClaw configuration files, routing rules, and channel definitions
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /app/data
+      purpose: Persistent application data and state
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  OpenClaw is a multi-channel AI control plane that orchestrates Claude API calls and routes requests across different AI backends and channels. It provides a unified interface for managing AI interactions across multiple integration points.
+
+  API key setup: Obtain an Anthropic API key from https://console.anthropic.com/. Set the ANTHROPIC_API_KEY environment variable in the compose file or inject via Stratum's secrets manager. The key must be kept confidential and rotated regularly.
+
+  Multi-channel routing: OpenClaw supports configuring multiple input channels (Slack, Discord, webhooks, etc.) and routing them to Claude or other AI backends. Configuration is stored in /app/config; consult the OpenClaw documentation for channel setup syntax.
+
+  Rate limiting: All Anthropic API accounts have rate limits. Monitor your account usage at https://console.anthropic.com/account/usage. If rate limited, implement request queuing or upgrade your plan.
+
+  Model selection: OpenClaw routes to Claude by default. You can configure fallback models or alternative backends via the config files. Refer to OpenClaw documentation for model routing and fallback configuration.
+
+  Port binding: Default 8080; customize via PORT environment variable or compose port mapping.
+
+  Integration with Stratum: Can be exposed through Stratum's UI or accessed directly. Recommend reverse proxy (nginx, Traefik) with HTTPS for security and API key protection.
+
+  Database: Persistent data is stored in /app/data. Ensure this directory is backed up regularly as it contains conversation history and routing state.
+
+  Logging: Container outputs structured logs. Adjust LOG_LEVEL environment variable (debug, info, warn, error) for verbosity control.
+
+  Security: ANTHROPIC_API_KEY should never be committed to version control. Use Stratum's secrets manager or Docker Compose environment file substitution with strict file permissions.
+
+  Common gotchas:
+  - API key missing or invalid: Verify ANTHROPIC_API_KEY is set and valid in console.anthropic.com
+  - Cannot connect to Anthropic: Check outbound internet access and firewall rules; verify DNS resolution
+  - Rate limited: Account quota exceeded; monitor usage and upgrade if needed
+  - Channel configuration errors: Ensure /app/config files follow OpenClaw channel definition syntax
+  - Persistent data lost: Back up /app/data regularly to prevent loss of conversation history or routing state

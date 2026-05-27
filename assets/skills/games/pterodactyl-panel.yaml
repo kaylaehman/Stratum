@@ -1,0 +1,303 @@
+id: pterodactyl-panel
+name: Pterodactyl Game Server Panel
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/pterodactyl/panel"
+  port_hints: [80, 443]
+category: games
+description: Web-based control panel for managing game servers, users, and nodes across Pterodactyl infrastructure
+docs_url: https://pterodactyl.io/
+
+common_issues:
+  - id: database-connection-failed
+    name: Panel cannot connect to database
+    symptoms:
+      - "SQLSTATE[HY000]"
+      - "Connection refused to database"
+      - "Database authentication failed"
+      - "Panel startup hangs then exits"
+    trigger_conditions:
+      - log_pattern: "SQLSTATE"
+      - log_pattern: "Connection refused"
+    steps:
+      - id: step-1
+        description: Verify database service is running
+        type: check
+        command: "docker ps | grep -E 'mysql|mariadb|postgres'"
+        expected_output: "mysql|mariadb|postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check panel database credentials in environment
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep DB_"
+        expected_output: "DB_"
+        on_fail: step-4
+      - id: step-4
+        description: Display current database configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test database connectivity from panel container
+        type: check
+        command: "docker exec {container_name} php artisan migrate:status"
+        expected_output: ""
+      - id: step-6
+        description: Run database migrations
+        type: fix
+        command: "docker exec {container_name} php artisan migrate --force"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify migrations completed successfully
+        type: check
+        command: "docker logs {container_name} | grep -i 'migration\\|migrated' | tail -5"
+    resolution: |
+      Database connectivity has been established and migrations applied. The panel requires a MySQL/MariaDB or PostgreSQL database with correct credentials in environment variables (DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE). Ensure the database service is running on the same network or accessible via the host specified in DB_HOST. If using a separate database container, verify both containers can reach each other via Docker networking.
+
+  - id: app-key-missing
+    name: APP_KEY not set - encryption disabled
+    symptoms:
+      - "No app key defined"
+      - "Missing APP_KEY environment variable"
+      - "Session data not encrypted"
+      - "Panel starts but sessions are insecure"
+    trigger_conditions:
+      - log_pattern: "APP_KEY"
+      - log_pattern: "application key"
+    steps:
+      - id: step-1
+        description: Check if APP_KEY is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep APP_KEY"
+        expected_output: "APP_KEY=base64:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate new application key
+        type: fix
+        command: "docker exec {container_name} php artisan key:generate --force"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify key was generated
+        type: check
+        command: "docker exec {container_name} grep APP_KEY /var/www/pterodactyl/.env"
+        expected_output: "APP_KEY=base64:"
+      - id: step-5
+        description: Restart panel to apply key
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify panel started successfully with key
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -10"
+    resolution: |
+      Application encryption key has been generated and the panel has been restarted. The APP_KEY is used for encrypting sensitive session data and API tokens. Make sure to persist this key in your docker-compose.yml environment or .env file. If you lose the APP_KEY, all existing user sessions and API tokens will become invalid.
+
+  - id: app-url-misconfigured
+    name: APP_URL configuration incorrect
+    symptoms:
+      - "Password reset links don't work"
+      - "Email verification links broken"
+      - "API calls from wings nodes fail with hostname mismatch"
+      - "Users cannot log in from external network"
+    trigger_conditions:
+      - log_pattern: "URL"
+      - log_pattern: "hostname mismatch"
+    steps:
+      - id: step-1
+        description: Check current APP_URL setting
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep APP_URL"
+        expected_output: "APP_URL="
+        on_fail: step-2
+      - id: step-2
+        description: Display current APP_URL
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify panel is accessible at configured URL
+        type: check
+        command: "curl -k -I https://{app_url} | head -1"
+        expected_output: "HTTP"
+        on_fail: step-4
+      - id: step-4
+        description: Explain APP_URL importance
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test panel health endpoint
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost/api/system/status"
+        expected_output: ""
+    resolution: |
+      APP_URL must be set to the fully qualified domain name (FQDN) where users and nodes will access the panel, e.g., https://panel.example.com. This URL is used in password reset emails, API endpoints for wings nodes, and OAuth redirects. All wings nodes configured to connect to this panel must be able to reach this URL over the network. Verify DNS resolution and network routing from both internal and external networks.
+
+  - id: reverse-proxy-needed
+    name: Panel requires HTTPS via reverse proxy
+    symptoms:
+      - "Panel loads over HTTP but is insecure"
+      - "API tokens transmitted in plaintext"
+      - "Nodes cannot authenticate securely"
+      - "HTTPS certificate errors in browser"
+    trigger_conditions:
+      - log_pattern: "HTTP"
+    steps:
+      - id: step-1
+        description: Check if reverse proxy is configured
+        type: check
+        command: "netstat -tlnp 2>/dev/null | grep '443\\|80' || ss -tlnp | grep '443\\|80'"
+        expected_output: ""
+      - id: step-2
+        description: Display current listening ports
+        type: inform
+        command: ""
+      - id: step-3
+        description: Explain reverse proxy requirement
+        type: inform
+        command: ""
+    resolution: |
+      Pterodactyl Panel requires HTTPS for secure communication. Use a reverse proxy like Traefik, Nginx, or Caddy in front of the panel container. The panel itself listens on port 80 inside the container; the reverse proxy handles TLS termination. Configure your reverse proxy to forward traffic to http://panel:80 and present a valid SSL certificate for your APP_URL domain. Let's Encrypt can provide free certificates via Certbot or your reverse proxy's built-in ACME support.
+
+default_config:
+  compose_template: |
+    services:
+      panel:
+        image: ghcr.io/pterodactyl/panel:latest
+        container_name: pterodactyl-panel
+        restart: unless-stopped
+        environment:
+          APP_URL: ${APP_URL:-https://panel.example.com}
+          APP_ENVIRONMENT: production
+          APP_DEBUG: "false"
+          LOG_CHANNEL: single
+          DB_HOST: ${DB_HOST:-database}
+          DB_PORT: ${DB_PORT:-3306}
+          DB_DATABASE: ${DB_DATABASE:-pterodactyl}
+          DB_USERNAME: ${DB_USERNAME:-pterodactyl}
+          DB_PASSWORD: ${DB_PASSWORD:-changeme}
+          CACHE_DRIVER: redis
+          SESSION_DRIVER: redis
+          QUEUE_DRIVER: redis
+          REDIS_HOST: ${REDIS_HOST:-redis}
+          REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+          REDIS_PORT: ${REDIS_PORT:-6379}
+          MAIL_DRIVER: ${MAIL_DRIVER:-log}
+          MAIL_HOST: ${MAIL_HOST:-}
+          MAIL_PORT: ${MAIL_PORT:-587}
+          MAIL_USERNAME: ${MAIL_USERNAME:-}
+          MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+          MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-noreply@example.com}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+          - ${LOGS_PATH:-./logs}:/var/log/pterodactyl
+          - ${UPLOADS_PATH:-./uploads}:/var/lib/pterodactyl/uploads
+        ports:
+          - "80:80/tcp"
+          - "443:443/tcp"
+        depends_on:
+          - database
+          - redis
+
+      database:
+        image: mysql:8.0
+        container_name: pterodactyl-database
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+          MYSQL_DATABASE: ${DB_DATABASE:-pterodactyl}
+          MYSQL_USER: ${DB_USERNAME:-pterodactyl}
+          MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
+        volumes:
+          - ${DB_PATH:-./database}:/var/lib/mysql
+
+      redis:
+        image: redis:7-alpine
+        container_name: pterodactyl-redis
+        restart: unless-stopped
+        command: redis-server --requirepass ${REDIS_PASSWORD:-}
+        volumes:
+          - ${REDIS_PATH:-./redis}:/data
+
+  required_vars:
+    - name: APP_URL
+      description: Panel URL (FQDN with https, e.g., https://panel.example.com)
+      default: "https://panel.example.com"
+    - name: DB_HOST
+      description: Database hostname or container name
+      default: "database"
+    - name: DB_PORT
+      description: Database port
+      default: "3306"
+    - name: DB_DATABASE
+      description: Database name
+      default: "pterodactyl"
+    - name: DB_USERNAME
+      description: Database username
+      default: "pterodactyl"
+    - name: DB_PASSWORD
+      description: Database password
+      default: "changeme"
+    - name: REDIS_HOST
+      description: Redis hostname or container name
+      default: "redis"
+    - name: REDIS_PASSWORD
+      description: Redis password (leave empty for no auth)
+      default: ""
+    - name: MAIL_DRIVER
+      description: Mail driver (log, smtp)
+      default: "log"
+    - name: DATA_PATH
+      description: Host path for panel data, uploads, and logs
+      default: "./data"
+    - name: DB_PATH
+      description: Host path for database files
+      default: "./database"
+    - name: REDIS_PATH
+      description: Host path for Redis persistence
+      default: "./redis"
+
+  known_mounts:
+    - container_path: /data
+      purpose: Panel configuration, cache, and persistent data
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/log/pterodactyl
+      purpose: Application logs
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/pterodactyl/uploads
+      purpose: ISO and archive file uploads
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Pterodactyl Panel is the web interface for managing game servers. It requires a separate MySQL/MariaDB database and Redis cache for production use.
+
+  Key environment variables:
+  - APP_URL must be accessible by all wings nodes and users — use the external FQDN
+  - APP_KEY is generated on first run — save it to docker-compose.yml to maintain user sessions
+  - MAIL_DRIVER can be log (print to stdout), smtp (send real emails), or mailgun
+  - CACHE_DRIVER and SESSION_DRIVER should use redis for multi-container scaling
+
+  Database migration:
+  The panel runs database migrations on startup if APP_ENVIRONMENT is production. If migrations fail, the container will not start.
+
+  Reverse proxy setup:
+  Use Traefik, Caddy, or Nginx as a reverse proxy in front of the panel. Forward HTTP/HTTPS traffic to http://panel:80.
+
+  Wings nodes:
+  Wings daemon containers connect back to this panel via the APP_URL to receive commands and report status. Ensure APP_URL is reachable from all wings node networks.
+
+  Storage:
+  The /data directory should be on fast storage (SSD preferred). Large ISO uploads will fill this directory quickly if not managed.

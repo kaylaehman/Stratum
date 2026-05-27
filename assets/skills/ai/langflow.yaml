@@ -1,0 +1,241 @@
+id: langflow
+name: LangFlow Workflow Designer
+version: "1.0"
+container_match:
+  image_patterns:
+    - "langflowai/langflow"
+  port_hints: [7860]
+category: ai
+description: Visual editor for building and testing LangChain workflows and applications
+docs_url: https://hub.docker.com/r/langflowai/langflow
+
+common_issues:
+  - id: database-migration-failed
+    name: Database migration or initialization errors
+    symptoms:
+      - "Database migration failed"
+      - "SQLAlchemy error"
+      - "schema mismatch"
+      - "Cannot create tables"
+      - "Table already exists"
+    trigger_conditions:
+      - log_pattern: "migration.*failed"
+      - log_pattern: "SQLAlchemy.*error"
+      - log_pattern: "schema.*mismatch"
+    steps:
+      - id: step-1
+        description: Check if database volume exists and is accessible
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}}{{end}}' | grep -i database"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check database directory permissions
+        type: check
+        command: "stat {database_path}"
+        expected_output: ""
+      - id: step-3
+        description: Display database status from logs
+        type: inform
+        command: ""
+      - id: step-4
+        description: Stop container and verify database isn't locked
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart container to run migrations cleanly
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor startup for successful migration
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'migration.*success\\|application started'"
+    resolution: |
+      LangFlow database has been reinitialized with a clean restart. If using an external PostgreSQL database, verify that the POSTGRES_* environment variables are correct and the database is accessible. For SQLite (default), ensure the database directory has write permissions.
+
+  - id: port-conflicts
+    name: Port 7860 is already in use
+    symptoms:
+      - "Address already in use"
+      - "bind: address already in use"
+      - "EADDRINUSE: address already in use"
+      - "Cannot start container on port 7860"
+    trigger_conditions:
+      - log_pattern: "EADDRINUSE"
+      - log_pattern: "already in use"
+    steps:
+      - id: step-1
+        description: Check what process is listening on port 7860
+        type: check
+        command: "ss -tlnp | grep 7860"
+        expected_output: ""
+      - id: step-2
+        description: Display port usage details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify LangFlow container port configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{range .NetworkSettings.Ports}}{{.}}{{end}}'"
+        expected_output: ""
+      - id: step-4
+        description: Recommend alternative port binding
+        type: inform
+        command: ""
+    resolution: |
+      Port 7860 is in use by another service. Options: (1) Stop the conflicting service, (2) Update docker-compose.yml to map to a different port (e.g., 7861:7860), or (3) If multiple LangFlow containers exist, ensure only one is running. Restart the container after updating port mappings.
+
+  - id: workflows-not-persisting
+    name: Workflows and configurations disappear after restart
+    symptoms:
+      - "All workflows missing after container restart"
+      - "Collections not saved"
+      - "Build history cleared"
+      - "Custom nodes lost"
+    trigger_conditions:
+      - log_pattern: "workflow.*not found"
+      - log_pattern: "collection.*empty"
+    steps:
+      - id: step-1
+        description: Verify database volume is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Type}}:{{.Destination}} {{end}}'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check if volume is empty or corrupted
+        type: check
+        command: "ls -la {database_path} | wc -l"
+        expected_output: ""
+      - id: step-3
+        description: Display volume and mount configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Ensure database volume is properly defined in compose
+        type: inform
+        command: ""
+    resolution: |
+      Workflows are persisted in the database volume. Without a proper volume mount, data is lost when the container stops. Update your docker-compose.yml to include a persistent volume for the database directory and ensure it's mounted at the container's database path. Existing workflows will need to be recreated or restored from backup.
+
+  - id: memory-limit-exceeded
+    name: Container runs out of memory
+    symptoms:
+      - "OOMKilled"
+      - "Out of memory"
+      - "Container exits unexpectedly"
+      - "Memory usage at 100%"
+    trigger_conditions:
+      - log_pattern: "OOMKilled"
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Display memory limit configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{.HostConfig.Memory}}'"
+        expected_output: ""
+      - id: step-3
+        description: Show resource constraints
+        type: inform
+        command: ""
+      - id: step-4
+        description: Increase memory limit in docker-compose.yml
+        type: fix
+        command: "echo 'Update deploy.resources.limits.memory to at least 2GB and redeploy'"
+        requires_approval: true
+    resolution: |
+      LangFlow requires sufficient memory to process workflows and large language models. Increase the container memory limit to at least 2-4GB via the deploy.resources.limits.memory setting in docker-compose.yml. Large workflows or concurrent users may require more. Restart the container after updating limits.
+
+  - id: external-database-connection-failed
+    name: Cannot connect to external PostgreSQL database
+    symptoms:
+      - "Connection refused"
+      - "could not connect to server"
+      - "POSTGRES connection error"
+      - "Database credentials rejected"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "postgres.*error"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL connection settings are correct
+        type: check
+        command: "docker exec {container_name} nc -zv {postgres_host} {postgres_port}"
+        expected_output: "succeeded"
+        on_fail: step-2
+      - id: step-2
+        description: Check if PostgreSQL service is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: ""
+      - id: step-3
+        description: Verify database credentials and environment variables
+        type: inform
+        command: ""
+      - id: step-4
+        description: Display connection string being used
+        type: check
+        command: "docker exec {container_name} echo 'POSTGRES_URL=$POSTGRES_URL'"
+        expected_output: ""
+    resolution: |
+      LangFlow could not connect to the PostgreSQL database. Verify that (1) POSTGRES_URL or POSTGRES_HOST/POSTGRES_USER/POSTGRES_PASSWORD are set correctly, (2) PostgreSQL is running and accessible, (3) Network connectivity exists between LangFlow and the database, and (4) The database user has permissions to create tables. Update environment variables and restart the container.
+
+default_config:
+  compose_template: |
+    services:
+      langflow:
+        image: langflowai/langflow:latest
+        container_name: langflow
+        restart: unless-stopped
+        environment:
+          LANGFLOW_HOST: "0.0.0.0"
+          LANGFLOW_PORT: 7860
+          LANGFLOW_DATABASE_URL: "sqlite:////data/langflow.db"
+          LOG_LEVEL: info
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "7860:7860/tcp"
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for persistent LangFlow database and configurations
+      default: "./data"
+    - name: LANGFLOW_DATABASE_URL
+      description: Database URL (SQLite or PostgreSQL). Default uses SQLite in /data/langflow.db
+      default: "sqlite:////data/langflow.db"
+  known_mounts:
+    - container_path: /data
+      purpose: SQLite database, workflows, collections, and application state
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  LangFlow is an open-source visual builder for constructing and testing LangChain applications and workflows without requiring code.
+
+  Database options: By default, LangFlow uses SQLite stored in /data/langflow.db. For multi-user deployments, configure LANGFLOW_DATABASE_URL to point to an external PostgreSQL database (e.g., postgresql://user:pass@postgres:5432/langflow).
+
+  Data persistence: All workflows, collections, and custom node definitions are stored in the database. Ensure the /data volume is mounted to persistent storage to prevent data loss on restarts.
+
+  Port: Default port is 7860. Access LangFlow at http://localhost:7860. Change via LANGFLOW_PORT environment variable if needed.
+
+  Memory requirements: LangFlow can be memory-intensive when processing large workflows or making multiple LLM calls. Allocate 2-4GB minimum.
+
+  Authentication: First-run setup may require account creation. Check logs for any initial setup instructions.
+
+  Common gotchas:
+  - Workflows missing after restart: Ensure /data volume is persisted, not ephemeral.
+  - Database errors: For PostgreSQL, verify credentials and network access.
+  - Port conflicts: Change LANGFLOW_PORT if 7860 is already in use.
+  - Memory issues: Large workflows or concurrent users may exceed available memory; increase container limits.

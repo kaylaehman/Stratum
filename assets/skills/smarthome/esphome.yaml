@@ -1,0 +1,320 @@
+id: esphome
+name: ESPHome Device Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "esphome/esphome"
+  port_hints: [6052]
+category: smarthome
+description: Build and manage firmware for ESP8266 and ESP32 devices with YAML configuration
+docs_url: https://esphome.io/
+
+common_issues:
+  - id: usb-device-not-detected
+    name: USB device (FTDI/CH340) not detected for initial flash
+    symptoms:
+      - "No serial port found"
+      - "Failed to find device"
+      - "Serial port not available"
+      - "USB device permission denied"
+    trigger_conditions:
+      - log_pattern: "no serial port|not found|permission denied"
+    steps:
+      - id: step-1
+        description: Check if USB device is connected to host
+        type: check
+        command: "lsusb | grep -iE 'ftdi|ch340|usb|serial|device'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display all connected USB devices
+        type: inform
+        command: ""
+      - id: step-3
+        description: Find the actual USB device path on the host
+        type: check
+        command: "ls -la /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || echo 'No TTY devices found'"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Verify USB device is recognized by the system
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check USB device permissions
+        type: check
+        command: "stat /dev/ttyUSB0 2>/dev/null | grep Access || echo 'Device not found or no permissions'"
+      - id: step-6
+        description: Inform about USB device passthrough requirement
+        type: inform
+        command: ""
+      - id: step-7
+        description: Add USB device to docker-compose for ESPHome
+        type: fix
+        command: "echo 'Add to docker-compose devices section:\\ndevices:\\n  - /dev/ttyUSB0:/dev/ttyUSB0 (replace ttyUSB0 with actual device)\\n  - /dev/bus/usb:/dev/bus/usb'"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Restart ESPHome container with USB device access
+        type: fix
+        command: "docker-compose restart esphome"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify USB device is accessible in container
+        type: check
+        command: "docker exec esphome ls -la /dev/ttyUSB* 2>/dev/null || echo 'USB device still not accessible'"
+    resolution: |
+      The USB device is now passed through to the ESPHome container. The first flash of an ESP8266/ESP32 device requires USB connection. After the initial flash, updates can be done over-the-air (OTA) without USB. Make sure the USB cable is properly connected and the device is in bootloader mode (hold IO0 button while plugging in for most boards).
+
+  - id: over-the-air-update-failed
+    name: Over-the-air (OTA) update failing after initial flash
+    symptoms:
+      - "OTA update failed"
+      - "Connection refused during OTA"
+      - "OTA port unreachable"
+      - "Device not responding to OTA requests"
+    trigger_conditions:
+      - log_pattern: "OTA.*fail|update.*fail|ota.*connection"
+    steps:
+      - id: step-1
+        description: Check if device is online and responding to ping
+        type: check
+        command: "ping -c 1 {device_ip} 2>&1 | grep -E 'ttl|packet loss' || echo 'Device not reachable'"
+        expected_output: "ttl"
+        on_fail: step-2
+      - id: step-2
+        description: Display device connectivity status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify OTA is enabled in the device YAML configuration
+        type: check
+        command: "docker exec esphome grep -r 'ota:' /config/*.yaml | head -2"
+        expected_output: "ota:"
+        on_fail: step-4
+      - id: step-4
+        description: Display OTA configuration in device YAML
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check for OTA port conflicts (default 3232)
+        type: check
+        command: "netstat -tuln | grep 3232 || ss -tuln | grep 3232 || echo 'Port 3232 is available'"
+      - id: step-6
+        description: Flash device again with USB to reset OTA
+        type: inform
+        command: ""
+      - id: step-7
+        description: Compile and flash device firmware via USB
+        type: fix
+        command: "docker exec esphome esphome run {device_config}.yaml"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify OTA is now working
+        type: check
+        command: "docker exec esphome esphome update {device_config}.yaml"
+    resolution: |
+      OTA updates have been restored. For future updates, the device should update wirelessly without requiring USB. Ensure the device remains powered and on the network during the update process. If OTA continues to fail, verify the device has sufficient flash space and the ESPHome version is compatible.
+
+  - id: device-not-discovered-ota
+    name: Device not appearing in OTA device list
+    symptoms:
+      - "Device not visible in Dashboard"
+      - "Cannot find device in OTA update list"
+      - "Device not broadcasting mDNS"
+      - "ESPHome can't find devices on network"
+    trigger_conditions:
+      - log_pattern: "device.*not found|not discoverable"
+    steps:
+      - id: step-1
+        description: Check if device has valid hostname in YAML configuration
+        type: check
+        command: "docker exec esphome grep -r 'substitutions:' /config/*.yaml -A 5 | grep hostname"
+        expected_output: ""
+      - id: step-2
+        description: Display device configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify device is online on the network
+        type: check
+        command: "ping -c 1 {device_hostname}.local 2>&1 | grep ttl"
+        expected_output: "ttl"
+        on_fail: step-4
+      - id: step-4
+        description: Try pinging device by IP address instead
+        type: check
+        command: "ping -c 1 {device_ip}"
+      - id: step-5
+        description: Enable mDNS in device YAML if not already enabled
+        type: fix
+        command: "echo 'Ensure device YAML includes:\\nwifi:\\n  ssid: !secret wifi_ssid\\n  password: !secret wifi_password\\n  use_address: {device_ip} (optional, for static IP)'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Compile and flash updated configuration to device
+        type: fix
+        command: "docker exec esphome esphome run {device_config}.yaml"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for device to boot and check if it appears
+        type: check
+        command: "sleep 10 && docker exec esphome esphome discover {device_config}.yaml"
+    resolution: |
+      The device configuration has been updated and reflashed. Devices should now be discoverable via mDNS if they're on the same network as ESPHome. If discovery still fails, the device may not have internet connectivity or may be on a different network segment. Use the IP address directly in the ESPHome dashboard if mDNS discovery isn't working.
+
+  - id: compilation-errors
+    name: Firmware compilation failing
+    symptoms:
+      - "Compilation failed"
+      - "Cannot find component"
+      - "Unknown platform"
+      - "Build error in logs"
+    trigger_conditions:
+      - log_pattern: "error:|failed to compile|compilation failed"
+    steps:
+      - id: step-1
+        description: Check device YAML for syntax errors
+        type: check
+        command: "docker exec esphome esphome validate {device_config}.yaml"
+        expected_output: "valid"
+        on_fail: step-2
+      - id: step-2
+        description: Display validation errors
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify platform is correctly specified
+        type: check
+        command: "docker exec esphome grep -E 'esp8266|esp32' {device_config}.yaml"
+        expected_output: ""
+      - id: step-4
+        description: Check if all referenced components exist
+        type: check
+        command: "docker exec esphome grep -E '^[a-z_]+:' {device_config}.yaml | head -10"
+      - id: step-5
+        description: Attempt to compile and capture detailed errors
+        type: check
+        command: "docker exec esphome esphome compile {device_config}.yaml 2>&1 | tail -20"
+      - id: step-6
+        description: Simplify device YAML to minimal working configuration
+        type: fix
+        command: "echo 'Create minimal YAML with only required sections:\\nesphome:\\n  name: device_name\\n  platform: esp8266\\nesp8266:\\n  board: d1_mini'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Recompile with simplified configuration
+        type: fix
+        command: "docker exec esphome esphome compile {device_config}.yaml"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify compilation succeeded
+        type: check
+        command: "docker exec esphome test -f /config/.esphome/build/{device_name}/.pioenvs/{device_name}/firmware.bin && echo 'Firmware compiled successfully'"
+    resolution: |
+      The configuration has been simplified and recompiled. If compilation still fails, check the ESPHome documentation for the specific component you're trying to use. Some components may require additional dependencies or may not be available for your platform (ESP8266 has more limited resources than ESP32).
+
+  - id: web-dashboard-not-loading
+    name: Web dashboard not accessible on port 6052
+    symptoms:
+      - "Cannot access ESPHome web interface"
+      - "Connection refused on port 6052"
+      - "Dashboard times out"
+      - "Port 6052 not responding"
+    trigger_conditions:
+      - log_pattern: "listen.*6052|port.*6052"
+    steps:
+      - id: step-1
+        description: Verify port 6052 is published in docker-compose
+        type: check
+        command: "docker inspect esphome | grep -A 2 6052"
+        expected_output: "6052"
+        on_fail: step-2
+      - id: step-2
+        description: Display current port mappings
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if dashboard service is running inside container
+        type: check
+        command: "docker exec esphome ss -tlnp | grep 6052"
+        expected_output: "LISTEN.*6052"
+        on_fail: step-4
+      - id: step-4
+        description: Check ESPHome container logs for startup errors
+        type: check
+        command: "docker logs esphome | grep -iE 'error|failed|dashboard' | tail -5"
+      - id: step-5
+        description: Restart ESPHome container
+        type: fix
+        command: "docker restart esphome"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait for container to fully start
+        type: check
+        command: "sleep 3 && docker exec esphome curl -s http://localhost:6052/ | head -c 50"
+    resolution: |
+      The ESPHome dashboard has been restarted. The web interface should now be accessible at http://host:6052. If it still doesn't load, verify the container is running with docker ps and check for any startup errors in the logs.
+
+default_config:
+  compose_template: |
+    services:
+      esphome:
+        image: esphome/esphome:latest
+        container_name: esphome
+        restart: unless-stopped
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "6052:6052"
+        devices:
+          - /dev/ttyUSB0:/dev/ttyUSB0
+          - /dev/bus/usb:/dev/bus/usb
+        environment:
+          TZ: ${TZ:-UTC}
+        networks:
+          - default
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for ESPHome device YAML configurations
+      default: "./config"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: DEVICE_NAME
+      description: Name of the ESP device
+      default: "my-device"
+    - name: DEVICE_IP
+      description: IP address or hostname of the ESP device
+      default: "192.168.1.100"
+  known_mounts:
+    - container_path: /config
+      purpose: Device YAML configuration files and build artifacts
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  ESPHome is a system to control ESP8266 and ESP32 boards by simple yet powerful YAML configuration files, with OTA updates, integration with Home Assistant, and visual editor support.
+
+  Initial setup: First flash requires a USB connection (FTDI, CH340, or built-in USB). Use esphome run device.yaml to compile and flash.
+
+  Over-the-air updates: After initial flash, devices update wirelessly using the OTA protocol. The device must be on the same network as the ESPHome instance.
+
+  Device discovery: ESPHome uses mDNS (Bonjour) to discover devices. Devices appear as {device_name}.local on the network.
+
+  Configuration: All device settings are in YAML files in /config/. Changes are applied by compiling and flashing new firmware.
+
+  Secrets: Store sensitive data (WiFi passwords, API keys) in secrets.yaml with !secret substitution in device YAML.
+
+  Dashboard: The web dashboard on port 6052 provides an interface to view devices, monitor logs, and initiate OTA updates.
+
+  Common gotchas:
+  - USB device permission denied: Device needs to be passed through in docker-compose devices section.
+  - OTA not working: Ensure device YAML has ota: section and device is online.
+  - Device not discovered: Check mDNS is working on your network; use IP address directly if needed.
+  - Compilation failed: Validate YAML syntax; check for unsupported components on your platform.

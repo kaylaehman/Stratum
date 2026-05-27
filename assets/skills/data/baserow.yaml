@@ -1,0 +1,370 @@
+id: baserow
+name: Baserow Database and Spreadsheet
+version: "1.0"
+container_match:
+  image_patterns:
+    - "baserow/baserow"
+  port_hints: [80, 443]
+category: data
+description: Open-source Airtable alternative for building collaborative databases and spreadsheets
+
+docs_url: https://hub.docker.com/r/baserow/baserow
+
+common_issues:
+  - id: database-connection-failed
+    name: Database connection errors or PostgreSQL unavailable
+    symptoms:
+      - "database connection refused"
+      - "PostgreSQL connection failed"
+      - "cannot connect to server"
+      - "FATAL: role 'baserow' does not exist"
+    trigger_conditions:
+      - log_pattern: "database"
+      - log_pattern: "postgres"
+      - log_pattern: "connection.*refused"
+    steps:
+      - id: step-1
+        description: Check if PostgreSQL container is running
+        type: check
+        command: "docker-compose -f {compose_path} ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Verify PostgreSQL database exists
+        type: check
+        command: "docker-compose -f {compose_path} exec db psql -U baserow -l | grep baserow"
+        expected_output: "baserow"
+        on_fail: step-3
+      - id: step-3
+        description: Display database connection status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check PostgreSQL logs for initialization errors
+        type: check
+        command: "docker logs {compose_name}_db_1 2>&1 | grep -i 'error\\|fatal' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Verify database credentials in environment
+        type: check
+        command: "docker-compose -f {compose_path} config | grep -i 'postgres\\|database'"
+        expected_output: ""
+      - id: step-6
+        description: Restart Baserow and PostgreSQL services
+        type: fix
+        command: "docker-compose -f {compose_path} restart"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify services are running and connected
+        type: check
+        command: "sleep 10 && docker-compose -f {compose_path} ps"
+    resolution: |
+      Baserow and PostgreSQL services have been restarted. The database should now be accessible. Ensure PostgreSQL initialized successfully on first startup (can take 1-2 minutes). Check that database credentials match in docker-compose and environment variables. If issues persist, verify sufficient disk space for the database volume.
+
+  - id: redis-cache-unavailable
+    name: Redis cache connection failed
+    symptoms:
+      - "redis connection refused"
+      - "cache connection failed"
+      - "cannot connect to cache"
+      - "ECONNREFUSED on redis"
+    trigger_conditions:
+      - log_pattern: "redis"
+      - log_pattern: "cache"
+      - log_pattern: "ECONNREFUSED"
+    steps:
+      - id: step-1
+        description: Check if Redis container is running
+        type: check
+        command: "docker-compose -f {compose_path} ps | grep redis"
+        expected_output: "redis"
+        on_fail: step-2
+      - id: step-2
+        description: Verify Redis is listening on default port 6379
+        type: check
+        command: "docker-compose -f {compose_path} exec redis redis-cli ping"
+        expected_output: "PONG"
+        on_fail: step-3
+      - id: step-3
+        description: Display Redis status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Redis container logs for errors
+        type: check
+        command: "docker logs {compose_name}_redis_1 2>&1 | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Restart Redis service
+        type: fix
+        command: "docker-compose -f {compose_path} restart redis"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Redis connectivity
+        type: check
+        command: "sleep 3 && docker-compose -f {compose_path} exec redis redis-cli ping"
+    resolution: |
+      Redis cache service has been restarted. Baserow uses Redis for caching and session management. The service should now be accessible. If Redis continues to fail, check for disk space issues or memory constraints on the host system. Redis is critical for Baserow operation; restart the entire stack if issues persist.
+
+  - id: web-ui-not-loading
+    name: Web interface fails to load
+    symptoms:
+      - "Cannot access Baserow web UI"
+      - "Port 80 or 443 not responding"
+      - "Blank page or connection refused"
+      - "UI loads but shows errors"
+    trigger_conditions:
+      - log_pattern: "port.*in use"
+      - log_pattern: "eaddrinuse"
+    steps:
+      - id: step-1
+        description: Check if Baserow web server is running
+        type: check
+        command: "docker-compose -f {compose_path} ps | grep 'backend\\|frontend'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Verify port 80 is listening in container
+        type: check
+        command: "docker-compose -f {compose_path} exec backend ss -tlnp | grep 80"
+        expected_output: ""
+      - id: step-3
+        description: Check if another process is using port 80 on host
+        type: check
+        command: "ss -tlnp | grep ':80 '"
+        expected_output: ""
+      - id: step-4
+        description: Display web server status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check Baserow backend logs for errors
+        type: check
+        command: "docker logs {compose_name}_backend_1 2>&1 | grep -i 'error\\|traceback' | head -10"
+        expected_output: ""
+      - id: step-6
+        description: Restart all Baserow services
+        type: fix
+        command: "docker-compose -f {compose_path} restart"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify web UI is accessible
+        type: check
+        command: "sleep 15 && curl -s http://localhost/api/health | head -20"
+    resolution: |
+      Baserow services have been restarted. The web UI should now be accessible. If still unavailable, check that no other service is using port 80/443. Verify Docker networking is properly configured. Initial startup may take 30-60 seconds; allow time for services to initialize before testing.
+
+  - id: migration-or-startup-failed
+    name: Database migrations failed or startup hangs
+    symptoms:
+      - "migrations pending"
+      - "migration error"
+      - "Container exits after startup"
+      - "Application never becomes ready"
+    trigger_conditions:
+      - log_pattern: "migration"
+      - log_pattern: "failed"
+      - log_pattern: "pending migrations"
+    steps:
+      - id: step-1
+        description: Check container exit code and logs
+        type: check
+        command: "docker-compose -f {compose_path} logs backend | tail -20"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Verify PostgreSQL is fully initialized
+        type: check
+        command: "docker-compose -f {compose_path} exec db pg_isready -U baserow"
+        expected_output: "accepting"
+      - id: step-3
+        description: Display initialization status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check database schema status
+        type: check
+        command: "docker-compose -f {compose_path} exec db psql -U baserow -c '\\dt' | head -10"
+        expected_output: ""
+      - id: step-5
+        description: Run migrations manually
+        type: fix
+        command: "docker-compose -f {compose_path} exec backend python manage.py migrate"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check if migrations completed successfully
+        type: check
+        command: "docker-compose -f {compose_path} exec backend python manage.py showmigrations | tail -10"
+    resolution: |
+      Database migrations have been executed. Ensure PostgreSQL is fully initialized before migrations run. If migrations still fail, check PostgreSQL logs for errors. Database corruption may require data restoration from backups. Contact Baserow support if migration errors persist after restart.
+
+  - id: file-upload-failed
+    name: File uploads fail or storage is full
+    symptoms:
+      - "Cannot upload files"
+      - "Upload fails with error"
+      - "no space left on device"
+      - "storage quota exceeded"
+    trigger_conditions:
+      - log_pattern: "upload"
+      - log_pattern: "disk full"
+      - log_pattern: "storage"
+    steps:
+      - id: step-1
+        description: Check available disk space in volumes
+        type: check
+        command: "docker volume inspect {compose_name}_baserow_uploads | grep Mountpoint"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check disk usage in media directory
+        type: check
+        command: "du -sh {media_path}"
+        expected_output: ""
+      - id: step-3
+        description: Display disk space status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Clean up old temporary files
+        type: fix
+        command: "docker-compose -f {compose_path} exec backend find {media_path}/temp -mtime +7 -delete"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify disk space after cleanup
+        type: check
+        command: "du -sh {media_path}"
+    resolution: |
+      Temporary files older than 7 days have been removed from the media directory. File uploads should now work if disk space is available. Monitor disk usage regularly. If storage continues to fill quickly, consider archiving old projects or expanding storage capacity.
+
+default_config:
+  compose_template: |
+    version: "3.8"
+    services:
+      db:
+        image: postgres:15-alpine
+        container_name: baserow_db
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: baserow
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-baserow}
+          POSTGRES_DB: baserow
+        volumes:
+          - ${DB_PATH:-./db_data}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U baserow"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      redis:
+        image: redis:7-alpine
+        container_name: baserow_redis
+        restart: unless-stopped
+        volumes:
+          - ${REDIS_PATH:-./redis_data}:/data
+        healthcheck:
+          test: ["CMD", "redis-cli", "ping"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      baserow:
+        image: baserow/baserow:latest
+        container_name: baserow
+        restart: unless-stopped
+        depends_on:
+          db:
+            condition: service_healthy
+          redis:
+            condition: service_healthy
+        environment:
+          DATABASE_ENGINE: django.db.backends.postgresql
+          DATABASE_NAME: baserow
+          DATABASE_USER: baserow
+          DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-baserow}
+          DATABASE_HOST: db
+          DATABASE_PORT: 5432
+          REDIS_URL: redis://redis:6379
+          SECRET_KEY: ${SECRET_KEY:-change-me}
+          DEBUG: "False"
+          ALLOWED_HOSTS: "*"
+        volumes:
+          - ${MEDIA_PATH:-./media}:/baserow/media
+          - ${DATA_PATH:-./data}:/baserow/data
+        ports:
+          - "80:80/tcp"
+          - "443:443/tcp"
+  required_vars:
+    - name: POSTGRES_PASSWORD
+      description: PostgreSQL password for baserow user
+      default: "baserow"
+    - name: SECRET_KEY
+      description: Django secret key for Baserow
+      default: "change-me-to-random-string"
+    - name: DB_PATH
+      description: Host path for PostgreSQL data directory
+      default: "./db_data"
+    - name: REDIS_PATH
+      description: Host path for Redis data directory
+      default: "./redis_data"
+    - name: MEDIA_PATH
+      description: Host path for user uploads and media
+      default: "./media"
+    - name: DATA_PATH
+      description: Host path for application data
+      default: "./data"
+  known_mounts:
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database files (required for data persistence)
+      recommended_permissions: "700"
+      owner: "70:70"
+    - container_path: /data
+      purpose: Redis database files (optional for persistence)
+      recommended_permissions: "755"
+      owner: "999:999"
+    - container_path: /baserow/media
+      purpose: User uploads, attachments, and exported files
+      recommended_permissions: "755"
+      owner: "9999:9999"
+    - container_path: /baserow/data
+      purpose: Application state and caches
+      recommended_permissions: "755"
+      owner: "9999:9999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Baserow is a multi-container application with backend API, frontend UI, PostgreSQL database, and Redis cache.
+
+  Database: PostgreSQL is required and must initialize on first startup. This can take 1-2 minutes.
+
+  Cache: Redis is used for sessions, caching, and real-time features. Critical for proper operation.
+
+  Storage: Requires three separate volumes: database data, Redis data, and user media uploads. Database volume should be on fast storage.
+
+  Initial setup: On first access, create an admin account. Database migrations run automatically.
+
+  Backup: Regularly backup PostgreSQL database and media volume. Use docker-compose backup procedures.
+
+  Performance: Ensure adequate RAM (2GB+ recommended) for PostgreSQL and Redis. Database size grows with number of records.
+
+  Dependencies: Backend waits for PostgreSQL and Redis to be healthy before starting (uses healthcheck).
+
+  Multi-container architecture:
+  - db: PostgreSQL 15 for data storage
+  - redis: Redis 7 for caching and sessions
+  - baserow: Main application (backend + frontend + worker)
+
+  Common gotchas:
+  - Database connection failed: Verify PostgreSQL fully initialized before migrations.
+  - Redis unavailable: Check Redis container is running; restart if needed.
+  - Web UI not loading: Allow 30-60 seconds for initial startup; check port 80 is open.
+  - Migrations pending: Run "python manage.py migrate" manually if stuck.
+  - File uploads fail: Check disk space in media volume; clean up old temporary files.

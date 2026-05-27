@@ -1,0 +1,322 @@
+id: akaunting
+name: Akaunting Open-Source Accounting
+version: "1.0"
+container_match:
+  image_patterns:
+    - "akaunting/akaunting"
+  port_hints: [80, 443]
+category: finance
+description: Open-source accounting software with invoicing, expense tracking, and financial reporting
+docs_url: https://akaunting.com/docs
+
+common_issues:
+  - id: database-connection-error
+    name: Database connection failed — cannot connect to MySQL/PostgreSQL
+    symptoms:
+      - "SQLSTATE[HY000]"
+      - "Access denied for user"
+      - "Connection refused"
+      - "Cannot connect to database on startup"
+      - "Database error — verify connection string"
+    trigger_conditions:
+      - log_pattern: "SQLSTATE"
+      - log_pattern: "Connection refused"
+    steps:
+      - id: step-1
+        description: Verify database container is running and healthy
+        type: check
+        command: "docker ps | grep -E 'mysql|postgres|mariadb'"
+        expected_output: "mysql|postgres|mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display running database containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Akaunting database environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i 'db_host\\|db_database\\|db_username'"
+        expected_output: "DB_HOST"
+        on_fail: step-4
+      - id: step-4
+        description: Display current database configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test database connectivity from Akaunting container
+        type: check
+        command: "docker exec {container_name} php artisan tinker --execute='DB::connection()->getPdo();' 2>&1 | head -5"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Verify database credentials and connectivity
+        type: check
+        command: "docker exec {database_container} mysql -u {db_user} -p{db_password} -e 'SELECT 1;' 2>&1"
+        expected_output: "1"
+        on_fail: step-7
+      - id: step-7
+        description: Restart Akaunting to reconnect to database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Wait and verify database connection succeeded
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'database.*connected\\|cache.*cleared' | tail -2"
+
+  - id: app-key-not-set
+    name: APP_KEY not set — application key required for encryption
+    symptoms:
+      - "APP_KEY not found"
+      - "No application key configured"
+      - "Encryption key missing"
+      - "Fatal error on startup — APP_KEY required"
+    trigger_conditions:
+      - log_pattern: "APP_KEY.*not.*set"
+      - log_pattern: "encryption.*unavailable"
+    steps:
+      - id: step-1
+        description: Check if APP_KEY environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep APP_KEY"
+        expected_output: "APP_KEY"
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a new APP_KEY using PHP artisan
+        type: fix
+        command: "docker exec {container_name} php artisan key:generate --show"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify APP_KEY was generated and set
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -o 'APP_KEY=[^ ]*' | cut -d= -f2 | wc -c"
+        expected_output: "[3-9]"
+    resolution: |
+      The APP_KEY is required for Akaunting's encryption functionality. The key has been generated. The container must be restarted with the new APP_KEY environment variable for changes to take effect.
+
+  - id: web-interface-404
+    name: Web interface returns 404 or blank page
+    symptoms:
+      - "404 Not Found"
+      - "Cannot access Akaunting web interface"
+      - "Blank white page on load"
+      - "Port 80 not responding"
+    trigger_conditions:
+      - log_pattern: "404"
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Verify Akaunting is listening on port 80
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 80"
+        expected_output: "LISTEN.*80"
+        on_fail: step-2
+      - id: step-2
+        description: Check port mapping in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '80/tcp'"
+        expected_output: "80"
+        on_fail: step-3
+      - id: step-3
+        description: Display port configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Akaunting startup logs for errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | head -10"
+        expected_output: ""
+      - id: step-5
+        description: Verify APP_KEY and database connection
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-6
+        description: Restart Akaunting
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify web interface is accessible
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'running\\|listening\\|ready' | tail -2"
+
+  - id: migration-failed-on-startup
+    name: Database migration fails on startup — schema not initialized
+    symptoms:
+      - "Migration error on startup"
+      - "SQLSTATE error during migration"
+      - "Schema table not found"
+      - "Database not properly initialized"
+      - "Cannot create tables"
+    trigger_conditions:
+      - log_pattern: "migration.*fail"
+      - log_pattern: "schema.*not.*found"
+    steps:
+      - id: step-1
+        description: Check database migration status in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'migration' | head -10"
+        expected_output: ""
+      - id: step-2
+        description: Display migration error details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database is accessible and ready for schema creation
+        type: check
+        command: "docker exec {database_container} mysql -u {db_user} -p{db_password} {database_name} -e 'SHOW TABLES;' 2>&1"
+        expected_output: ""
+      - id: step-4
+        description: Run database migrations manually via Artisan
+        type: fix
+        command: "docker exec {container_name} php artisan migrate --force"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify migrations completed successfully
+        type: check
+        command: "docker logs {container_name} | grep -i 'migration.*success\\|migrated' | tail -5"
+    resolution: |
+      Database migrations have been executed. Akaunting will now initialize the schema and create necessary tables. If migrations continue to fail, verify the database is accessible and no conflicting tables already exist. For further assistance, consult the official Akaunting documentation.
+
+default_config:
+  compose_template: |
+    services:
+      akaunting:
+        image: akaunting/akaunting:latest
+        container_name: akaunting
+        restart: unless-stopped
+        environment:
+          APP_KEY: ${APP_KEY}
+          APP_URL: ${APP_URL:-http://localhost}
+          DB_HOST: ${DB_HOST:-mysql}
+          DB_PORT: ${DB_PORT:-3306}
+          DB_DATABASE: ${DB_DATABASE:-akaunting}
+          DB_USERNAME: ${DB_USERNAME:-akaunting}
+          DB_PASSWORD: ${DB_PASSWORD:-akaunting}
+          DB_CONNECTION: ${DB_CONNECTION:-mysql}
+          MAIL_DRIVER: ${MAIL_DRIVER:-log}
+        volumes:
+          - ${STORAGE_PATH:-./storage}:/var/www/html/storage
+          - ${CONFIG_PATH:-./config}:/var/www/html/config
+        ports:
+          - "80:80"
+        depends_on:
+          mysql:
+            condition: service_healthy
+
+      mysql:
+        image: mysql:8.0
+        container_name: akaunting-mysql
+        restart: unless-stopped
+        environment:
+          MYSQL_DATABASE: ${MYSQL_DATABASE:-akaunting}
+          MYSQL_USER: ${MYSQL_USER:-akaunting}
+          MYSQL_PASSWORD: ${MYSQL_PASSWORD:-akaunting}
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+        volumes:
+          - ${DB_PATH:-./mysql-data}:/var/lib/mysql
+        healthcheck:
+          test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+  required_vars:
+    - name: APP_KEY
+      description: Application key for encryption (generate with docker exec akaunting php artisan key:generate --show)
+      default: ""
+    - name: APP_URL
+      description: External URL for Akaunting (e.g., http://localhost or https://accounting.example.com)
+      default: "http://localhost"
+    - name: DB_HOST
+      description: MySQL hostname
+      default: "mysql"
+    - name: DB_PORT
+      description: MySQL port
+      default: "3306"
+    - name: DB_DATABASE
+      description: Database name
+      default: "akaunting"
+    - name: DB_USERNAME
+      description: Database user
+      default: "akaunting"
+    - name: DB_PASSWORD
+      description: Database password
+      default: "akaunting"
+    - name: DB_CONNECTION
+      description: Database driver (mysql or pgsql)
+      default: "mysql"
+    - name: MAIL_DRIVER
+      description: Mail driver for notifications
+      default: "log"
+    - name: STORAGE_PATH
+      description: Host path for Akaunting storage directory
+      default: "./storage"
+    - name: CONFIG_PATH
+      description: Host path for Akaunting configuration
+      default: "./config"
+    - name: DB_PATH
+      description: Host path for MySQL data
+      default: "./mysql-data"
+    - name: MYSQL_ROOT_PASSWORD
+      description: MySQL root password
+      default: "rootpassword"
+
+  known_mounts:
+    - container_path: /var/www/html/storage
+      purpose: Akaunting attachments, exports, and uploaded files
+      recommended_permissions: "755"
+      owner: "www-data:www-data"
+    - container_path: /var/www/html/config
+      purpose: Akaunting configuration files
+      recommended_permissions: "755"
+      owner: "www-data:www-data"
+    - container_path: /var/lib/mysql
+      purpose: MySQL database storage
+      recommended_permissions: "700"
+      owner: "mysql:mysql"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Akaunting is a free and open-source accounting software designed for small businesses and freelancers. It provides invoicing, expense tracking, and financial reporting.
+
+  **APP_KEY generation:**
+  The APP_KEY is required for encryption. Generate it once using:
+  ```
+  docker exec akaunting php artisan key:generate --show
+  ```
+  Copy the output value and set it as the APP_KEY environment variable before first startup.
+
+  **Database selection:**
+  MySQL 8.0 is recommended and included in the compose template. PostgreSQL is also supported — set DB_CONNECTION to 'pgsql' and modify the database service accordingly.
+
+  **First-run workflow:**
+  1. Set APP_KEY, DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD
+  2. Start containers (database runs healthcheck and migrations automatically on first start)
+  3. Wait for database to be healthy (check docker logs)
+  4. Access Akaunting at http://localhost
+  5. Create admin account on first login
+  6. Configure company information, users, and chart of accounts
+
+  **Multiple users:**
+  Akaunting supports multiple user accounts with role-based access control. Create additional users via the settings panel after initial setup.
+
+  **Backups:**
+  Regularly export your financial data via the Akaunting export feature. Back up the MySQL database separately using `mysqldump`.
+
+  **Common gotchas:**
+  - APP_KEY not set: Akaunting will refuse to start
+  - Database migrations fail: Ensure database is accessible and empty on first startup
+  - Web interface blank: Check logs for APP_KEY or database connection errors
+  - Port conflicts: Akaunting uses port 80 (HTTP) by default; change in compose template if needed

@@ -1,0 +1,254 @@
+id: homeassistant
+name: Home Assistant
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/home-assistant/home-assistant"
+  port_hints: [8123]
+category: smarthome
+description: Open-source home automation platform for controlling smart devices and automations
+docs_url: https://hub.docker.com/r/homeassistant/home-assistant
+
+common_issues:
+  - id: configuration-yaml-syntax-error
+    name: configuration.yaml syntax error preventing startup
+    symptoms:
+      - "Home Assistant fails to start"
+      - "YAML parsing error in logs"
+      - "Invalid YAML or duplicate keys"
+      - "Container crashes immediately after start"
+    trigger_conditions:
+      - log_pattern: "yaml.*error"
+      - log_pattern: "parsing.*failed"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check the last few lines of Home Assistant logs for YAML errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-2
+        description: Display configuration.yaml file for inspection
+        type: check
+        command: "cat {config_path}/configuration.yaml | head -50"
+        expected_output: ""
+      - id: step-3
+        description: Validate YAML syntax of configuration.yaml
+        type: check
+        command: "docker exec {container_name} python3 -c \"import yaml; yaml.safe_load(open('/config/configuration.yaml'))\" 2>&1"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Show YAML validation error details
+        type: inform
+        command: ""
+      - id: step-5
+        description: Common YAML fixes needed
+        type: inform
+        command: ""
+      - id: step-6
+        description: Create a backup of the current configuration.yaml
+        type: fix
+        command: "cp {config_path}/configuration.yaml {config_path}/configuration.yaml.bak.$(date +%s)"
+        requires_approval: true
+    resolution: |
+      Home Assistant requires valid YAML syntax in configuration.yaml. Common YAML errors include: duplicate keys, incorrect indentation (must use spaces, not tabs), missing colons after keys, or quotes in the wrong place. Check the error message in logs to identify the exact line. Edit configuration.yaml to fix the syntax error, then restart the container. A backup has been created in case you need to revert changes.
+
+  - id: usb-zwave-not-detected
+    name: Z-Wave USB device not recognized or accessible
+    symptoms:
+      - "Z-Wave integration fails to connect"
+      - "USB device not found /dev/ttyUSB0 or /dev/ttyACM0"
+      - "Permission denied accessing USB device"
+      - "Z-Wave stick appears disconnected"
+    trigger_conditions:
+      - log_pattern: "z-wave.*error"
+      - log_pattern: "device.*not found"
+      - log_pattern: "/dev/tty.*permission"
+    steps:
+      - id: step-1
+        description: Identify the USB device name for Z-Wave stick
+        type: check
+        command: "ls -la /dev/tty* | grep -E 'ttyUSB|ttyACM'"
+        expected_output: "/dev/tty"
+        on_fail: step-2
+      - id: step-2
+        description: Display all USB devices to locate Z-Wave stick
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify USB device is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .HostConfig.Devices}}{{.PathOnHost}} -> {{.PathInContainer}} {{end}}'"
+        expected_output: "/dev/tty"
+        on_fail: step-4
+      - id: step-4
+        description: USB device not mounted; displaying mount requirement
+        type: inform
+        command: ""
+      - id: step-5
+        description: Stop Home Assistant container to update device mount
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Update docker-compose to include USB device and restart
+        type: inform
+        command: ""
+      - id: step-7
+        description: Verify device is accessible from within container after restart
+        type: check
+        command: "docker exec {container_name} ls -la /dev/tty* 2>&1 | head -5"
+    resolution: |
+      Z-Wave USB sticks require direct device access from the container. Identify the device (usually /dev/ttyUSB0 or /dev/ttyACM0) and mount it in docker-compose with a `devices:` section: `devices: - /dev/ttyUSB0:/dev/ttyUSB0`. The Z-Wave integration in Home Assistant must then be configured with the matching path. After updating docker-compose, recreate the container.
+
+  - id: zigbee-integration-connection-failed
+    name: Zigbee integration fails to connect to coordinator
+    symptoms:
+      - "Zigbee Home Automation integration error"
+      - "Cannot connect to coordinator device"
+      - "Zigbee devices not appearing in Home Assistant"
+      - "Serial port open error"
+    trigger_conditions:
+      - log_pattern: "zigbee.*error"
+      - log_pattern: "coordinator.*not found"
+      - log_pattern: "serial.*open.*failed"
+    steps:
+      - id: step-1
+        description: Check Home Assistant logs for Zigbee-specific error messages
+        type: check
+        command: "docker logs {container_name} | grep -i 'zigbee' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Identify the USB coordinator device
+        type: check
+        command: "ls -la /dev/tty* | grep -E 'ttyUSB|ttyACM'"
+        expected_output: "/dev/tty"
+        on_fail: step-3
+      - id: step-3
+        description: No USB coordinator found; check device is connected
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify coordinator device is passed to container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .HostConfig.Devices}}{{.PathOnHost}} {{end}}'"
+        expected_output: "/dev/tty"
+        on_fail: step-5
+      - id: step-5
+        description: Coordinator device not passed to container; update docker-compose
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Home Assistant to reinitialize Zigbee integration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor logs after restart for successful Zigbee connection
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'zigbee' | tail -5"
+    resolution: |
+      Zigbee coordinators (Sonoff, GLEDOPTO, etc.) require USB device passthrough to the container. The device must be mounted in docker-compose with `devices: - /dev/ttyUSB0:/dev/ttyUSB0` (or the correct device path). After mounting the device, the Zigbee integration should automatically detect and connect to the coordinator. If still failing, check the integration configuration in Home Assistant settings.
+
+  - id: oauth-integration-auth-failed
+    name: OAuth/authentication integration fails or times out
+    symptoms:
+      - "Authentication failed for Spotify, Google, or other OAuth provider"
+      - "Login dialog hangs or redirects incorrectly"
+      - "Callback URL mismatch error"
+      - "Home Assistant cannot reach OAuth provider"
+    trigger_conditions:
+      - log_pattern: "auth.*failed"
+      - log_pattern: "oauth.*error"
+      - log_pattern: "callback.*timeout"
+    steps:
+      - id: step-1
+        description: Check Home Assistant logs for OAuth error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|oauth' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Verify Home Assistant is accessible at configured base_url
+        type: check
+        command: "curl -s -o /dev/null -w '%{http_code}' http://{container_name}:8123"
+        expected_output: "200"
+        on_fail: step-3
+      - id: step-3
+        description: Display base_url and external_url configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if external_url is configured in configuration.yaml
+        type: check
+        command: "grep -n 'external_url\\|base_url' {config_path}/configuration.yaml"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: external_url not configured; show configuration requirement
+        type: inform
+        command: ""
+      - id: step-6
+        description: Add external_url to configuration.yaml for OAuth callback
+        type: fix
+        command: "echo -e '\\nhttp:\\n  external_url: https://{external_url}' >> {config_path}/configuration.yaml"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Home Assistant to load new configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify configuration was applied after restart
+        type: check
+        command: "docker logs {container_name} | grep -i 'external_url' | head -3"
+    resolution: |
+      OAuth integrations require Home Assistant to be accessible via a stable external URL so the OAuth provider can redirect back with credentials. Ensure `external_url` is configured in configuration.yaml to the externally accessible address of your Home Assistant instance. Without this, OAuth callback redirects fail. After configuring external_url, restart Home Assistant and retry the integration setup.
+
+default_config:
+  compose_template: |
+    services:
+      homeassistant:
+        image: ghcr.io/home-assistant/home-assistant:latest
+        container_name: homeassistant
+        restart: unless-stopped
+        privileged: true
+        network_mode: host
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./homeassistant}:/config
+        devices:
+          - /dev/ttyUSB0:/dev/ttyUSB0
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for /config (configuration and database)
+      default: "./homeassistant"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /config
+      purpose: Home Assistant configuration, databases, and automation files
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Home Assistant is a Python-based home automation platform with support for hundreds of integrations including Zigbee, Z-Wave, MQTT, Spotify, Google, and custom automations.
+
+  Critical setup:
+  - network_mode: host is recommended for mDNS discovery and device connectivity.
+  - Zigbee/Z-Wave: Requires direct USB device passthrough via `devices:` in docker-compose.
+  - OAuth integrations: Require `external_url` configured in configuration.yaml for callback redirects.
+  - /config: MUST be a persistent volume; configuration is essential and lost without it.
+
+  Common gotchas:
+  - Configuration.yaml syntax errors: Use a YAML validator before restarting.
+  - USB devices not found: Identify the device with `ls /dev/tty*` and add to devices section.
+  - Z-Wave/Zigbee not working: Verify USB coordinator is mounted and correct serial path configured.
+  - OAuth login hangs: Check external_url is set correctly and Home Assistant is reachable externally.
+  - Automations not triggering: Verify configuration.yaml has valid automation: section.

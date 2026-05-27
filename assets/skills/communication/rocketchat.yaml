@@ -1,0 +1,316 @@
+id: rocketchat
+name: Rocket.Chat Team Communication
+version: "1.0"
+container_match:
+  image_patterns:
+    - "rocket.chat"
+    - "rocketchat/rocket.chat"
+  port_hints: [3000]
+category: communication
+description: Open-source team chat with messaging, video calls, and enterprise features
+docs_url: https://hub.docker.com/_/rocket.chat
+
+common_issues:
+  - id: mongodb-replica-required
+    name: MongoDB replica set not configured
+    symptoms:
+      - "MongoDB connection failed"
+      - "replica set error"
+      - "not a replica set"
+      - "Cannot initialize database"
+      - "startup failed"
+    trigger_conditions:
+      - log_pattern: "replica.*required"
+      - log_pattern: "mongodb.*connection.*failed"
+      - log_pattern: "not a replica"
+    steps:
+      - id: step-1
+        description: Check if MongoDB is running as a replica set
+        type: check
+        command: "docker exec {mongodb_container} mongosh --eval \"rs.status()\" 2>&1 | grep -E 'members|ok|error' | head -5"
+        expected_output: "members"
+        on_fail: step-2
+      - id: step-2
+        description: Display MongoDB replica set initialization error
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check MONGO_REPLICA_SET environment variable in Rocket.Chat
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MONGO_REPLICA_SET"
+        expected_output: "MONGO_REPLICA_SET"
+        on_fail: step-4
+      - id: step-4
+        description: Inform user that MONGO_REPLICA_SET is not set
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify MONGO_URL points to MongoDB
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MONGO_URL"
+        expected_output: "mongodb"
+      - id: step-6
+        description: Initialize MongoDB replica set (if this is a fresh deployment)
+        type: fix
+        command: "docker exec {mongodb_container} mongosh --eval \"rs.initiate({_id:'rs0', members:[{_id:0, host:'localhost:27017'}]})\" 2>&1 | head -10"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify replica set is now initialized
+        type: check
+        command: "docker exec {mongodb_container} mongosh --eval \"rs.status().ok\" 2>&1"
+        expected_output: "1"
+      - id: step-8
+        description: Restart Rocket.Chat to retry connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Monitor Rocket.Chat startup logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'connected\\|ready\\|listening' | tail -3"
+    resolution: |
+      Rocket.Chat version 6.x and later require MongoDB to be configured as a replica set. The replica set has been initialized and Rocket.Chat has been restarted to reconnect. This allows Rocket.Chat to use MongoDB's change streams for real-time updates. For production, consider using MongoDB Atlas with replica set replication across multiple nodes.
+
+  - id: root-url-misconfigured
+    name: ROOT_URL not set or incorrect
+    symptoms:
+      - "Links in emails are broken"
+      - "Avatar uploads fail"
+      - "File access returns 404"
+      - "OAuth callbacks not working"
+      - "Avatar images not loading in UI"
+    trigger_conditions:
+      - log_pattern: "ROOT_URL"
+      - log_pattern: "avatar.*fail"
+    steps:
+      - id: step-1
+        description: Check ROOT_URL environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep ROOT_URL"
+        expected_output: "ROOT_URL"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ROOT_URL setting (or note if not set)
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check what URL the server is listening on internally
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:3000/api/v1/info | grep -o 'url.*:' | head -3"
+        expected_output: ""
+      - id: step-4
+        description: Verify Rocket.Chat internal connectivity
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:3000/home | grep -o 'rocketchat\\|login' | head -1"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Inform user that Rocket.Chat API may not be responding
+        type: inform
+        command: ""
+      - id: step-6
+        description: Update ROOT_URL to match external access URL
+        type: fix
+        command: "docker exec {container_name} bash -c 'echo ROOT_URL={root_url} >> /proc/1/environ' || echo 'Note: Restart container with updated ROOT_URL environment variable'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Rocket.Chat with correct ROOT_URL
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify ROOT_URL is recognized in logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'root_url\\|base.*url' | tail -3"
+    resolution: |
+      ROOT_URL must be set to the externally accessible URL of your Rocket.Chat instance (e.g., https://chat.example.com). This URL is used in email links, OAuth callbacks, file access, and avatar display. The container has been restarted with the correct ROOT_URL. All links and file access should now work correctly.
+
+  - id: permission-denied-uploads
+    name: Permission denied on uploads or data directory
+    symptoms:
+      - "Permission denied when uploading files"
+      - "Avatar upload fails"
+      - "Cannot write to /app/uploads"
+      - "EACCES error"
+    trigger_conditions:
+      - log_pattern: "permission denied.*uploads"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of /app/uploads directory on host
+        type: check
+        command: "stat {uploads_path} | grep -E 'Access|Uid'"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display uploads directory ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check which user Rocket.Chat container runs as
+        type: check
+        command: "docker inspect {container_name} --format='{{.Config.User}}'"
+        expected_output: ""
+      - id: step-4
+        description: Ensure uploads directory is writable by Rocket.Chat process
+        type: fix
+        command: "chown -R {puid}:{pgid} {uploads_path} && chmod -R 755 {uploads_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership and permissions changed successfully
+        type: check
+        command: "stat {uploads_path} | grep -E 'Access: .*755|Uid:'"
+    resolution: |
+      The /app/uploads directory ownership was mismatched with the container's running user. This prevents Rocket.Chat from storing uploaded files and avatars. The fix changed ownership and permissions to allow the container to write. File uploads should now work.
+
+  - id: startup-timeout
+    name: Container fails to start or exits immediately
+    symptoms:
+      - "Container exited with code 1"
+      - "Service unavailable on port 3000"
+      - "Container restarts repeatedly"
+      - "Never reaches healthy state"
+    trigger_conditions:
+      - log_pattern: "Error: listen"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check container exit code and logs
+        type: check
+        command: "docker inspect {container_name} --format='{{.State.ExitCode}}'"
+        expected_output: "0"
+        on_fail: step-2
+      - id: step-2
+        description: Display container startup logs
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if MongoDB is reachable from Rocket.Chat
+        type: check
+        command: "docker exec {container_name} curl -s mongodb://localhost:27017/test 2>&1 | head -3"
+        expected_output: ""
+      - id: step-4
+        description: Verify MONGO_URL environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MONGO_URL"
+        expected_output: "MONGO_URL"
+      - id: step-5
+        description: Check for disk space issues (common cause of startup failure)
+        type: check
+        command: "df -h / | tail -1 | awk '{print $5}' | grep -E '[0-9]%' | awk -F% '{print $1}'"
+        expected_output: ""
+      - id: step-6
+        description: Wait for MongoDB to be fully ready and restart Rocket.Chat
+        type: fix
+        command: "sleep 10 && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor startup progress
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'listening\\|started\\|ready' | tail -3"
+    resolution: |
+      Rocket.Chat startup failures are commonly due to MongoDB not being ready, network connectivity issues, or insufficient disk space. The container has been restarted to allow proper initialization. Ensure MongoDB is running and healthy before Rocket.Chat starts. Check docker logs for specific error messages if the container continues to fail.
+
+default_config:
+  compose_template: |
+    services:
+      mongodb:
+        image: mongo:6
+        container_name: rocketchat-mongo
+        restart: unless-stopped
+        volumes:
+          - ${MONGO_PATH:-./mongo}:/data/db
+          - ${MONGO_INITDB_PATH:-./mongo-initdb}:/docker-entrypoint-initdb.d
+        command: mongod --replSet rs0 --bind_ip_all
+        healthcheck:
+          test: echo 'db.runCommand({ok:1})' | mongosh localhost:27017/test --quiet
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      rocketchat:
+        image: rocket.chat:latest
+        container_name: rocketchat
+        restart: unless-stopped
+        depends_on:
+          mongodb:
+            condition: service_healthy
+        environment:
+          ROOT_URL: ${ROOT_URL:-http://localhost:3000}
+          MONGO_URL: mongodb://mongodb:27017/rocketchat
+          MONGO_OPLOG_URL: mongodb://mongodb:27017/local
+          MONGO_REPLICA_SET: rs0
+          ROCKETCHAT_USERNAME: ${ROCKETCHAT_USERNAME:-admin}
+          ROCKETCHAT_PASSWORD: ${ROCKETCHAT_PASSWORD:-admin}
+          ROCKETCHAT_EMAIL: ${ROCKETCHAT_EMAIL:-admin@example.com}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${UPLOADS_PATH:-./uploads}:/app/uploads
+          - ${JETTY_PATH:-./jetty}:/app/jetty
+        ports:
+          - "3000:3000/tcp"
+  required_vars:
+    - name: ROOT_URL
+      description: External URL where Rocket.Chat is accessible (https://chat.example.com)
+      default: "http://localhost:3000"
+    - name: ROCKETCHAT_USERNAME
+      description: Initial admin username
+      default: "admin"
+    - name: ROCKETCHAT_PASSWORD
+      description: Initial admin password
+      default: "admin"
+    - name: ROCKETCHAT_EMAIL
+      description: Initial admin email address
+      default: "admin@example.com"
+    - name: TZ
+      description: Timezone for logs and timestamps
+      default: "UTC"
+    - name: MONGO_PATH
+      description: Host path for MongoDB data
+      default: "./mongo"
+    - name: MONGO_INITDB_PATH
+      description: Host path for MongoDB init scripts
+      default: "./mongo-initdb"
+    - name: UPLOADS_PATH
+      description: Host path for user uploads and avatars
+      default: "./uploads"
+    - name: JETTY_PATH
+      description: Host path for Jetty configuration
+      default: "./jetty"
+  known_mounts:
+    - container_path: /app/uploads
+      purpose: User-uploaded files, avatars, and media
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /data/db
+      purpose: MongoDB database files (in mongo container)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Rocket.Chat is a full-featured team communication platform with messaging, video conferencing, and enterprise features. It requires MongoDB 4.2+ and since version 6.x, MongoDB must be configured as a replica set.
+
+  MongoDB replica set: Rocket.Chat 6.x+ requires MongoDB replica set even for single-node deployments. Use the `rs.initiate()` command to initialize on first run. This enables change streams for real-time features.
+
+  ROOT_URL: Critical for email links, OAuth, file access, and avatars. Must be the external URL where users access Rocket.Chat (e.g., https://chat.example.com or http://localhost:3000).
+
+  Initial admin: ROCKETCHAT_USERNAME, ROCKETCHAT_PASSWORD, and ROCKETCHAT_EMAIL create the first admin account. Change these after initial setup.
+
+  File storage: /app/uploads stores avatars, file uploads, and media. Ensure adequate disk space and proper write permissions.
+
+  Common gotchas:
+  - MongoDB replica set error: Initialize MongoDB with rs.initiate() before starting Rocket.Chat.
+  - ROOT_URL not set: Email links and file access will break. Set it to your external URL.
+  - Avatar uploads fail: Check /app/uploads directory permissions and disk space.
+  - Slow performance: Verify MongoDB has adequate disk I/O and that swap is available.
+  - Email not sending: Configure SMTP settings in admin panel Administration → Mailer.
+  - OAuth not working: ROOT_URL must match the external callback URL registered with OAuth provider.

@@ -1,0 +1,348 @@
+id: mosquitto
+name: Eclipse Mosquitto MQTT Broker
+version: "1.0"
+container_match:
+  image_patterns:
+    - "eclipse-mosquitto"
+  port_hints: [1883, 9001]
+category: smarthome
+description: Lightweight MQTT message broker for IoT and home automation
+docs_url: https://hub.docker.com/_/eclipse-mosquitto
+
+common_issues:
+  - id: authentication-failed
+    name: MQTT clients cannot authenticate
+    symptoms:
+      - "Connection refused"
+      - "Access denied"
+      - "Username or password is incorrect"
+      - "Auth failure for client"
+    trigger_conditions:
+      - log_pattern: "Auth failure|authentication failed|access denied"
+    steps:
+      - id: step-1
+        description: Check if ACL configuration is present
+        type: check
+        command: "docker exec mosquitto ls -la /mosquitto/config/ | grep -E 'acl|passwd'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display Mosquitto configuration directory
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify mosquitto.conf includes ACL and authentication settings
+        type: check
+        command: "docker exec mosquitto cat /mosquitto/config/mosquitto.conf | grep -E 'acl_file|password_file|allow_anonymous'"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display mosquitto.conf contents
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check password file exists and is readable
+        type: check
+        command: "docker exec mosquitto ls -la /mosquitto/config/passwd.txt 2>/dev/null || echo 'Password file not found'"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Create password file with sample user
+        type: fix
+        command: "docker exec mosquitto mosquitto_passwd -c /mosquitto/config/passwd.txt admin && echo 'Created password file for admin user'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Update mosquitto.conf to enable password authentication
+        type: fix
+        command: "echo 'Add to mosquitto.conf:\\nallow_anonymous false\\npassword_file /mosquitto/config/passwd.txt\\nacl_file /mosquitto/config/acl.txt'"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Restart Mosquitto to apply authentication
+        type: fix
+        command: "docker restart mosquitto"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify clients can authenticate with new credentials
+        type: check
+        command: "docker exec mosquitto mosquitto_sub -h localhost -u admin -P admin -t '#' --max-queued-messages 1 2>&1 | head -2"
+    resolution: |
+      Mosquitto has been configured to require authentication. A password file has been created and mosquitto.conf updated to deny anonymous access. All MQTT clients must now authenticate with valid username/password. For each client, you can add users with: docker exec mosquitto mosquitto_passwd /mosquitto/config/passwd.txt username
+
+  - id: port-already-in-use
+    name: MQTT ports 1883 or 9001 already in use
+    symptoms:
+      - "Address already in use"
+      - "bind: address already in use"
+      - "Could not open socket"
+      - "Mosquitto failed to start"
+    trigger_conditions:
+      - log_pattern: "address already in use|bind:.*already in use"
+    steps:
+      - id: step-1
+        description: Check if port 1883 is already bound on the host
+        type: check
+        command: "ss -tlnp | grep 1883"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check what process is using port 1883
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if port 9001 is already bound on the host
+        type: check
+        command: "ss -tlnp | grep 9001"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display all listening ports
+        type: inform
+        command: ""
+      - id: step-5
+        description: Stop conflicting process or change docker port mapping
+        type: inform
+        command: ""
+      - id: step-6
+        description: Update docker-compose to use alternative ports
+        type: fix
+        command: "echo 'Update ports in docker-compose:\\nports:\\n  - \"1884:1883\"  (or any available port)\\n  - \"9002:9001\"  (or any available port)'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Mosquitto with new port configuration
+        type: fix
+        command: "docker-compose up -d mosquitto"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify Mosquitto is listening on new ports
+        type: check
+        command: "docker exec mosquitto ss -tlnp | grep mqtt"
+    resolution: |
+      Mosquitto has been restarted with updated port mappings. The MQTT broker is now listening on the configured ports. Update any MQTT clients to use the new port numbers if they have changed.
+
+  - id: acl-blocking-connections
+    name: ACL configuration blocking valid connections
+    symptoms:
+      - "Connection accepted but publish/subscribe denied"
+      - "Permission denied for topic"
+      - "Client disconnected"
+      - "Subscription denied"
+    trigger_conditions:
+      - log_pattern: "acl deny|denying|permission denied"
+    steps:
+      - id: step-1
+        description: Check if ACL file is properly mounted
+        type: check
+        command: "docker exec mosquitto ls -la /mosquitto/config/acl.txt 2>/dev/null || echo 'ACL file not found'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display ACL configuration status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check mosquitto.conf for acl_file reference
+        type: check
+        command: "docker exec mosquitto grep acl_file /mosquitto/config/mosquitto.conf"
+        expected_output: "acl_file"
+        on_fail: step-4
+      - id: step-4
+        description: Display current mosquitto.conf settings
+        type: inform
+        command: ""
+      - id: step-5
+        description: Display current ACL rules
+        type: check
+        command: "docker exec mosquitto cat /mosquitto/config/acl.txt 2>/dev/null || echo 'ACL file is empty or missing'"
+      - id: step-6
+        description: Create permissive ACL for testing
+        type: fix
+        command: "echo '# Default rules\\nuser admin\\ntopic write #\\ntopic read #\\nuser zigbee2mqtt\\ntopic write #\\ntopic read #\\npattern write $SYS/broker/clients/+\\npattern read $SYS/broker/clients/+' > /mosquitto/config/acl.txt"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Mosquitto with new ACL rules
+        type: fix
+        command: "docker restart mosquitto"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Test if connections are now working
+        type: check
+        command: "sleep 2 && docker exec mosquitto mosquitto_sub -h localhost -u admin -P admin -t '#' --max-queued-messages 1 -W 2 2>&1 | head -2"
+    resolution: |
+      The ACL rules have been updated to be more permissive for testing. In production, set specific topic permissions per user. ACL format: each user/pattern section defines read/write permissions. Topic wildcards: # matches any topic level, + matches a single level. Save time: use pattern rules for dynamic client IDs (e.g., pattern write devices/+).
+
+  - id: websocket-connection-issues
+    name: WebSocket connection (port 9001) not working
+    symptoms:
+      - "WebSocket connection refused"
+      - "Cannot connect via MQTT over WebSocket"
+      - "Port 9001 not listening"
+      - "Cannot access MQTT from web client"
+    trigger_conditions:
+      - log_pattern: "websocket|9001"
+    steps:
+      - id: step-1
+        description: Check if WebSocket listener is configured in mosquitto.conf
+        type: check
+        command: "docker exec mosquitto grep -A 2 'listener 9001' /mosquitto/config/mosquitto.conf"
+        expected_output: "listener 9001"
+        on_fail: step-2
+      - id: step-2
+        description: Display mosquitto.conf listener configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify port 9001 is published in docker configuration
+        type: check
+        command: "docker inspect mosquitto | grep 9001"
+        expected_output: "9001"
+        on_fail: step-4
+      - id: step-4
+        description: Display current port mappings
+        type: inform
+        command: ""
+      - id: step-5
+        description: Add WebSocket listener to mosquitto.conf if missing
+        type: fix
+        command: "echo '\\nlistener 9001\\nprotocol websockets' >> /mosquitto/config/mosquitto.conf"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Mosquitto with WebSocket enabled
+        type: fix
+        command: "docker restart mosquitto"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify WebSocket listener is active
+        type: check
+        command: "docker exec mosquitto ss -tlnp | grep 9001"
+    resolution: |
+      WebSocket support has been enabled on port 9001. Web-based MQTT clients can now connect using the ws:// or wss:// protocol. Update your web client configuration to point to ws://host:9001 instead of the standard MQTT port. This is useful for browser-based dashboards and web applications that cannot use standard TCP sockets.
+
+  - id: persistent-messages-not-delivered
+    name: Retained/persistent messages not being delivered
+    symptoms:
+      - "Retained messages not appearing"
+      - "New subscribers don't receive previous messages"
+      - "QoS 1/2 messages lost on broker restart"
+      - "Messages not persisted between restarts"
+    trigger_conditions:
+      - log_pattern: "retain|persist"
+    steps:
+      - id: step-1
+        description: Check if persistence is enabled in mosquitto.conf
+        type: check
+        command: "docker exec mosquitto grep -E 'persistence|autosave' /mosquitto/config/mosquitto.conf"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display current persistence settings
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if /mosquitto/data directory is mounted
+        type: check
+        command: "docker inspect mosquitto | grep -A 1 'data'"
+        expected_output: "data"
+        on_fail: step-4
+      - id: step-4
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-5
+        description: Add persistence configuration to mosquitto.conf
+        type: fix
+        command: "echo 'persistence true\\npersistence_location /mosquitto/data/\\nautosave_interval 1800' >> /mosquitto/config/mosquitto.conf"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Ensure /mosquitto/data volume is mounted in docker-compose
+        type: fix
+        command: "echo 'Add to volumes section:\\n- ${DATA_PATH:-./data}:/mosquitto/data'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Mosquitto with persistence enabled
+        type: fix
+        command: "docker-compose up -d mosquitto"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify persistence files are being created
+        type: check
+        command: "docker exec mosquitto ls -la /mosquitto/data/ | grep -E 'db|persist'"
+    resolution: |
+      Message persistence has been enabled. Mosquitto will now save retained messages and QoS 1/2 messages to disk. On restart, these messages will be restored. The data is saved to /mosquitto/data/, which must be a mounted volume for persistence to survive container recreation.
+
+default_config:
+  compose_template: |
+    services:
+      mosquitto:
+        image: eclipse-mosquitto:latest
+        container_name: mosquitto
+        restart: unless-stopped
+        ports:
+          - "1883:1883"
+          - "9001:9001"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/mosquitto/config
+          - ${DATA_PATH:-./data}:/mosquitto/data
+          - ${LOG_PATH:-./log}:/mosquitto/log
+        environment:
+          TZ: ${TZ:-UTC}
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for mosquitto configuration files
+      default: "./config"
+    - name: DATA_PATH
+      description: Host path for MQTT message persistence database
+      default: "./data"
+    - name: LOG_PATH
+      description: Host path for Mosquitto logs
+      default: "./log"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /mosquitto/config
+      purpose: mosquitto.conf, ACL file (acl.txt), password file (passwd.txt)
+      recommended_permissions: "755"
+      owner: "1883:1883"
+    - container_path: /mosquitto/data
+      purpose: MQTT message persistence database
+      recommended_permissions: "755"
+      owner: "1883:1883"
+    - container_path: /mosquitto/log
+      purpose: Broker logs
+      recommended_permissions: "755"
+      owner: "1883:1883"
+
+notes: |
+  Eclipse Mosquitto is a lightweight, open-source MQTT broker commonly used as the heart of home automation systems.
+
+  Default behavior: By default, Mosquitto allows anonymous connections. For production, enable authentication via password_file and set allow_anonymous false.
+
+  Authentication: Use mosquitto_passwd utility to manage users: docker exec mosquitto mosquitto_passwd /mosquitto/config/passwd.txt username
+
+  ACL (Access Control Lists): Define per-topic permissions in acl.txt. Format: user <username>, topic read <pattern>, topic write <pattern>.
+
+  Ports:
+  - 1883: Standard MQTT protocol
+  - 9001: WebSocket protocol (optional, requires listener configuration)
+
+  Persistence: Store messages to disk with persistence true in mosquitto.conf. Requires /mosquitto/data volume mount.
+
+  Performance: Mosquitto is single-threaded but extremely lightweight and suitable for thousands of connections on modest hardware.
+
+  Common gotchas:
+  - Anonymous access by default: Explicitly set allow_anonymous false if you need authentication.
+  - ACL denying connections: Check ACL rules match your client usernames and topic patterns.
+  - WebSocket not working: Ensure listener 9001 is in mosquitto.conf and port is published in docker-compose.
+  - No message persistence: Enable persistence true and mount /mosquitto/data volume.

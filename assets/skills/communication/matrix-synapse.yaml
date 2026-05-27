@@ -1,0 +1,182 @@
+id: matrix-synapse
+name: Matrix Synapse
+version: "1.0"
+container_match:
+  image_patterns:
+    - "matrixdotorg/synapse"
+  port_hints: [8008, 8448]
+category: communication
+description: Reference home server for the Matrix decentralized communication protocol
+docs_url: https://element-hq.github.io/synapse/latest/setup/installing.html
+
+common_issues:
+  - id: homeserver-yaml-not-generated
+    name: Synapse refuses to start — homeserver.yaml missing
+    symptoms:
+      - "ConfigError: homeserver.yaml not found"
+      - "No such file or directory: '/data/homeserver.yaml'"
+    trigger_conditions:
+      - log_pattern: "homeserver.yaml"
+    steps:
+      - id: step-1
+        description: Check whether /data has been initialized
+        type: check
+        command: "ls -la {data_path}"
+        expected_output: "homeserver.yaml"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about the one-shot generate step
+        type: inform
+        command: ""
+      - id: step-3
+        description: Run the generate step to scaffold homeserver.yaml + keys
+        type: fix
+        command: "docker run -it --rm -v {data_path}:/data -e SYNAPSE_SERVER_NAME={server_name} -e SYNAPSE_REPORT_STATS=no matrixdotorg/synapse:latest generate"
+        requires_approval: true
+    resolution: |
+      Synapse needs a `generate` step on first run to create
+      homeserver.yaml, signing keys, and a default media store. After
+      generate succeeds, start Synapse normally — it will boot against the
+      new config.
+
+  - id: postgres-connection-failed
+    name: Cannot connect to PostgreSQL
+    symptoms:
+      - "psycopg2.OperationalError"
+      - "could not connect to server"
+      - "FATAL: password authentication failed"
+    trigger_conditions:
+      - log_pattern: "psycopg2"
+    steps:
+      - id: step-1
+        description: Verify the Postgres container is running
+        type: check
+        command: "docker inspect {db_container} --format='{{.State.Status}}'"
+        expected_output: "running"
+        on_fail: step-2
+      - id: step-2
+        description: Test connectivity to Postgres from Synapse
+        type: check
+        command: "docker exec {container_name} nc -zv {db_container} 5432 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about required encoding and locale
+        type: inform
+        command: ""
+    resolution: |
+      Synapse requires a Postgres database with `ENCODING='UTF8'` and
+      `LC_COLLATE='C' LC_CTYPE='C'`. If the DB was created without these,
+      Synapse refuses to use it. The compose template below sets the
+      correct POSTGRES_INITDB_ARGS.
+
+  - id: federation-not-working
+    name: Federation requests fail or other servers cannot reach us
+    symptoms:
+      - "Failed to fetch remote room"
+      - "Server not reachable"
+      - "Federation tester reports failure"
+    trigger_conditions:
+      - log_pattern: "federation"
+    steps:
+      - id: step-1
+        description: Verify port 8448 is exposed
+        type: check
+        command: "docker inspect {container_name} | grep 8448"
+        expected_output: "8448"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about federation requirements
+        type: inform
+        command: ""
+    resolution: |
+      Federation requires either port 8448 reachable from the public
+      internet OR a properly configured .well-known/matrix/server record on
+      the server_name host. The federation tester at
+      https://federationtester.matrix.org/ will tell you which is missing.
+
+  - id: media-storage-permission
+    name: Permission denied on /data/media_store
+    symptoms:
+      - "permission denied"
+      - "Cannot write uploaded media"
+    trigger_conditions:
+      - log_pattern: "media_store"
+    steps:
+      - id: step-1
+        description: Check ownership of the data directory
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 991"
+        on_fail: step-2
+      - id: step-2
+        description: Chown /data to the synapse user (UID 991)
+        type: fix
+        command: "chown -R 991:991 {data_path}"
+        requires_approval: true
+    resolution: |
+      The matrixdotorg/synapse image runs as the `synapse` user (UID 991).
+      /data — including media_store, uploads, and signing keys — must be
+      writable by that user.
+
+default_config:
+  compose_template: |
+    services:
+      synapse:
+        image: matrixdotorg/synapse:latest
+        container_name: synapse
+        restart: unless-stopped
+        depends_on:
+          - postgres
+        environment:
+          SYNAPSE_SERVER_NAME: ${SERVER_NAME}
+          SYNAPSE_REPORT_STATS: "no"
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "8008:8008"
+          - "8448:8448"
+      postgres:
+        image: postgres:15
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: synapse
+          POSTGRES_USER: synapse
+          POSTGRES_PASSWORD: ${DB_PASSWORD}
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/postgresql/data
+  required_vars:
+    - name: SERVER_NAME
+      description: Public Matrix server name (e.g. matrix.example.com)
+      default: "matrix.example.com"
+    - name: DB_PASSWORD
+      description: Postgres password for the synapse user
+      default: ""
+    - name: DATA_PATH
+      description: Host path for /data (config, keys, media store)
+      default: "./data"
+    - name: DB_PATH
+      description: Host path for Postgres data
+      default: "./db"
+  known_mounts:
+    - container_path: /data
+      purpose: homeserver.yaml, signing keys, media store, logs
+      recommended_permissions: "750"
+      owner: "991:991"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  First run requires the `generate` subcommand to scaffold homeserver.yaml
+  and signing keys before regular `start` works.
+
+  Postgres MUST be initialized with --encoding=UTF8 --lc-collate=C
+  --lc-ctype=C. Synapse will refuse a DB that was created differently —
+  you cannot fix this in place; you'd need to dump, recreate the DB
+  cluster with the right locale, and restore.
+
+  Federation: port 8448 must be reachable from the public internet, OR
+  delegate via .well-known/matrix/server on the SERVER_NAME host. Test at
+  https://federationtester.matrix.org/.

@@ -1,0 +1,260 @@
+id: langfuse
+name: Langfuse LLM Observability
+version: "1.0"
+container_match:
+  image_patterns:
+    - "langfuse/langfuse"
+  port_hints: [3000]
+category: ai
+description: Open-source observability platform for monitoring and debugging LLM applications
+docs_url: https://hub.docker.com/r/langfuse/langfuse
+
+common_issues:
+  - id: postgres-connection-failed
+    name: PostgreSQL database connection failed
+    symptoms:
+      - "Cannot connect to PostgreSQL"
+      - "connection refused"
+      - "database does not exist"
+      - "FATAL: password authentication failed"
+      - "No such table"
+    trigger_conditions:
+      - log_pattern: "postgres.*error"
+      - log_pattern: "connection refused"
+      - log_pattern: "database.*does not exist"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL service is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Check if PostgreSQL is reachable from Langfuse container
+        type: check
+        command: "docker exec {container_name} nc -zv {postgres_host} {postgres_port}"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Display PostgreSQL connection error
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify PostgreSQL credentials and database name
+        type: check
+        command: "echo 'DATABASE_URL: ${DATABASE_URL}'"
+        expected_output: "DATABASE_URL:"
+      - id: step-5
+        description: Restart Langfuse to retry connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor startup for successful database initialization
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'database.*initialized\\|connected\\|listening'"
+    resolution: |
+      Langfuse database connection has been tested and the container restarted. Ensure that DATABASE_URL is correctly configured with valid PostgreSQL credentials and that PostgreSQL is running and accessible on the network. The database should exist and the user should have permissions to create tables.
+
+  - id: auth-initialization-failed
+    name: Authentication setup or login failed
+    symptoms:
+      - "Login page shows error"
+      - "Cannot create initial admin account"
+      - "NEXTAUTH_SECRET error"
+      - "Session token invalid"
+      - "Unauthorized access"
+    trigger_conditions:
+      - log_pattern: "NEXTAUTH.*error"
+      - log_pattern: "auth.*failed"
+    steps:
+      - id: step-1
+        description: Check if NEXTAUTH_SECRET is configured
+        type: check
+        command: "docker exec {container_name} env | grep NEXTAUTH_SECRET"
+        expected_output: "NEXTAUTH_SECRET="
+        on_fail: step-2
+      - id: step-2
+        description: Display authentication configuration status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify NEXTAUTH_URL matches your deployment URL
+        type: check
+        command: "docker exec {container_name} env | grep NEXTAUTH_URL"
+        expected_output: "NEXTAUTH_URL="
+      - id: step-4
+        description: Ensure NEXTAUTH_SECRET is set to a secure random string
+        type: fix
+        command: "echo 'Set NEXTAUTH_SECRET env var to a secure 32+ char random string and redeploy'"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Langfuse with proper auth configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify authentication is working
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -5"
+    resolution: |
+      Langfuse authentication has been reconfigured. NEXTAUTH_SECRET must be set to a secure random string for session management. NEXTAUTH_URL should match your deployment URL (e.g., http://localhost:3000 for local, https://langfuse.example.com for production). After restarting, try logging in again or creating a new account.
+
+  - id: api-key-generation-unavailable
+    name: Cannot generate or manage API keys
+    symptoms:
+      - "API key generation failed"
+      - "Keys not showing in UI"
+      - "Cannot access API"
+      - "Keys page shows error"
+    trigger_conditions:
+      - log_pattern: "api.*error"
+      - log_pattern: "key.*generation.*failed"
+    steps:
+      - id: step-1
+        description: Verify Langfuse is fully initialized
+        type: check
+        command: "docker logs {container_name} | grep -i 'ready\\|listening\\|initialized' | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Check database connectivity
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:3000/health 2>&1"
+        expected_output: ""
+      - id: step-3
+        description: Display API and database status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if user account is properly set up
+        type: check
+        command: "docker logs {container_name} | grep -i 'user\\|account' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Restart Langfuse to reinitialize API subsystem
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify API is accessible
+        type: check
+        command: "sleep 10 && docker exec {container_name} curl -s http://localhost:3000/api/health"
+    resolution: |
+      Langfuse has been restarted to reinitialize the API system. API keys are generated and stored in the PostgreSQL database. If keys still don't appear, ensure that your user account was properly created during setup and that database connectivity is stable. Try logging out and back in, or creating a new project to trigger API key generation.
+
+  - id: high-memory-usage
+    name: Container consuming excessive memory
+    symptoms:
+      - "Memory usage above 90%"
+      - "OOMKilled"
+      - "Out of memory errors"
+      - "Container restarts unexpectedly"
+    trigger_conditions:
+      - log_pattern: "OOMKilled"
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Identify what's consuming memory
+        type: check
+        command: "docker exec {container_name} ps aux --sort=-%mem | head -5"
+        expected_output: ""
+      - id: step-3
+        description: Display memory limit and usage
+        type: inform
+        command: ""
+      - id: step-4
+        description: Increase memory limit in docker-compose
+        type: fix
+        command: "echo 'Increase deploy.resources.limits.memory to 2GB or higher and redeploy'"
+        requires_approval: true
+    resolution: |
+      Langfuse is running out of allocated memory. Increase the container's memory limit via deploy.resources.limits.memory in docker-compose.yml to at least 2GB. Large volumes of trace data or long-running aggregations can require significant memory. After updating the limit, restart the container. Consider also implementing data retention policies to prevent unbounded growth of trace records in PostgreSQL.
+
+default_config:
+  compose_template: |
+    services:
+      postgres:
+        image: postgres:16-alpine
+        container_name: langfuse-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-langfuse}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-langfuse}
+          POSTGRES_DB: ${POSTGRES_DB:-langfuse}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./postgres_data}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-langfuse}"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      langfuse:
+        image: langfuse/langfuse:latest
+        container_name: langfuse
+        restart: unless-stopped
+        depends_on:
+          postgres:
+            condition: service_healthy
+        environment:
+          DATABASE_URL: "postgresql://${POSTGRES_USER:-langfuse}:${POSTGRES_PASSWORD:-langfuse}@postgres:5432/${POSTGRES_DB:-langfuse}"
+          NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme-generate-secure-random}
+          NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+          LOG_LEVEL: info
+        ports:
+          - "3000:3000/tcp"
+  required_vars:
+    - name: POSTGRES_USER
+      description: PostgreSQL username for Langfuse database
+      default: "langfuse"
+    - name: POSTGRES_PASSWORD
+      description: PostgreSQL password (change from default for production)
+      default: "langfuse"
+    - name: POSTGRES_DB
+      description: PostgreSQL database name
+      default: "langfuse"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for PostgreSQL data persistence
+      default: "./postgres_data"
+    - name: NEXTAUTH_SECRET
+      description: Secret key for NextAuth session management (must be 32+ char random string)
+      default: "changeme-generate-secure-random"
+    - name: NEXTAUTH_URL
+      description: Public URL of Langfuse deployment (for auth redirects)
+      default: "http://localhost:3000"
+  known_mounts:
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database files and trace data
+      recommended_permissions: "700"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Langfuse is an open-source observability platform for LLM applications, providing detailed tracing, debugging, and analytics for LLM calls, embeddings, and chains.
+
+  PostgreSQL requirement: Langfuse requires a PostgreSQL database for persistent storage of traces and observability data. The provided compose template includes a PostgreSQL service. For production, consider using a managed database.
+
+  Authentication: NEXTAUTH_SECRET must be a secure random string (32+ characters). Generate with `openssl rand -base64 32`. NEXTAUTH_URL must match your deployment's public URL for authentication redirects to work correctly.
+
+  Ingestion: Applications send trace data to Langfuse via the SDKs (Python, JavaScript, etc.). The API listens on port 3000 at /api/public/ingestion for incoming traces.
+
+  Data retention: Configure trace retention policies via environment variables or the UI to prevent unbounded database growth. Consider archiving old traces periodically.
+
+  Memory: Langfuse aggregates and processes trace data, which can be memory-intensive with large volumes. Allocate 1-2GB minimum.
+
+  Common gotchas:
+  - PostgreSQL not running: Ensure postgres service is healthy before langfuse starts.
+  - Auth failures: Verify NEXTAUTH_SECRET is set and NEXTAUTH_URL matches your deployment.
+  - API key issues: Keys are stored in PostgreSQL; ensure database connectivity is stable.
+  - High memory: Large trace volumes or unindexed queries can cause memory spikes; tune database or implement retention.

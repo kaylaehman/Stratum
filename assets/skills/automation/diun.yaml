@@ -1,0 +1,175 @@
+id: diun
+name: DIUN (Docker Image Update Notifier)
+version: "1.0"
+container_match:
+  image_patterns:
+    - "crazymax/diun"
+  port_hints: []
+category: automation
+description: Docker image update notifier that watches registries and sends notifications via webhook
+docs_url: https://hub.docker.com/r/crazymax/diun
+
+common_issues:
+  - id: docker-socket-not-mounted
+    name: Docker socket not accessible
+    symptoms:
+      - "Cannot connect to Docker daemon"
+      - "Permission denied accessing /var/run/docker.sock"
+      - "DIUN fails to start or exits immediately"
+      - "Docker connection error in logs"
+    trigger_conditions:
+      - log_pattern: "cannot connect"
+      - log_pattern: "permission denied.*docker"
+      - log_pattern: "docker.*not found"
+    steps:
+      - id: step-1
+        description: Verify Docker socket exists on host
+        type: check
+        command: "ls -la /var/run/docker.sock"
+        expected_output: "/var/run/docker.sock"
+        on_fail: step-2
+      - id: step-2
+        description: Display docker socket path and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify Docker socket is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "/var/run/docker.sock"
+        on_fail: step-4
+      - id: step-4
+        description: Docker socket not mounted; displaying mount requirement
+        type: inform
+        command: ""
+      - id: step-5
+        description: Stop DIUN container to update docker-compose
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Update docker-compose.yml to include Docker socket mount
+        type: inform
+        command: ""
+    resolution: |
+      DIUN requires access to the Docker daemon to monitor running containers and query registries for image updates. The Docker socket must be mounted as a read-only bind mount into the container at /var/run/docker.sock. Update your docker-compose configuration to include `volumes: - /var/run/docker.sock:/var/run/docker.sock:ro`. Recreate the container after updating the configuration.
+
+  - id: webhook-notification-not-working
+    name: Webhook notifications not being sent
+    symptoms:
+      - "DIUN detects updates but notifications are not received"
+      - "Webhook endpoint returns 404 or connection timeout"
+      - "No logs indicating webhook attempt"
+      - "Notification provider appears unconfigured"
+    trigger_conditions:
+      - log_pattern: "webhook.*error"
+      - log_pattern: "notification.*failed"
+      - log_pattern: "provider.*not configured"
+    steps:
+      - id: step-1
+        description: Check DIUN logs for webhook configuration errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'webhook\\|notification\\|provider' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Verify webhook URL is configured in environment or config file
+        type: check
+        command: "docker exec {container_name} env | grep -i webhook"
+        expected_output: "WEBHOOK"
+        on_fail: step-3
+      - id: step-3
+        description: Display notification provider configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test webhook endpoint from container
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' '{webhook_url}' || echo 'unreachable'"
+        expected_output: "200"
+        on_fail: step-5
+      - id: step-5
+        description: Webhook endpoint unreachable; verify URL and network access
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart DIUN to reload notification configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor logs for next scheduled image check and webhook attempt
+        type: check
+        command: "sleep 30 && docker logs {container_name} | grep -i 'webhook\\|notification' | tail -5"
+    resolution: |
+      DIUN requires a properly configured notification provider (webhook URL) to send image update notifications. Common providers include Slack, Discord, Telegram, or custom webhooks. Verify that your webhook URL is set via environment variable or config file, that the endpoint is accessible from the container, and that the endpoint returns HTTP 200. After fixing the configuration, the container has been restarted and will attempt notification on the next scheduled image registry check.
+
+default_config:
+  compose_template: |
+    services:
+      diun:
+        image: crazymax/diun:latest
+        container_name: diun
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+          LOG_LEVEL: ${LOG_LEVEL:-info}
+          DIUN_WATCH_WORKERS: ${DIUN_WATCH_WORKERS:-1}
+          DIUN_NOTIF_WEBHOOK_ENDPOINT: ${WEBHOOK_ENDPOINT:-}
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - ${CONFIG_PATH:-./diun}:/home/diun
+  required_vars:
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: LOG_LEVEL
+      description: Log verbosity (info, debug, warn, error)
+      default: "info"
+    - name: WEBHOOK_ENDPOINT
+      description: Webhook URL for notifications (e.g., Slack, Discord, custom)
+      default: ""
+    - name: DIUN_WATCH_WORKERS
+      description: Number of concurrent workers for image checks
+      default: "1"
+    - name: CONFIG_PATH
+      description: Host path for DIUN configuration and state
+      default: "./diun"
+  known_mounts:
+    - container_path: /var/run/docker.sock
+      purpose: Access to Docker daemon for container and image monitoring (read-only)
+      recommended_permissions: "660"
+      owner: "root:docker"
+    - container_path: /home/diun
+      purpose: DIUN configuration, database, and state files
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  DIUN is a Docker image update notifier that periodically checks registries for new image versions and sends notifications via configured webhooks. The container runs as UID 1000 (diun user) by default.
+
+  Critical setup:
+  - /var/run/docker.sock: MUST be mounted as read-only bind mount; without it, DIUN cannot monitor containers.
+  - Webhook endpoint: Required for notifications to be sent. Configure via DIUN_NOTIF_WEBHOOK_ENDPOINT environment variable.
+  - /home/diun: Should be a persistent volume to maintain state and image check history across restarts.
+
+  First-run setup:
+  1. After first start, DIUN automatically detects running containers via Docker socket.
+  2. Configure notification provider: Slack incoming webhook, Discord webhook, Telegram, or custom HTTP endpoint.
+  3. Set DIUN_NOTIF_WEBHOOK_ENDPOINT to your webhook URL.
+  4. Container images are checked on a configurable schedule (default: daily); on update detection, webhook is triggered.
+  5. Review logs to confirm image monitoring is active.
+
+  Supported notification providers:
+  - Slack: https://hooks.slack.com/services/... (incoming webhook)
+  - Discord: https://discordapp.com/api/webhooks/... (webhook URL)
+  - Telegram: Via Telegram bot webhook
+  - Custom HTTP: Any endpoint that accepts POST with JSON payload
+
+  Common gotchas:
+  - Docker socket not mounted: DIUN will fail to start or exit silently.
+  - Webhook unreachable: Check firewall rules and network access from container.
+  - No state persistence: If /home/diun is not mounted, DIUN loses image check history on restart.
+  - Label filtering not set: By default, DIUN monitors all containers; use labels to narrow scope.
+  - Notification format: Verify your webhook provider accepts the JSON payload DIUN sends.

@@ -1,0 +1,405 @@
+id: frigate
+name: Frigate NVR (Network Video Recorder)
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/blakeblackshear/frigate"
+  port_hints: [5000, 8554, 1935, 8555]
+category: smarthome
+description: Real-time object detection for IP cameras with GPU acceleration support
+docs_url: https://docs.frigate.video/
+
+common_issues:
+  - id: camera-stream-connection-refused
+    name: Cannot connect to camera RTSP stream
+    symptoms:
+      - "Connection refused on port 554"
+      - "RTSP connection timeout"
+      - "Unable to connect to camera"
+      - "Stream not starting"
+      - "Timeout connecting to camera"
+    trigger_conditions:
+      - log_pattern: "Connection refused|timeout|unable to connect|stream.*failed"
+    steps:
+      - id: step-1
+        description: Test connectivity to camera from host
+        type: check
+        command: "timeout 5 nc -zv {camera_ip} 554 2>&1 | grep -E 'succeeded|refused'"
+        expected_output: "succeeded"
+        on_fail: step-2
+      - id: step-2
+        description: Display camera connectivity attempt
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if camera IP is reachable via ping
+        type: check
+        command: "ping -c 1 {camera_ip} | grep -E 'ttl|0% packet loss'"
+        expected_output: "ttl"
+        on_fail: step-4
+      - id: step-4
+        description: Verify camera is powered on and on network
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test RTSP stream URL directly from Frigate container
+        type: check
+        command: "docker exec frigate timeout 10 ffprobe -rtsp_transport tcp -v quiet rtsp://{camera_user}:{camera_password}@{camera_ip}:554/{camera_path} 2>&1 | head -3"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Verify camera RTSP credentials in frigate config
+        type: inform
+        command: ""
+      - id: step-7
+        description: Update camera configuration with correct IP, credentials, and stream path
+        type: fix
+        command: "echo 'Verify in /config/config.yml:\\ncameras:\\n  camera_name:\\n    ffmpeg:\\n      inputs:\\n        - path: rtsp://user:pass@camera_ip:554/stream\\n          roles: [detect, record]'"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Restart Frigate to reconnect to camera
+        type: fix
+        command: "docker restart frigate"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify camera stream is now active
+        type: check
+        command: "docker logs frigate | grep -iE 'camera.*starting|connected|stream' | tail -3"
+    resolution: |
+      Camera stream connection has been reconfigured and Frigate has been restarted. Ensure the camera IP is correct, credentials are accurate, and the RTSP stream path matches your camera model. Common stream paths: /stream1, /streaming/channels/101, /cam/realmonitor?channel=1. Check your camera's documentation for the exact path.
+
+  - id: gpu-acceleration-not-working
+    name: GPU/hardware acceleration (VAAPI, NVDEC, Coral) not detected
+    symptoms:
+      - "GPU acceleration not available"
+      - "Running on CPU only"
+      - "High CPU usage for detection"
+      - "Coral device not found"
+      - "NVIDIA GPU not detected"
+    trigger_conditions:
+      - log_pattern: "acceleration|GPU|coral|nvdec|vaapi.*not found"
+    steps:
+      - id: step-1
+        description: Check what acceleration options are available on host
+        type: check
+        command: "docker exec frigate grep -i 'acceleration\\|gpu\\|vaapi\\|nvidia\\|coral' /proc/version 2>/dev/null || echo 'Running on CPU'"
+      - id: step-2
+        description: Inform about available GPU options
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check for NVIDIA GPU on host
+        type: check
+        command: "command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --list-gpus || echo 'No NVIDIA GPU detected'"
+      - id: step-4
+        description: Check for Intel iGPU/VAAPI support on host
+        type: check
+        command: "ls /dev/dri/renderD* 2>/dev/null || echo 'No DRI/VAAPI devices found'"
+        on_fail: step-5
+      - id: step-5
+        description: Check for Coral TPU device on host
+        type: check
+        command: "lsusb | grep -i 'coral\\|google' || echo 'Coral TPU not found'"
+      - id: step-6
+        description: Inform about GPU device passthrough requirement
+        type: inform
+        command: ""
+      - id: step-7
+        description: Add GPU devices to docker-compose for Frigate
+        type: fix
+        command: "echo 'For NVIDIA: Add to devices:\\n  - /dev/nvidia0:/dev/nvidia0\\n  - /dev/nvidiactl:/dev/nvidiactl\\nFor Intel VAAPI: Add devices:\\n  - /dev/dri:/dev/dri\\nFor Coral USB: Add devices:\\n  - /dev/bus/usb:/dev/bus/usb'"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Configure Frigate to use GPU acceleration
+        type: fix
+        command: "echo 'Add to config.yml detectors section:\\ndetectors:\\n  coral:\\n    type: edgetpu\\n  nvidia:\\n    type: nvidia\\n    device: cuda\\n  intel:\\n    type: openvino\\n    device: AUTO'"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Restart Frigate with GPU acceleration
+        type: fix
+        command: "docker-compose up -d frigate"
+        requires_approval: true
+        on_success: step-10
+      - id: step-10
+        description: Verify GPU acceleration is now active
+        type: check
+        command: "docker logs frigate | grep -iE 'coral|nvidia|vaapi|gpu.*active|acceleration' | tail -3"
+    resolution: |
+      GPU acceleration configuration has been updated. Frigate will now offload object detection to the accelerator, dramatically reducing CPU usage. For Coral TPU (recommended for CPU-constrained systems): provides ~10x speedup. For NVIDIA NVENC: enables hardware video encoding. For Intel VAAPI: moderate acceleration on integrated graphics. Monitor detection performance with docker stats frigate to confirm lower CPU usage.
+
+  - id: persistent-storage-permissions
+    name: Permission denied writing to /media/frigate recordings directory
+    symptoms:
+      - "Permission denied writing to recordings"
+      - "Cannot write to /media/frigate"
+      - "Recordings directory not writable"
+      - "Failed to save recording"
+    trigger_conditions:
+      - log_pattern: "permission denied.*media|cannot write.*recording"
+    steps:
+      - id: step-1
+        description: Check ownership of /media/frigate directory on host
+        type: check
+        command: "stat {media_path} | grep -E 'Uid|Access'"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display directory ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check UID/GID of Frigate process
+        type: check
+        command: "docker inspect frigate -f '{{.Config.User}}' || echo 'default (root)'"
+      - id: step-4
+        description: Change ownership of recordings directory to Frigate user
+        type: fix
+        command: "chown -R 0:0 {media_path} && chmod -R 755 {media_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify directory is now writable
+        type: check
+        command: "test -w {media_path} && echo 'Directory is writable' || echo 'Still not writable'"
+      - id: step-6
+        description: Restart Frigate to test recording
+        type: fix
+        command: "docker restart frigate"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Check if recordings are now being saved
+        type: check
+        command: "docker logs frigate | grep -i 'record\\|saving' | tail -2"
+    resolution: |
+      Recording directory permissions have been fixed. Frigate should now be able to write video recordings. Check that /media/frigate has sufficient disk space (frigate can use multiple GB per camera per day depending on resolution and retention settings).
+
+  - id: high-cpu-detection
+    name: High CPU usage for object detection
+    symptoms:
+      - "CPU usage above 80%"
+      - "Detection running slowly"
+      - "Dropped frames"
+      - "Detection processes consuming all CPU"
+    trigger_conditions:
+      - log_pattern: "dropped.*frame|cpu.*high"
+    steps:
+      - id: step-1
+        description: Check current CPU usage of Frigate
+        type: check
+        command: "docker stats frigate --no-stream | awk '{print $3}'"
+      - id: step-2
+        description: Display CPU usage statistics
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if GPU acceleration is enabled
+        type: check
+        command: "docker logs frigate | grep -i 'coral\\|gpu\\|cuda\\|acceleration' | head -2"
+        on_fail: step-4
+      - id: step-4
+        description: Inform about GPU acceleration benefits
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check detection settings in frigate config
+        type: check
+        command: "docker exec frigate grep -A 10 'detect:' /config/config.yml | head -10"
+      - id: step-6
+        description: Reduce detection resolution or frame rate
+        type: fix
+        command: "echo 'In config.yml, update detect section:\\ndetect:\\n  width: 320\\n  height: 240\\n  fps: 5\\n  enabled: true\\nReduce fps (frames per second) and resolution to lower CPU usage'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Frigate with reduced detection settings
+        type: fix
+        command: "docker restart frigate"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor CPU usage after optimization
+        type: check
+        command: "sleep 10 && docker stats frigate --no-stream"
+    resolution: |
+      Detection settings have been optimized to reduce CPU load. Lower detection resolution and frame rate will reduce accuracy slightly but significantly reduce CPU usage. Alternatively, enable GPU acceleration (Coral, NVIDIA, or Intel) for much better performance. If using Coral TPU, expect CPU usage to drop below 10%.
+
+  - id: object-detection-not-working
+    name: Object detection not triggering or finding objects
+    symptoms:
+      - "No events detected"
+      - "Detection shows 0 objects"
+      - "No person detected despite people in frame"
+      - "Events list empty"
+    trigger_conditions:
+      - log_pattern: "detection.*fail|no.*detect|0.*object"
+    steps:
+      - id: step-1
+        description: Check if detect model is loaded
+        type: check
+        command: "docker logs frigate | grep -iE 'loading.*model|model.*loaded' | tail -2"
+      - id: step-2
+        description: Display detection model status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify object detector is enabled in config
+        type: check
+        command: "docker exec frigate grep -A 5 'detectors:' /config/config.yml"
+        expected_output: "type:"
+        on_fail: step-4
+      - id: step-4
+        description: Check available detectors in Frigate
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify objects to detect are configured
+        type: check
+        command: "docker exec frigate grep -A 3 'objects:' /config/config.yml | grep -E 'person|car|dog'"
+      - id: step-6
+        description: Update config to enable detection with defaults
+        type: fix
+        command: "echo 'In config.yml, ensure detect section exists:\\ndetect:\\n  enabled: true\\nobjects:\\n  track:\\n    - person\\n    - car\\n    - dog'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Frigate with detection enabled
+        type: fix
+        command: "docker restart frigate"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify detection is now running
+        type: check
+        command: "sleep 15 && docker logs frigate | grep -iE 'detecting|object' | tail -3"
+    resolution: |
+      Object detection has been enabled and configured. Frigate will now detect persons, cars, and other configured objects in camera streams. Detection takes a few seconds to warm up after restart. Check the Frigate web interface at port 5000 to see detected objects overlaid on live video.
+
+  - id: mqtt-connectivity-failed
+    name: MQTT integration not connecting
+    symptoms:
+      - "MQTT connection refused"
+      - "Cannot publish to MQTT broker"
+      - "MQTT connection error"
+      - "Unable to connect to broker"
+    trigger_conditions:
+      - log_pattern: "mqtt.*connection|broker.*refused"
+    steps:
+      - id: step-1
+        description: Check MQTT configuration in frigate config
+        type: check
+        command: "docker exec frigate grep -A 5 'mqtt:' /config/config.yml | head -6"
+        expected_output: "mqtt:"
+        on_fail: step-2
+      - id: step-2
+        description: Display MQTT configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test connectivity to MQTT broker from container
+        type: check
+        command: "docker exec frigate nc -zv {mqtt_host} {mqtt_port}"
+        expected_output: "succeeded"
+        on_fail: step-4
+      - id: step-4
+        description: Verify MQTT broker is running and accessible
+        type: inform
+        command: ""
+      - id: step-5
+        description: Update MQTT connection settings in config
+        type: fix
+        command: "echo 'In config.yml, update mqtt section:\\nmqtt:\\n  host: mosquitto\\n  port: 1883\\n  topic_prefix: frigate\\n  user: frigate\\n  password: your_password'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Frigate to reconnect to MQTT
+        type: fix
+        command: "docker restart frigate"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify MQTT connection is established
+        type: check
+        command: "docker logs frigate | grep -i 'mqtt.*connect' | tail -2"
+    resolution: |
+      MQTT configuration has been updated and Frigate has been restarted. Frigate will now publish event notifications and camera status to your MQTT broker, enabling integration with Home Assistant and other automation platforms.
+
+default_config:
+  compose_template: |
+    services:
+      frigate:
+        image: ghcr.io/blakeblackshear/frigate:latest
+        container_name: frigate
+        restart: unless-stopped
+        privileged: true
+        environment:
+          LIBVA_DRIVER_NAME: i965
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${MEDIA_PATH:-./media}:/media/frigate
+          - /etc/localtime:/etc/localtime:ro
+        ports:
+          - "5000:5000"
+          - "8554:8554"
+          - "8555:8555/tcp"
+          - "8555:8555/udp"
+          - "1935:1935"
+        devices:
+          - /dev/dri:/dev/dri
+          - /dev/bus/usb:/dev/bus/usb
+        networks:
+          - default
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for Frigate configuration files
+      default: "./config"
+    - name: MEDIA_PATH
+      description: Host path for recordings and snapshots
+      default: "./media"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /config
+      purpose: config.yml and Frigate database
+      recommended_permissions: "755"
+      owner: "0:0"
+    - container_path: /media/frigate
+      purpose: Video recordings, snapshots, and event clips
+      recommended_permissions: "755"
+      owner: "0:0"
+
+notes: |
+  Frigate is a free, open-source NVR (network video recorder) with real-time object detection powered by YOLO, supporting multiple cameras and hardware acceleration options.
+
+  Requirements: A dedicated GPU or Coral TPU is strongly recommended. Frigate can run on CPU but will consume significant resources. Minimum: 2GB RAM, 2 CPU cores. Recommended: 4GB RAM, 4 CPU cores, GPU acceleration.
+
+  Hardware acceleration options:
+  - Coral TPU (USB or PCIe): Best performance, ~$100-150, ideal for home use
+  - NVIDIA GPU: High-end but more expensive, best for large deployments
+  - Intel Quick Sync / VAAPI: Built-in to many systems, moderate performance
+  - Arm NEON: For ARM-based systems like Raspberry Pi 4
+
+  Cameras: Any RTSP-capable IP camera (Reolink, Amcrest, Hikvision, etc.). Add via config.yml with camera details.
+
+  Storage: Allocate plenty of disk space. Rule of thumb: 100GB per camera per month at 1080p, 24/7 recording.
+
+  Ports:
+  - 5000: Web dashboard and API
+  - 8554: RTSP server (restream camera feeds)
+  - 8555: WebRTC (live view in web UI)
+  - 1935: RTMP server (optional)
+
+  Integration: MQTT publishes events and status. Integrate with Home Assistant for automations based on detected persons, cars, etc.
+
+  Common gotchas:
+  - High CPU on CPU-only: Enable GPU acceleration (Coral TPU recommended).
+  - Stream connection refused: Check camera IP, credentials, and RTSP stream path.
+  - Recordings not saving: Verify /media/frigate directory has sufficient space and write permissions.
+  - Object detection not working: Ensure detect model is loaded and enabled in config.yml.
+  - No snapshots on events: Check object confidence threshold in config; lower it for more detections.

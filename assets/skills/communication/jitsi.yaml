@@ -1,0 +1,333 @@
+id: jitsi-meet
+name: Jitsi Meet Video Conferencing
+version: "1.0"
+container_match:
+  image_patterns:
+    - "jitsi/web"
+    - "jitsi/prosody"
+    - "jitsi/jicofo"
+    - "jitsi/jvb"
+  port_hints: [8000, 5280, 5347]
+category: communication
+description: Self-hosted video conferencing platform with WebRTC, secure rooms, and multi-participant support
+docs_url: https://hub.docker.com/u/jitsi
+
+common_issues:
+  - id: conference-bridge-unavailable
+    name: Conference bridge (JVB) not available or unhealthy
+    symptoms:
+      - "Connection failed"
+      - "JVB unavailable"
+      - "Cannot join video conference"
+      - "500 error on web interface"
+    trigger_conditions:
+      - log_pattern: "JVB.*unavailable"
+      - log_pattern: "bridge.*error"
+      - log_pattern: "connection.*refused"
+    steps:
+      - id: step-1
+        description: Check if JVB container is running
+        type: check
+        command: "docker ps | grep jitsi.*jvb"
+        expected_output: "jvb"
+        on_fail: step-2
+      - id: step-2
+        description: Inform user that JVB container is not running
+        type: inform
+        command: ""
+      - id: step-3
+        description: Restart JVB container to re-establish bridge connection
+        type: fix
+        command: "docker restart {jvb_container_name}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify JVB is listening on XMPP port
+        type: check
+        command: "docker logs {jvb_container_name} | grep -i 'xmpp.*connected' | tail -3"
+    resolution: |
+      The Jitsi Video Bridge (JVB) was restarted to restore connection to the XMPP server (Prosody). JVB handles all WebRTC streams and is essential for video/audio conferencing. If JVB still fails to start, verify that Prosody is running and healthy, and that XMPP credentials in JVB environment variables match those configured in Prosody.
+
+  - id: prosody-xmpp-auth-failed
+    name: XMPP authentication failed in Prosody
+    symptoms:
+      - "Authentication failed"
+      - "Prosody connection refused"
+      - "XMPP error in logs"
+      - "Invalid credentials"
+    trigger_conditions:
+      - log_pattern: "auth.*failed"
+      - log_pattern: "XMPP.*refused"
+      - log_pattern: "prosody.*error"
+    steps:
+      - id: step-1
+        description: Verify Prosody is running
+        type: check
+        command: "docker ps | grep jitsi.*prosody"
+        expected_output: "prosody"
+        on_fail: step-2
+      - id: step-2
+        description: Display Prosody container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check JVB XMPP credentials in environment variables
+        type: check
+        command: "docker inspect {jvb_container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'XMPP_|JVB_AUTH'"
+        expected_output: "JVB_AUTH_"
+      - id: step-4
+        description: Check Prosody XMPP password configuration
+        type: check
+        command: "docker logs {prosody_container_name} | grep -i 'password\\|auth' | tail -5"
+      - id: step-5
+        description: Restart Prosody to reset XMPP state
+        type: fix
+        command: "docker restart {prosody_container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Prosody is ready to accept connections
+        type: check
+        command: "sleep 5 && docker logs {prosody_container_name} | grep -i 'ready\\|started' | tail -3"
+    resolution: |
+      Prosody XMPP server has been restarted to reset authentication state. Jitsi components use XMPP (internal messaging protocol) to coordinate. Ensure all JVB and Jicofo containers have matching JVB_AUTH_PASSWORD and matching domain names. If credentials continue to fail, manually verify {jicofo_container_name}, {jvb_container_name}, and {prosody_container_name} all share the same JVB_AUTH_PASSWORD environment variable.
+
+  - id: room-creation-failed
+    name: Cannot create or join conference room
+    symptoms:
+      - "Room creation failed"
+      - "Unable to join meeting"
+      - "404 room not found"
+      - "Conference initialization error"
+    trigger_conditions:
+      - log_pattern: "room.*failed"
+      - log_pattern: "conference.*error"
+      - log_pattern: "initialization.*error"
+    steps:
+      - id: step-1
+        description: Verify web interface container is running
+        type: check
+        command: "docker ps | grep jitsi.*web"
+        expected_output: "web"
+        on_fail: step-2
+      - id: step-2
+        description: Display Jitsi web container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Jicofo (conference controller) is running
+        type: check
+        command: "docker ps | grep jitsi.*jicofo"
+        expected_output: "jicofo"
+        on_fail: step-4
+      - id: step-4
+        description: Display Jicofo container status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify XMPP domain is correctly set in environment
+        type: check
+        command: "docker inspect {web_container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep XMPP_DOMAIN"
+        expected_output: "XMPP_DOMAIN"
+      - id: step-6
+        description: Restart all Jitsi components to rebuild room state
+        type: fix
+        command: "docker restart {jicofo_container_name} {jvb_container_name} {prosody_container_name} {web_container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify all components are healthy and connected
+        type: check
+        command: "sleep 10 && docker logs {jicofo_container_name} | grep -i 'started\\|ready' | tail -3"
+    resolution: |
+      All Jitsi components have been restarted to rebuild internal state. Rooms are created dynamically by Jicofo (focus controller) when users join. If room creation continues to fail, verify that XMPP_DOMAIN environment variable is set correctly and consistently across all containers, and that all components can reach each other via the Docker internal network.
+
+  - id: permission-denied-config
+    name: Permission denied on /config or /data mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "cannot write to /config"
+      - "failed to create directory"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES.*jitsi"
+    steps:
+      - id: step-1
+        description: Check current ownership of the config directory on host
+        type: check
+        command: "stat {config_path} | grep -E 'Access|Uid'"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display config directory ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check which UID Jitsi containers run as
+        type: check
+        command: "docker inspect {prosody_container_name} --format='{{.Config.User}}'"
+        expected_output: ""
+      - id: step-4
+        description: Ensure config directory is owned by container's running user
+        type: fix
+        command: "chown -R 999:999 {config_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+    resolution: |
+      The /config and /data directory ownership was corrected to match Jitsi container process UID (999). Jitsi components (Prosody, JVB, Jicofo) all run as UID 999 by default. This prevents file write failures on certificate generation, configuration updates, and logging.
+
+default_config:
+  compose_template: |
+    services:
+      prosody:
+        image: jitsi/prosody:latest
+        container_name: jitsi-prosody
+        restart: unless-stopped
+        environment:
+          XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.example.com}
+          XMPP_SERVER: ${XMPP_SERVER:-prosody}
+          JICOFO_COMPONENT_SECRET: ${JICOFO_COMPONENT_SECRET:-jicofo_secret_12345}
+          JVB_AUTH_USER: jvb
+          JVB_AUTH_PASSWORD: ${JVB_AUTH_PASSWORD:-jvb_secret_67890}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${PROSODY_PLUGINS:-./prosody-plugins}:/prosody-plugins-custom
+        healthcheck:
+          test: ["CMD", "prosodyctl", "status"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      jicofo:
+        image: jitsi/jicofo:latest
+        container_name: jitsi-jicofo
+        restart: unless-stopped
+        depends_on:
+          prosody:
+            condition: service_healthy
+        environment:
+          XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.example.com}
+          XMPP_SERVER: prosody
+          JICOFO_COMPONENT_SECRET: ${JICOFO_COMPONENT_SECRET:-jicofo_secret_12345}
+          JICOFO_AUTH_USER: focus
+          JICOFO_AUTH_PASSWORD: ${JICOFO_AUTH_PASSWORD:-focus_secret_abcde}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+
+      jvb:
+        image: jitsi/jvb:latest
+        container_name: jitsi-jvb
+        restart: unless-stopped
+        depends_on:
+          prosody:
+            condition: service_healthy
+        environment:
+          XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.example.com}
+          XMPP_SERVER: prosody
+          JVB_AUTH_USER: jvb
+          JVB_AUTH_PASSWORD: ${JVB_AUTH_PASSWORD:-jvb_secret_67890}
+          PUBLIC_URL: ${PUBLIC_URL:-https://meet.example.com}
+          DOCKER_HOST_ADDRESS: ${DOCKER_HOST_ADDRESS:-127.0.0.1}
+          JVB_TCP_HARVESTER_DISABLED: "true"
+          JVB_ENABLE_APIS: rest
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "10000:10000/udp"
+          - "4443:4443/tcp"
+
+      web:
+        image: jitsi/web:latest
+        container_name: jitsi-web
+        restart: unless-stopped
+        depends_on:
+          - prosody
+          - jicofo
+          - jvb
+        environment:
+          XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.example.com}
+          XMPP_SERVER: prosody
+          PUBLIC_URL: ${PUBLIC_URL:-https://meet.example.com}
+          TZ: ${TZ:-UTC}
+          ENABLE_LETSENCRYPT: "false"
+          LETSENCRYPT_DOMAIN: ${LETSENCRYPT_DOMAIN:-}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${TRANSCRIPTS_PATH:-./transcripts}:/usr/share/jitsi-meet/transcripts
+        ports:
+          - "8000:80/tcp"
+          - "8443:443/tcp"
+
+  required_vars:
+    - name: XMPP_DOMAIN
+      description: XMPP domain name for Jitsi (internal, not public)
+      default: "meet.example.com"
+    - name: PUBLIC_URL
+      description: Public URL where Jitsi web is accessible (used in JVB configuration)
+      default: "https://meet.example.com"
+    - name: JICOFO_COMPONENT_SECRET
+      description: Shared secret between Prosody and Jicofo
+      default: "jicofo_secret_12345"
+    - name: JICOFO_AUTH_PASSWORD
+      description: Jicofo authentication password for Prosody
+      default: "focus_secret_abcde"
+    - name: JVB_AUTH_PASSWORD
+      description: JVB authentication password for Prosody
+      default: "jvb_secret_67890"
+    - name: TZ
+      description: Timezone for logs and timestamps
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (configuration and certs)
+      default: "./config"
+    - name: PROSODY_PLUGINS
+      description: Host path for prosody custom plugins
+      default: "./prosody-plugins"
+    - name: TRANSCRIPTS_PATH
+      description: Host path for meeting transcripts
+      default: "./transcripts"
+
+  known_mounts:
+    - container_path: /config
+      purpose: Jitsi configuration, certificates, and shared settings
+      recommended_permissions: "755"
+      owner: "999:999"
+    - container_path: /prosody-plugins-custom
+      purpose: Custom Prosody XMPP plugins and modules
+      recommended_permissions: "755"
+      owner: "999:999"
+    - container_path: /usr/share/jitsi-meet/transcripts
+      purpose: Meeting recording transcripts and logs
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Jitsi Meet is a free, open-source video conferencing platform. It requires multiple coordinated containers: Prosody (XMPP server), Jicofo (focus/conference controller), JVB (video bridge), and Web (UI).
+
+  XMPP: All Jitsi components communicate internally via XMPP protocol. Prosody acts as the XMPP server; Jicofo and JVB are clients. Authentication is token-based using shared secrets. Ensure JICOFO_COMPONENT_SECRET and JVB_AUTH_PASSWORD are set and consistent.
+
+  Public URL: The PUBLIC_URL environment variable must match the external address where the web interface is accessible. JVB uses this to advertise its address to clients.
+
+  Certificates: For HTTPS, place a valid certificate and key in {CONFIG_PATH}/certs/. Alternatively, enable LETSENCRYPT_DOMAIN for automatic cert generation (requires DNS setup).
+
+  Port mapping: UDP 10000 and TCP 4443 are used by JVB for WebRTC streams. These must be reachable from clients. Web UI runs on port 8000 (HTTP) or 8443 (HTTPS).
+
+  Component restart order: Prosody must start first (it provides XMPP services). Jicofo and JVB depend on Prosody being healthy. Web depends on all three.
+
+  Common gotchas:
+  - Wrong XMPP domain in environment: all components must use the same XMPP_DOMAIN
+  - Mismatched auth passwords: JICOFO_COMPONENT_SECRET and JVB_AUTH_PASSWORD must match what Prosody expects
+  - JVB not reachable: ensure PUBLIC_URL is set correctly and UDP 10000 is accessible from outside
+  - Conferences not persisting: use named volumes or bind mounts for /config to preserve settings across restarts
+  - Certificate errors: if using custom certs, ensure they are in {CONFIG_PATH}/certs/ with correct ownership

@@ -1,0 +1,280 @@
+id: pterodactyl-wings
+name: Pterodactyl Wings Game Server Daemon
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/pterodactyl/wings"
+  port_hints: [8080]
+category: games
+description: Daemon that runs on each node to execute and manage individual game server instances controlled by Pterodactyl Panel
+docs_url: https://docs.pterodactyl.io/wings/
+
+common_issues:
+  - id: docker-socket-permission-denied
+    name: Docker socket permission denied - Wings cannot manage containers
+    symptoms:
+      - "permission denied while trying to connect to Docker daemon"
+      - "Cannot create container"
+      - "Got permission denied"
+      - "Wings cannot manage game servers"
+    trigger_conditions:
+      - log_pattern: "permission denied.*docker"
+      - log_pattern: "Cannot create container"
+    steps:
+      - id: step-1
+        description: Verify Wings container user has Docker access
+        type: check
+        command: "docker inspect {container_name} --format='{{.Config.User}}'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check if docker.sock is mounted in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "docker.sock"
+        on_fail: step-3
+      - id: step-3
+        description: Display current mount configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check docker.sock permissions on host
+        type: check
+        command: "ls -la /var/run/docker.sock"
+        expected_output: "docker"
+        on_fail: step-5
+      - id: step-5
+        description: Add docker group to container user (requires container restart)
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Wings to apply group changes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify Wings can connect to Docker daemon
+        type: check
+        command: "docker logs {container_name} | grep -i 'docker.*connected\\|listening' | tail -3"
+    resolution: |
+      Wings requires access to the Docker daemon socket at /var/run/docker.sock to create and manage game server containers. The daemon has been restarted. Ensure the Wings container runs as a user in the docker group (or uid 0), and that the docker socket is mounted with read-write permissions. If using a rootless Docker setup, ensure the Wings user is in the rootless docker group or has appropriate permissions configured.
+
+  - id: panel-connection-failed
+    name: Wings cannot connect to Panel - authentication or network error
+    symptoms:
+      - "Could not connect to Panel"
+      - "Authentication failed"
+      - "Connection refused"
+      - "Wings unable to authenticate"
+      - "Server creation fails with no error"
+    trigger_conditions:
+      - log_pattern: "could not.*connect.*panel"
+      - log_pattern: "authentication failed"
+    steps:
+      - id: step-1
+        description: Check Panel URL configuration in Wings
+        type: check
+        command: "docker exec {container_name} grep -i 'panel_url' /etc/pterodactyl/config.yml"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display Wings configuration file
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test connectivity from Wings container to Panel
+        type: check
+        command: "docker exec {container_name} curl -k -I https://{panel_url} | head -1"
+        expected_output: "HTTP"
+        on_fail: step-4
+      - id: step-4
+        description: Verify Panel URL is reachable and HTTPS is functional
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check Wings authentication token in configuration
+        type: check
+        command: "docker exec {container_name} grep -A2 'api:' /etc/pterodactyl/config.yml | grep -i token"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display auth configuration status
+        type: inform
+        command: ""
+      - id: step-7
+        description: Regenerate authentication token on Panel and update Wings config
+        type: fix
+        command: "echo 'Update Wings token in /etc/pterodactyl/config.yml via Panel admin, then restart'"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Restart Wings to reconnect with new credentials
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Monitor connection status in logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'connected\\|authenticated' | tail -3"
+    resolution: |
+      Wings must be able to reach the Pterodactyl Panel via HTTPS and authenticate with a valid API token. The Panel URL (typically https://panel.example.com) must be reachable from the Wings host network. The authentication token is generated in Panel Settings and must match the token in Wings /etc/pterodactyl/config.yml. After updating credentials, Wings has been restarted and should establish a secure connection to the Panel.
+
+  - id: server-creation-fails
+    name: Game server creation fails or servers cannot start
+    symptoms:
+      - "Error creating server"
+      - "No container created for server"
+      - "Server starts then immediately stops"
+      - "Insufficient resources"
+      - "Memory allocation failed"
+    trigger_conditions:
+      - log_pattern: "error.*creating.*server"
+      - log_pattern: "insufficient resources"
+    steps:
+      - id: step-1
+        description: Check available disk space on Wings host
+        type: check
+        command: "docker exec {container_name} df -h / | tail -1"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Monitor Wings resource usage during server creation attempt
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-3
+        description: Check Wings logs for specific error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify docker.sock is functional
+        type: check
+        command: "docker exec {container_name} docker ps"
+        expected_output: "CONTAINER"
+        on_fail: step-5
+      - id: step-5
+        description: Display Docker connectivity status
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Wings daemon
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor for successful server creation
+        type: check
+        command: "sleep 15 && docker logs {container_name} | tail -20"
+    resolution: |
+      Game server creation requires sufficient disk space, available container resources, and functional Docker daemon access. Wings has been restarted. Ensure the /data directory (where game server data is stored) has sufficient free space. Check Docker daemon logs for any container creation errors. If the issue persists, verify Docker is running normally and the docker.sock mount is functioning correctly.
+
+  - id: server-data-not-persisted
+    name: Game server data lost after Wing restart
+    symptoms:
+      - "Server content disappeared after restart"
+      - "Server configuration reset"
+      - "/data directory appears empty"
+      - "New servers created each time Wings starts"
+    trigger_conditions:
+      - log_pattern: "Creating.*server"
+      - exit_code: 0
+    steps:
+      - id: step-1
+        description: Verify game server data volume is mounted on Wings
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}' | grep /data"
+        expected_output: "/data"
+        on_fail: step-2
+      - id: step-2
+        description: Display volume mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if data directory exists and has content on host
+        type: check
+        command: "ls -la {data_path}/ | head -20"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display data directory status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Explain persistent volume requirement
+        type: inform
+        command: ""
+    resolution: |
+      Game server data and configurations must be stored in a persistent volume mounted to /data in the Wings container. Without this mount, all server data is lost when the Wings container is removed or recreated. Ensure your docker-compose.yml includes a volume binding for the host data directory (e.g., ./data:/data or a named volume). All running game servers store their data in subdirectories under /data; if this path is not mounted, data is ephemeral.
+
+default_config:
+  compose_template: |
+    services:
+      wings:
+        image: ghcr.io/pterodactyl/wings:latest
+        container_name: pterodactyl-wings
+        restart: unless-stopped
+        environment:
+          PANEL_URL: ${PANEL_URL:-https://panel.example.com}
+          TOKEN: ${WINGS_TOKEN:-}
+          LOG_LEVEL: ${LOG_LEVEL:-info}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+          - /var/run/docker.sock:/var/run/docker.sock
+          - ${CONFIG_PATH:-./config}:/etc/pterodactyl
+        ports:
+          - "8080:8080/tcp"
+        networks:
+          - pterodactyl
+        stdin_open: true
+        tty: true
+
+  required_vars:
+    - name: PANEL_URL
+      description: URL of the Pterodactyl Panel (e.g., https://panel.example.com)
+      default: "https://panel.example.com"
+    - name: WINGS_TOKEN
+      description: Authentication token generated in Panel for this Wings node
+      default: ""
+    - name: LOG_LEVEL
+      description: Logging level (debug, info, warn, error)
+      default: "info"
+    - name: DATA_PATH
+      description: Host path for game server data and container files
+      default: "./data"
+    - name: CONFIG_PATH
+      description: Host path for Wings configuration files
+      default: "./config"
+  known_mounts:
+    - container_path: /data
+      purpose: Game server data, container configurations, and server files
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /etc/pterodactyl
+      purpose: Wings daemon configuration and API authentication
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon access (required for server management)
+      recommended_permissions: "rw"
+      owner: "root:docker"
+
+notes: |
+  Pterodactyl Wings is the daemon that runs on each node in a Pterodactyl cluster. It manages the lifecycle of individual game servers and communicates with the Panel for instructions.
+
+  Docker socket mount: Wings MUST have read-write access to /var/run/docker.sock to create and manage game server containers. This is a privileged operation — ensure the Wings container user has docker group membership or runs as root.
+
+  Network: Wings exposes port 8080 for internal API communication with the Panel. This port should not be directly exposed to the internet.
+
+  Panel authentication: The WINGS_TOKEN is generated in Panel Settings → Nodes → [Node] → Authentication. This token must be set in Wings /etc/pterodactyl/config.yml for the Panel and Wings to communicate.
+
+  Data directory: The /data volume must be on fast storage (SSD preferred) and have sufficient free space for all running game servers. Typical game servers consume 500MB-5GB each depending on type and world size.
+
+  Resource limits: Wings can run hundreds of servers if the host has sufficient CPU, RAM, and disk. Use docker resource limits (mem_limit, cpus) to prevent individual servers from consuming excessive host resources.
+
+  Panel connectivity: Ensure firewall rules allow Wings to reach the Panel via HTTPS (typically port 443) on the Panel hostname.
+
+  Multi-node: A Pterodactyl installation can have multiple Wings nodes, each running on different hosts, all managed from a single Panel instance.

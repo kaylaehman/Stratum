@@ -1,0 +1,299 @@
+id: mattermost
+name: Mattermost Team Communication
+version: "1.0"
+container_match:
+  image_patterns:
+    - "mattermost/mattermost-team-edition"
+    - "mattermost/mattermost-enterprise-edition"
+  port_hints: [8065]
+category: communication
+description: Self-hosted team chat platform with messaging, file sharing, and integrations
+docs_url: https://hub.docker.com/r/mattermost/mattermost-team-edition
+
+common_issues:
+  - id: postgres-connection-failed
+    name: Database connection failed or not configured
+    symptoms:
+      - "Connection refused to database"
+      - "unknown host"
+      - "FATAL: database does not exist"
+      - "error connecting to postgres"
+      - "startup failed"
+    trigger_conditions:
+      - log_pattern: "database.*refused"
+      - log_pattern: "postgres.*failed"
+      - log_pattern: "DB_CONNECTION_ERROR"
+    steps:
+      - id: step-1
+        description: Check if Mattermost is attempting to use Postgres
+        type: check
+        command: "docker exec {container_name} grep -E 'MM_SQLSETTINGS_DRIVERNAME|DB_CONNECTION_STRING' /mattermost/config/config.json | head -5"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display current database driver and connection settings
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify Postgres container is running and accessible
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-4
+      - id: step-4
+        description: Inform user that Postgres container is not running
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check MM_SQLSETTINGS_DATASOURCE environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MM_SQLSETTINGS_DATASOURCE"
+        expected_output: "postgres"
+        on_fail: step-6
+      - id: step-6
+        description: Display datasource connection string (if set)
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart Mattermost to retry database connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor logs for successful database connection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'database.*connected\\|ready to serve' | tail -3"
+    resolution: |
+      Mattermost requires a PostgreSQL database backend (SQLite is not recommended for production use). The container has been restarted to attempt reconnection. Ensure that MM_SQLSETTINGS_DATASOURCE is set to a valid Postgres connection string (format: postgres://user:password@host:5432/mattermost) and that the Postgres service is running and accepting connections.
+
+  - id: permission-denied-data
+    name: Permission denied on /mattermost/data mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "cannot write to /mattermost/data"
+      - "failed to create directory"
+    trigger_conditions:
+      - log_pattern: "permission denied.*data"
+      - log_pattern: "EACCES.*mattermost"
+    steps:
+      - id: step-1
+        description: Check current ownership of the data directory on host
+        type: check
+        command: "stat {data_path} | grep -E 'Access|Uid'"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display data directory ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check which UID Mattermost container runs as
+        type: check
+        command: "docker inspect {container_name} --format='{{.Config.User}}'"
+        expected_output: ""
+      - id: step-4
+        description: Ensure data directory is owned by the container's running user
+        type: fix
+        command: "chown -R {puid}:{pgid} {data_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership changed successfully
+        type: check
+        command: "stat {data_path} | grep Uid"
+    resolution: |
+      The /mattermost/data directory ownership was mismatched with the container's running user. This prevents Mattermost from writing user uploads and files. The fix changed ownership to match the container process. Mattermost should now be able to write to /data.
+
+  - id: config-not-mounted
+    name: Configuration not persisted or not found
+    symptoms:
+      - "config.json not found"
+      - "Settings reset after restart"
+      - "Unable to configure server"
+      - "using default configuration"
+    trigger_conditions:
+      - log_pattern: "config.*not found"
+      - log_pattern: "default.*configuration"
+    steps:
+      - id: step-1
+        description: Verify /mattermost/config is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep config"
+        expected_output: "/config"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if config.json exists on host
+        type: check
+        command: "ls -la {config_path}/config.json"
+        expected_output: "config.json"
+        on_fail: step-4
+      - id: step-4
+        description: Inform user that config.json is missing and must be created
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Mattermost to generate default config.json
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify config.json was created
+        type: check
+        command: "sleep 3 && ls -la {config_path}/config.json"
+    resolution: |
+      Mattermost configuration must be persisted in /mattermost/config which should be mounted as a volume on the host. The container has been restarted and will generate a default config.json if it was missing. Ensure the /mattermost/config volume is properly mounted and writable before configuring server settings.
+
+  - id: initial-setup-stuck
+    name: Initial setup wizard not progressing or accessible
+    symptoms:
+      - "Setup page not loading"
+      - "Stuck at admin account creation"
+      - "Cannot proceed past first setup screen"
+      - "Setup page returns blank or error"
+    trigger_conditions:
+      - log_pattern: "setup.*failed"
+      - log_pattern: "admin.*creation.*error"
+    steps:
+      - id: step-1
+        description: Verify Mattermost container is fully started
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:8065/api/v4/system/status | grep -o 'status.*true'"
+        expected_output: "true"
+        on_fail: step-2
+      - id: step-2
+        description: Wait for Mattermost startup and check status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check logs for database initialization errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'database.*init\\|migration\\|error' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify database connection is stable
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:8065/api/v4/system/database/connection | grep -o '\"status\":\"healthy\"'"
+        expected_output: "healthy"
+        on_fail: step-5
+      - id: step-5
+        description: Check MM_SQLSETTINGS_DATASOURCE configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MM_SQLSETTINGS_DATASOURCE"
+        expected_output: "postgres"
+      - id: step-6
+        description: Clear Mattermost cache and restart
+        type: fix
+        command: "docker exec {container_name} rm -rf /tmp/mattermost_cache_* && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor setup progress in logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'ready.*serve\\|listening' | tail -3"
+    resolution: |
+      Mattermost's initial setup requires a properly configured database backend and full container startup. The cache has been cleared and the container restarted to ensure a clean setup attempt. Allow 30-60 seconds for full startup, then access the setup wizard at http://{host}:8065. If setup still fails, verify database connectivity and check logs for specific migration errors.
+
+default_config:
+  compose_template: |
+    services:
+      postgres:
+        image: postgres:15-alpine
+        container_name: mattermost-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: mmuser
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_password}
+          POSTGRES_DB: mattermost
+        volumes:
+          - ${DB_PATH:-./postgres}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U mmuser -d mattermost"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      mattermost:
+        image: mattermost/mattermost-team-edition:latest
+        container_name: mattermost
+        restart: unless-stopped
+        depends_on:
+          postgres:
+            condition: service_healthy
+        environment:
+          MM_SQLSETTINGS_DRIVERNAME: postgres
+          MM_SQLSETTINGS_DATASOURCE: postgres://mmuser:${DB_PASSWORD:-secure_password}@postgres:5432/mattermost?sslmode=disable
+          MM_SERVICESETTINGS_SITEURL: ${SITE_URL:-http://localhost:8065}
+          MM_TEAMSETTINGS_SITENAME: ${SITE_NAME:-Mattermost}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/mattermost/config
+          - ${DATA_PATH:-./data}:/mattermost/data
+          - ${PLUGINS_PATH:-./plugins}:/mattermost/plugins
+        ports:
+          - "8065:8065/tcp"
+  required_vars:
+    - name: DB_PASSWORD
+      description: PostgreSQL password for mmuser
+      default: "secure_password"
+    - name: SITE_URL
+      description: External URL where Mattermost is accessible
+      default: "http://localhost:8065"
+    - name: SITE_NAME
+      description: Name of the Mattermost instance
+      default: "Mattermost"
+    - name: TZ
+      description: Timezone for logs and timestamps
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /mattermost/config
+      default: "./config"
+    - name: DATA_PATH
+      description: Host path for /mattermost/data (user uploads)
+      default: "./data"
+    - name: PLUGINS_PATH
+      description: Host path for /mattermost/plugins
+      default: "./plugins"
+    - name: DB_PATH
+      description: Host path for PostgreSQL database files
+      default: "./postgres"
+  known_mounts:
+    - container_path: /mattermost/config
+      purpose: Mattermost configuration and environment settings
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /mattermost/data
+      purpose: User uploads, files, and attachments
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /mattermost/plugins
+      purpose: Plugin binaries and configurations
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Mattermost is a self-hosted team collaboration platform similar to Slack. It requires PostgreSQL (version 12+) for reliable production use. SQLite is included but only suitable for single-user testing.
+
+  Database: Always use PostgreSQL with Mattermost. Use MM_SQLSETTINGS_DATASOURCE to specify the connection string. The example includes a Postgres container; adjust connection details to match your setup.
+
+  Configuration: Mattermost config is stored in /mattermost/config/config.json. Most settings can be changed via the web UI admin panel, but some require direct config file edits. Restart the container after editing config.json.
+
+  SITE_URL: Must be set to the externally accessible URL (http or https). This affects email links, SSO, and file access.
+
+  File mounts: /mattermost/data stores user uploads. Ensure adequate disk space and proper ownership (Mattermost runs as root by default). /mattermost/plugins stores installed integrations.
+
+  Common gotchas:
+  - Database not ready: PostgreSQL must be running and initialized before Mattermost starts. Use depends_on with healthcheck.
+  - Config not persisting: /mattermost/config must be mounted as a volume on the host.
+  - Permission denied on /data: Ensure /mattermost/data is writable by the container (usually root:root with 755).
+  - Initial setup timeout: Large database migrations on first run can take 1-2 minutes. Allow sufficient startup time.
+  - Email not working: Requires SMTP configuration in admin panel Settings → Email.

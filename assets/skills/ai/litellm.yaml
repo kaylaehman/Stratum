@@ -1,0 +1,261 @@
+id: litellm
+name: LiteLLM Multi-Provider Proxy
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/berriai/litellm"
+  port_hints: [4000]
+category: ai
+description: LLM gateway that proxies requests to multiple providers (OpenAI, Anthropic, Azure, local models)
+docs_url: https://hub.docker.com/r/berriai/litellm
+
+common_issues:
+  - id: master-key-missing
+    name: MASTER_KEY not configured or invalid
+    symptoms:
+      - "Unauthorized: invalid MASTER_KEY"
+      - "Missing MASTER_KEY"
+      - "Cannot authenticate requests"
+      - "401 Unauthorized on all API calls"
+    trigger_conditions:
+      - log_pattern: "MASTER_KEY.*missing"
+      - log_pattern: "Unauthorized.*MASTER_KEY"
+    steps:
+      - id: step-1
+        description: Check if MASTER_KEY is set in environment
+        type: check
+        command: "docker exec {container_name} env | grep MASTER_KEY"
+        expected_output: "MASTER_KEY="
+        on_fail: step-2
+      - id: step-2
+        description: Display authentication status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set MASTER_KEY to a secure value
+        type: fix
+        command: "echo 'Set MASTER_KEY env var to a secure random string (32+ chars) and restart'"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Restart LiteLLM with MASTER_KEY configured
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify API is accepting requests
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'listening\\|started'"
+    resolution: |
+      LiteLLM requires a MASTER_KEY environment variable for request authentication. All API requests must include this key in the Authorization header (Bearer {MASTER_KEY}). Generate a secure random string and set it via environment variables, then restart the container. Keep the MASTER_KEY secret and never commit it to version control.
+
+  - id: config-file-not-found
+    name: Config file not mounted or found
+    symptoms:
+      - "Config file not found"
+      - "litellm_config.yaml: No such file"
+      - "Configuration not loaded"
+      - "Models list is empty"
+    trigger_conditions:
+      - log_pattern: "config.*not found"
+      - log_pattern: "litellm_config.*error"
+    steps:
+      - id: step-1
+        description: Verify config file is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep config"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check if config file exists on host
+        type: check
+        command: "ls -la {config_path}"
+        expected_output: ""
+      - id: step-3
+        description: Display mount configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify config file path in docker-compose
+        type: check
+        command: "docker exec {container_name} cat /app/litellm_config.yaml | head -20"
+        expected_output: ""
+      - id: step-5
+        description: Restart container after verifying mount
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify config was loaded
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'config.*loaded\\|models.*registered'"
+    resolution: |
+      The LiteLLM configuration file (litellm_config.yaml) must be mounted into the container. Ensure your docker-compose.yml includes a volume mount like `./litellm_config.yaml:/app/litellm_config.yaml`. Create a config file with your model definitions and API keys, then restart the container. See LiteLLM documentation for config format.
+
+  - id: provider-api-key-rejected
+    name: Provider API key invalid or rejected
+    symptoms:
+      - "Invalid API key"
+      - "Authentication failed"
+      - "Unauthorized at provider"
+      - "API key expired"
+      - "429 Too Many Requests"
+    trigger_conditions:
+      - log_pattern: "API key.*invalid"
+      - log_pattern: "authentication.*failed"
+      - log_pattern: "429.*rate limit"
+    steps:
+      - id: step-1
+        description: Check provider configuration in config file
+        type: check
+        command: "docker exec {container_name} cat /app/litellm_config.yaml | grep -A 10 'provider'"
+        expected_output: ""
+      - id: step-2
+        description: Verify API key is correctly set
+        type: check
+        command: "echo 'Check provider API key is valid and not expired'"
+        expected_output: ""
+      - id: step-3
+        description: Display API authentication errors
+        type: inform
+        command: ""
+      - id: step-4
+        description: Inform user to update API key
+        type: inform
+        command: ""
+      - id: step-5
+        description: Update config with valid API key
+        type: fix
+        command: "echo 'Update litellm_config.yaml with valid provider API key and redeploy'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart with updated credentials
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Test provider connectivity
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'provider.*connected\\|ready'"
+    resolution: |
+      The API key for your LLM provider (OpenAI, Anthropic, Azure, etc.) is invalid, expired, or rate-limited. Update your litellm_config.yaml with a valid API key, ensure the key has the correct permissions, and verify you haven't exceeded the provider's rate limits. Some providers may require re-authentication after deployment. Restart the container after updating credentials.
+
+  - id: port-binding-failed
+    name: Port 4000 binding failed or conflict
+    symptoms:
+      - "Address already in use"
+      - "bind: address already in use"
+      - "EADDRINUSE"
+      - "Cannot start service on port 4000"
+    trigger_conditions:
+      - log_pattern: "EADDRINUSE"
+      - log_pattern: "already in use"
+    steps:
+      - id: step-1
+        description: Check what service is using port 4000
+        type: check
+        command: "ss -tlnp | grep 4000"
+        expected_output: ""
+      - id: step-2
+        description: Display port conflict details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify LiteLLM port binding configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{range .NetworkSettings.Ports}}{{.}}{{end}}'"
+        expected_output: ""
+      - id: step-4
+        description: Stop conflicting service or reassign port
+        type: inform
+        command: ""
+    resolution: |
+      Port 4000 is already in use by another service. Options: (1) Stop the conflicting service, (2) Change the port mapping in docker-compose.yml (e.g., 4001:4000), or (3) Check if another LiteLLM container is running. Update the port mapping and restart the container.
+
+  - id: memory-limit-exceeded
+    name: Container running out of memory
+    symptoms:
+      - "OOMKilled"
+      - "Out of memory"
+      - "Container exits without error"
+      - "Memory usage constantly 100%"
+    trigger_conditions:
+      - log_pattern: "OOMKilled"
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Identify high-memory processes
+        type: check
+        command: "docker exec {container_name} ps aux --sort=-%mem | head -5"
+        expected_output: ""
+      - id: step-3
+        description: Display memory constraints
+        type: inform
+        command: ""
+      - id: step-4
+        description: Increase container memory limit
+        type: fix
+        command: "echo 'Increase deploy.resources.limits.memory to 1GB or higher in docker-compose'"
+        requires_approval: true
+    resolution: |
+      LiteLLM is running out of allocated memory. Increase the container memory limit via deploy.resources.limits.memory in docker-compose.yml to at least 1GB, or 2GB if handling many concurrent requests. Large model caching or high request concurrency can increase memory usage. After updating limits, restart the container.
+
+default_config:
+  compose_template: |
+    services:
+      litellm:
+        image: ghcr.io/berriai/litellm:latest
+        container_name: litellm
+        restart: unless-stopped
+        environment:
+          MASTER_KEY: ${MASTER_KEY:-changeme-set-secure-key}
+          LOG_LEVEL: info
+          PORT: 4000
+        volumes:
+          - ${CONFIG_PATH:-./litellm_config.yaml}:/app/litellm_config.yaml:ro
+        ports:
+          - "4000:4000/tcp"
+  required_vars:
+    - name: MASTER_KEY
+      description: Authentication key for LiteLLM API (include in Authorization Bearer header)
+      default: "changeme-set-secure-key"
+    - name: CONFIG_PATH
+      description: Host path to litellm_config.yaml file with model and provider configuration
+      default: "./litellm_config.yaml"
+  known_mounts:
+    - container_path: /app/litellm_config.yaml
+      purpose: LiteLLM configuration defining models, providers, API keys, and routing rules
+      recommended_permissions: "644"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  LiteLLM is a gateway that provides a unified interface to multiple LLM providers including OpenAI, Anthropic, Azure, Cohere, Replicate, local models via Ollama, and many others.
+
+  Configuration: LiteLLM requires a litellm_config.yaml file mounted at /app/litellm_config.yaml. This file defines all models, their providers, API keys, fallback behavior, and request routing rules.
+
+  MASTER_KEY: All requests to the LiteLLM API must include the MASTER_KEY in the Authorization header as a Bearer token. Generate a secure random value and keep it secret.
+
+  API format: Requests to LiteLLM use the OpenAI-compatible API format, making it easy to drop in as a replacement for OpenAI clients. Endpoint: http://localhost:4000/v1/chat/completions
+
+  Provider configuration: Store provider API keys either in environment variables or directly in litellm_config.yaml. For production, prefer environment variables to keep secrets out of version control.
+
+  Request routing: Use litellm_config.yaml to define fallback models, load balancing across providers, or cost optimization rules.
+
+  Common gotchas:
+  - MASTER_KEY not set: All requests will be rejected with 401.
+  - Config file not mounted: LiteLLM won't load models; ensure volume mount is correct.
+  - Invalid API keys: Requests will fail at the provider; keep API keys current and valid.
+  - Rate limiting: Providers enforce rate limits; LiteLLM will return 429 if exceeded.
+  - Memory usage: High concurrency can increase memory; allocate 1-2GB for production use.

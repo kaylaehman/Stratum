@@ -1,0 +1,110 @@
+id: watchtower
+name: Watchtower
+version: "1.0"
+container_match:
+  image_patterns:
+    - "containrrr/watchtower"
+  port_hints: []
+category: automation
+description: Auto-updates running Docker containers when their images change in the registry
+docs_url: https://containrrr.dev/watchtower/
+
+common_issues:
+  - id: docker-socket-not-mounted
+    name: Watchtower cannot reach the Docker daemon
+    symptoms:
+      - "Cannot connect to the Docker daemon"
+      - "permission denied while trying to connect"
+      - "/var/run/docker.sock: no such file"
+    trigger_conditions:
+      - log_pattern: "docker.sock"
+    steps:
+      - id: step-1
+        description: Verify the docker socket mount
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep docker.sock"
+        expected_output: "/var/run/docker.sock"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about the socket mount requirement
+        type: inform
+        command: ""
+    resolution: |
+      Watchtower controls Docker via the daemon socket. Mount it into the
+      container at `/var/run/docker.sock:/var/run/docker.sock` (ideally
+      read-only, but writes are required to recreate updated containers).
+
+  - id: containers-not-being-updated
+    name: Containers are not being updated despite new images
+    symptoms:
+      - "No updates applied"
+      - "Watchtower running but containers stale"
+      - "Image digest unchanged in logs"
+    trigger_conditions:
+      - log_pattern: "no updates"
+    steps:
+      - id: step-1
+        description: Surface Watchtower's recent update activity
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'updated|no updates|scanning' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Inform about label-based and selector behavior
+        type: inform
+        command: ""
+    resolution: |
+      In default mode Watchtower only updates containers with the
+      `com.centurylinklabs.watchtower.enable=true` label, OR (if started
+      with --label-enable=false) updates ALL containers. Check that the
+      containers you expect to update either carry the enable label or that
+      Watchtower is configured for all-containers mode. Also verify the
+      registry is returning a new digest (Watchtower compares digests, not
+      tags).
+
+default_config:
+  compose_template: |
+    services:
+      watchtower:
+        image: containrrr/watchtower:latest
+        container_name: watchtower
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+          WATCHTOWER_CLEANUP: "true"
+          WATCHTOWER_POLL_INTERVAL: "${POLL_INTERVAL:-3600}"
+          WATCHTOWER_LABEL_ENABLE: "true"
+          WATCHTOWER_NOTIFICATIONS: "${NOTIFICATIONS:-}"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+  required_vars:
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: POLL_INTERVAL
+      description: Seconds between update checks
+      default: "3600"
+    - name: NOTIFICATIONS
+      description: Comma-separated notifier list (e.g. slack,email,gotify)
+      default: ""
+  known_mounts:
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket — required to inspect and recreate containers
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Watchtower needs write access to the Docker socket to recreate containers
+  with updated images — purely read-only socket mounts will not work for the
+  update step itself, even though the inspect step works fine.
+
+  Label-based opt-in (the compose default above) is safer for homelabs than
+  all-containers mode, since arbitrary recreate-on-update can break tightly
+  coupled stacks. Add `com.centurylinklabs.watchtower.enable=true` as a
+  label on containers you want updated.
+
+  Notification providers: configure via WATCHTOWER_NOTIFICATION_* env vars.
+  See containrrr.dev/watchtower/notifications for the per-provider variable
+  list (Slack, Discord, Gotify, email, MS Teams).

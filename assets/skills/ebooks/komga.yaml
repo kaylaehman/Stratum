@@ -1,0 +1,246 @@
+id: komga
+name: Komga Comics and Manga Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "gotson/komga"
+  port_hints: [25600]
+category: ebooks
+description: Lightweight server for reading and managing comics and manga collections
+
+docs_url: https://hub.docker.com/r/gotson/komga
+
+common_issues:
+  - id: library-not-scanning
+    name: Library not scanning or books not appearing
+    symptoms:
+      - "No comics or manga appear in library"
+      - "Library shows 0 items"
+      - "Scan completes but finds no files"
+      - "New files added but not detected"
+    trigger_conditions:
+      - log_pattern: "scan"
+      - log_pattern: "0 items"
+      - log_pattern: "library"
+    steps:
+      - id: step-1
+        description: Verify library path is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}'"
+        expected_output: "/comics"
+        on_fail: step-2
+      - id: step-2
+        description: Check if files exist in the library directory
+        type: check
+        command: "ls -la {library_path} | head -20"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display library directory contents
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify library contains supported comic formats (cbz, cbr, zip, rar)
+        type: check
+        command: "find {library_path} -type f \\( -name '*.cbz' -o -name '*.cbr' -o -name '*.zip' -o -name '*.rar' \\) | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Trigger manual library scan in Komga
+        type: fix
+        command: "docker exec {container_name} curl -X POST 'http://localhost:25600/api/v1/libraries/scan'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check scan status in logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      Komga library scan has been triggered. The server will now index all comic and manga files in your library. Ensure your library directory contains supported formats (CBZ, CBR, ZIP, RAR). Depending on library size, initial scan may take several minutes. If files still don't appear, verify the library path is correct and readable.
+
+  - id: permission-denied-library
+    name: Permission denied when accessing library files
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot read comic files"
+      - "Access denied errors in logs"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of library directory
+        type: check
+        command: "stat {library_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check container's running UID
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: ""
+      - id: step-4
+        description: Make library readable by all users (temporary fix)
+        type: fix
+        command: "chmod -R o+rx {library_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify permissions were updated
+        type: check
+        command: "stat {library_path}"
+    resolution: |
+      Library directory permissions have been updated to allow Komga to read comic files. For better security, consider creating a dedicated user for Komga and chowning the library to that user. Komga runs as a specific UID; ensure the library is readable by that user or all users on the system.
+
+  - id: web-ui-slow
+    name: Web interface is slow or unresponsive
+    symptoms:
+      - "Pages take long time to load"
+      - "Scrolling through library is laggy"
+      - "UI becomes unresponsive after browsing"
+      - "High CPU usage in container"
+    trigger_conditions:
+      - log_pattern: "slow"
+      - log_pattern: "memory"
+    steps:
+      - id: step-1
+        description: Check CPU and memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Check Komga logs for errors or warnings
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|warning' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Display Komga performance status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Clear Komga cache and temporary files
+        type: fix
+        command: "docker exec {container_name} rm -rf {config_path}/cache/*"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor performance after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      Komga cache has been cleared and the container restarted. Performance should improve, especially for large libraries. Komga uses in-memory caching to speed up browsing. If slowness persists, consider the size of your library and available system RAM. Very large collections may require more resources.
+
+  - id: image-extraction-failed
+    name: Cannot extract or display comic pages
+    symptoms:
+      - "Pages not showing in reader"
+      - "Blank pages or broken images"
+      - "Extraction failed error"
+      - "Cannot open comics in web reader"
+    trigger_conditions:
+      - log_pattern: "extract"
+      - log_pattern: "image"
+      - log_pattern: "failed"
+    steps:
+      - id: step-1
+        description: Verify comic file is valid and not corrupted
+        type: check
+        command: "file {library_path}/*.cbz | head -3"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check if unrar/7z tools are available for CBR files
+        type: check
+        command: "docker exec {container_name} which unrar 7z"
+        expected_output: ""
+      - id: step-3
+        description: Display image extraction tool status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test extraction of a sample comic file
+        type: check
+        command: "docker exec {container_name} unzip -t {library_path}/sample.cbz 2>&1 | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Clear image cache in Komga
+        type: fix
+        command: "docker exec {container_name} rm -rf {config_path}/cache/covers/*"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart and re-scan to rebuild cache
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Image extraction cache has been cleared. Komga will rebuild page thumbnails on next access. If specific comics still fail, the files may be corrupted or use an unsupported format. Ensure CBZ files use standard ZIP compression and CBR files are valid RAR archives. Test corrupted files with desktop extraction tools to verify integrity.
+
+default_config:
+  compose_template: |
+    services:
+      komga:
+        image: gotson/komga:latest
+        container_name: komga
+        restart: unless-stopped
+        environment:
+          SERVER_SERVLET_CONTEXT_PATH: /
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${LIBRARY_PATH:-./comics}:/comics:ro
+        ports:
+          - "25600:25600/tcp"
+  required_vars:
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (Komga database and cache)
+      default: "./config"
+    - name: LIBRARY_PATH
+      description: Host path for /comics (comic and manga library, read-only)
+      default: "./comics"
+  known_mounts:
+    - container_path: /config
+      purpose: Komga database, user settings, and metadata cache
+      recommended_permissions: "755"
+      owner: "1000:1000"
+    - container_path: /comics
+      purpose: Comic and manga library (read-only access from Komga)
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Komga is a lightweight, free server for reading and managing comics and manga. Unlike desktop readers, it provides web-based access with progress tracking and user management.
+
+  Supported formats: CBZ (ZIP-based), CBR (RAR-based), ZIP, RAR, 7Z archives containing images.
+
+  Library location: Should contain comic archives in supported formats. Use read-only mount for safety.
+
+  User management: Create users in Komga to track reading progress per user and control library access.
+
+  Performance: Komga is Java-based and maintains in-memory caches. Ensure adequate RAM (512MB minimum, 1GB+ for large libraries).
+
+  Reading progress: Komga tracks which users have read which series and pages, providing personalized reading experience.
+
+  Series detection: Organizes comics into series based on filename patterns. Proper naming (e.g., "Series Name Vol 1" format) improves organization.
+
+  Common gotchas:
+  - Library not scanning: Verify library path contains supported comic formats.
+  - Permission denied: Ensure library is readable by the Komga container user.
+  - Slow performance: Check available RAM and cache size; restart to clear memory.
+  - Extraction failed: Verify comic files are valid archives; test with desktop extraction tools.

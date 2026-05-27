@@ -1,0 +1,233 @@
+id: n8n
+name: n8n Workflow Automation
+version: "1.0"
+container_match:
+  image_patterns:
+    - "n8nio/n8n"
+  port_hints: [5678]
+category: automation
+description: Open-source workflow automation platform for connecting apps and services
+docs_url: https://hub.docker.com/r/n8nio/n8n
+
+common_issues:
+  - id: basic-auth-not-working
+    name: Basic authentication not working or bypassed
+    symptoms:
+      - "Cannot log in with credentials"
+      - "Basic auth disabled or warning in UI"
+      - "Login page shows 'Authentication disabled'"
+      - "Anyone can access n8n without password"
+    trigger_conditions:
+      - log_pattern: "authentication.*disabled"
+      - log_pattern: "basic auth.*not enabled"
+    steps:
+      - id: step-1
+        description: Check if N8N_BASIC_AUTH is configured
+        type: check
+        command: "docker exec {container_name} env | grep N8N_BASIC_AUTH"
+        expected_output: "N8N_BASIC_AUTH=true"
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables related to authentication
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set N8N_BASIC_AUTH_ACTIVE to true in container configuration
+        type: fix
+        command: "echo 'N8N_BASIC_AUTH=true' >> {config_path}/.env"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Restart n8n to apply authentication settings
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify basic auth is now enabled
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth' | tail -5"
+    resolution: |
+      n8n requires N8N_BASIC_AUTH environment variable to be set to true for authentication to be active. Without this setting, the UI is accessible without credentials, which is a security risk. The environment variable has been configured and the container restarted. Basic authentication should now be required for login.
+
+  - id: webhook-url-unreachable
+    name: Webhook endpoint not accessible or returning 404
+    symptoms:
+      - "Webhook calls return 404 Not Found"
+      - "External services cannot trigger workflows"
+      - "Webhook URL appears to be incorrect"
+      - "Logs show 'webhook.*not found'"
+    trigger_conditions:
+      - log_pattern: "webhook.*404"
+      - log_pattern: "webhook.*not found"
+    steps:
+      - id: step-1
+        description: Verify n8n is listening on expected port 5678
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 5678"
+        expected_output: "LISTEN.*5678"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 5678 is properly exposed
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 '5678'"
+        expected_output: "5678"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping information
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check webhook base URL configuration in n8n
+        type: check
+        command: "docker exec {container_name} env | grep N8N_WEBHOOK"
+        expected_output: "N8N_WEBHOOK"
+      - id: step-5
+        description: Verify webhook URL is correctly configured and accessible
+        type: check
+        command: "curl -s -o /dev/null -w '%{http_code}' http://{container_name}:5678/webhook-test"
+        expected_output: "200"
+        on_fail: step-6
+      - id: step-6
+        description: Check n8n logs for webhook configuration errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'webhook\\|url' | tail -5"
+    resolution: |
+      The webhook endpoint may not be accessible due to incorrect port exposure, missing N8N_WEBHOOK_URL configuration, or firewall rules. Verify that port 5678 is exposed to the network from which external webhooks originate. If using a reverse proxy, ensure it correctly forwards webhook requests. The webhook URL configured in n8n (Settings > Webhooks) must match the external access URL.
+
+  - id: data-directory-permission-denied
+    name: Permission denied on /home/node/.n8n mount
+    symptoms:
+      - "Permission denied when accessing /home/node/.n8n"
+      - "Cannot write workflows or database files"
+      - "EACCES errors in logs"
+      - "n8n crashes on startup due to database lock"
+    trigger_conditions:
+      - log_pattern: "permission denied.*\\.n8n"
+      - log_pattern: "EACCES.*database"
+    steps:
+      - id: step-1
+        description: Check current ownership of the .n8n directory on host
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display detailed ownership and permission information
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively fix ownership of .n8n directory to container user
+        type: fix
+        command: "chown -R 1000:1000 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Fix directory permissions to allow read/write
+        type: fix
+        command: "chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership and permissions are now correct
+        type: check
+        command: "stat {config_path} | grep -E 'Uid|Access'"
+        expected_output: "Uid:"
+    resolution: |
+      The /home/node/.n8n directory ownership or permissions were mismatched with the n8n container's running user (UID 1000). This prevented the container from reading/writing workflow definitions, credentials, and database files. Ownership has been corrected and permissions set appropriately. n8n should now be able to persist data properly.
+
+  - id: volume-mount-missing
+    name: Workflows and settings lost after container restart
+    symptoms:
+      - "Workflows disappear after restart"
+      - "No persistent /home/node/.n8n volume mounted"
+      - "Each restart starts with empty workflow list"
+      - "Credentials not saved between restarts"
+    trigger_conditions:
+      - log_pattern: "database.*not found"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if /home/node/.n8n volume is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{.Type}} {{end}}'"
+        expected_output: "/home/node/.n8n"
+        on_fail: step-2
+      - id: step-2
+        description: Display all mounted volumes for this container
+        type: inform
+        command: ""
+      - id: step-3
+        description: Stop the container to prepare for volume remount
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Remove the container (keep the image)
+        type: fix
+        command: "docker rm {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Display instructions for recreating with persistent volume
+        type: inform
+        command: ""
+    resolution: |
+      n8n requires a persistent volume or bind mount at /home/node/.n8n to save workflows, credentials, and settings. Without a mounted volume, all data is lost when the container stops. Recreate the container with a proper volume mount: use docker-compose with `volumes: - {path}:/home/node/.n8n` or add the volume before running n8n again.
+
+default_config:
+  compose_template: |
+    services:
+      n8n:
+        image: n8nio/n8n:latest
+        container_name: n8n
+        restart: unless-stopped
+        environment:
+          N8N_BASIC_AUTH: "true"
+          N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+          N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-changeme}
+          TZ: ${TZ:-UTC}
+          NODE_ENV: production
+        volumes:
+          - ${DATA_PATH:-./n8n_data}:/home/node/.n8n
+        ports:
+          - "5678:5678/tcp"
+  required_vars:
+    - name: N8N_USER
+      description: Basic auth username
+      default: "admin"
+    - name: N8N_PASSWORD
+      description: Basic auth password (change from default)
+      default: "changeme"
+    - name: DATA_PATH
+      description: Host path for persistent /home/node/.n8n volume
+      default: "./n8n_data"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /home/node/.n8n
+      purpose: n8n workflows, credentials, database, and configuration
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  n8n is an extensible workflow automation platform with a powerful visual builder. The container runs as UID 1000 (node user) by default.
+
+  Critical configuration:
+  - N8N_BASIC_AUTH: Set to 'true' to enable authentication (default is false — insecure!)
+  - /home/node/.n8n: MUST be a persistent volume or bind mount; without it, workflows are lost on restart.
+  - Webhook URL: Must be externally accessible if integrating with external services.
+
+  First-run setup:
+  1. After first start, browse to http://localhost:5678
+  2. Create initial admin user if N8N_BASIC_AUTH is enabled
+  3. Set up credentials in Settings > Credentials for connected services
+  4. Create and test workflows in the visual editor
+
+  Common gotchas:
+  - Authentication disabled: Check N8N_BASIC_AUTH is set to true in docker-compose.
+  - Workflows lost after restart: Verify /home/node/.n8n is mounted as a persistent volume.
+  - Webhook 404: Check N8N_WEBHOOK_URL is set correctly if using external webhooks.
+  - Permission denied: Ensure host volume owner is UID 1000 or use correct PUID in docker-compose.

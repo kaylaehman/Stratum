@@ -1,0 +1,243 @@
+id: valheim
+name: Valheim Game Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "lloesche/valheim-server"
+    - "mbround18/valheim"
+  port_hints: [2456, 2457, 2458]
+category: games
+description: Self-hosted Valheim multiplayer server with world persistence, configurable difficulty, and player limits
+docs_url: https://hub.docker.com/r/lloesche/valheim-server
+
+common_issues:
+  - id: server-not-discoverable
+    name: Server not appearing in server list
+    symptoms:
+      - "Server is running but doesn't appear in Valheim server browser"
+      - "Players cannot find or connect to server"
+      - "Public toggle does not make server visible"
+      - "Connection timeout when manually entering server IP"
+    trigger_conditions:
+      - log_pattern: "Server.*listening"
+      - log_pattern: "listening on port"
+    steps:
+      - id: step-1
+        description: Verify SERVER_NAME environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep SERVER_NAME"
+        expected_output: "SERVER_NAME="
+        on_fail: step-2
+      - id: step-2
+        description: Display server configuration variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if ports 2456-2458 are published and accessible
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Ports}}{{.PublicPort}}:{{.PrivatePort}} {{end}}'"
+        expected_output: "2456"
+        on_fail: step-4
+      - id: step-4
+        description: Verify port mapping status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check server logs for startup errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed\\|bind' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Restart server to refresh server list registration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and check if server appears in logs as advertised
+        type: check
+        command: "sleep 30 && docker logs {container_name} | grep -i 'advertis\\|broadcast\\|public' | tail -3"
+    resolution: |
+      Valheim servers must properly advertise themselves to the master server list. Ensure SERVER_NAME is set, the server is in Public mode (set PUBLIC=1), and UDP ports 2456-2458 are open on your firewall and router. The server has been restarted to re-register with the master list. If still not visible after 5 minutes, check your firewall and router port forwarding rules.
+
+  - id: world-not-loading
+    name: World/server crashes on startup
+    symptoms:
+      - "Container exits immediately after starting"
+      - "World save corrupted or invalid"
+      - "Could not load world"
+      - "Server starts and stops repeatedly"
+    trigger_conditions:
+      - log_pattern: "ERROR.*world"
+      - log_pattern: "corrupted"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if world data directory is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "/data"
+        on_fail: step-2
+      - id: step-2
+        description: Display mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify world files exist in /data directory
+        type: check
+        command: "ls -la {data_path}/ | grep -E 'worlds|fwl'"
+        expected_output: "worlds"
+        on_fail: step-4
+      - id: step-4
+        description: Display data directory contents
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check server logs for corruption details
+        type: check
+        command: "docker logs {container_name} | grep -i 'corrupt\\|invalid\\|load' | head -10"
+        expected_output: ""
+      - id: step-6
+        description: Restart server with clean state (world will be created if missing)
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor startup logs for successful initialization
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -20"
+    resolution: |
+      World save files may become corrupted or unavailable if the /data volume is not properly mounted or accessible. The server has been restarted. If you have an existing world backup, restore it before starting. If the world is permanently corrupted, a new world will be generated on next startup, but all previous progress will be lost.
+
+  - id: players-kicked-connection-lost
+    name: Players disconnected with connection errors
+    symptoms:
+      - "Connection attempt failed"
+      - "Connection refused"
+      - "Lost connection to server"
+      - "Players can connect briefly then disconnect"
+    trigger_conditions:
+      - log_pattern: "Disconnect"
+      - log_pattern: "connection lost"
+    steps:
+      - id: step-1
+        description: Check if server is actually running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "{container_name}"
+        on_fail: step-2
+      - id: step-2
+        description: Display container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check server memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-4
+        description: Check for out-of-memory errors in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'memory\\|killed' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Verify UDP ports are accessible from outside
+        type: check
+        command: "netstat -ulnp 2>/dev/null | grep -E '2456|2457|2458' || ss -ulnp | grep -E '2456|2457|2458'"
+        expected_output: "2456"
+      - id: step-6
+        description: Restart server and monitor stability
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor for stable connections in logs
+        type: check
+        command: "sleep 15 && docker logs {container_name} | tail -10"
+    resolution: |
+      Connection issues are typically due to insufficient server resources, network connectivity problems, or firewall blocking. Ensure the host has sufficient free memory (at least 4GB), UDP traffic is not being blocked, and port forwarding is correctly configured on your router. The server has been restarted and should be stable now. Check player logs on the client side for more specific error messages.
+
+default_config:
+  compose_template: |
+    services:
+      valheim:
+        image: lloesche/valheim-server:latest
+        container_name: valheim
+        restart: unless-stopped
+        environment:
+          SERVER_NAME: ${SERVER_NAME:-Valheim Server}
+          WORLD_NAME: ${WORLD_NAME:-Dedicated}
+          SERVER_PASS: ${SERVER_PASS:-}
+          SERVER_PUBLIC: ${SERVER_PUBLIC:-1}
+          DIFFICULTY: ${DIFFICULTY:-0}
+          MODIFIER_COMBAT: ${MODIFIER_COMBAT:-normal}
+          MODIFIER_DEATH_PENALTY: ${MODIFIER_DEATH_PENALTY:-normal}
+          MODIFIER_RESOURCES: ${MODIFIER_RESOURCES:-normal}
+          MODIFIER_RAIDS: ${MODIFIER_RAIDS:-normal}
+        volumes:
+          - ${DATA_PATH:-./data}:/home/steam/valheim
+        ports:
+          - "2456:2456/udp"
+          - "2457:2457/udp"
+          - "2458:2458/udp"
+        stdin_open: true
+        tty: true
+  required_vars:
+    - name: SERVER_NAME
+      description: Display name for the server in the server list
+      default: "Valheim Server"
+    - name: WORLD_NAME
+      description: World/save file name (alphanumeric, no spaces)
+      default: "Dedicated"
+    - name: SERVER_PASS
+      description: Server password (leave empty for public server)
+      default: ""
+    - name: SERVER_PUBLIC
+      description: Public server (0=private, 1=public in server list)
+      default: "1"
+    - name: DIFFICULTY
+      description: Difficulty modifier (0=easy, 1=hard)
+      default: "0"
+    - name: MODIFIER_COMBAT
+      description: Combat difficulty (easier, normal, harder, veryhard, nightmare)
+      default: "normal"
+    - name: MODIFIER_DEATH_PENALTY
+      description: Death penalty (nopenalty, minimal, normal, hard)
+      default: "normal"
+    - name: MODIFIER_RESOURCES
+      description: Resource availability (muchless, less, normal, more, muchmore)
+      default: "normal"
+    - name: MODIFIER_RAIDS
+      description: Boss raid frequency (never, muchless, less, normal, more, muchmore)
+      default: "normal"
+    - name: DATA_PATH
+      description: Host path for world saves and configuration
+      default: "./data"
+  known_mounts:
+    - container_path: /home/steam/valheim
+      purpose: World saves, server configuration, and logs
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  The lloesche/valheim-server image is the most popular community-maintained Valheim dedicated server image. It handles world persistence, automatic backups, and clean server lifecycle management.
+
+  World names: Must be alphanumeric (no spaces or special characters). Each world is stored separately, allowing multiple worlds on the same server.
+
+  Server discovery: Public servers must have SERVER_PUBLIC=1 set. The server registers with the master list automatically. Non-public servers require players to manually enter the IP address and password.
+
+  Ports: Valheim uses three UDP ports (2456-2458). All three must be open in your firewall and port-forwarded on your router for remote connectivity.
+
+  Difficulty modifiers: Set individual gameplay modifiers for combat, resources, raids, and death penalties to customize the difficulty curve independent of the main difficulty setting.
+
+  Data persistence: The /home/steam/valheim directory must be mounted as a volume to persist worlds and configuration. Automatic daily backups are created in this directory.
+
+  Password-protected worlds: Set SERVER_PASS to require a password. Leave empty for no password (PUBLIC=1 recommended if no password).
+
+  Common issues:
+  - Server not appearing in list: Verify SERVER_PUBLIC=1 and wait 5 minutes for registration
+  - Connection refused: Check UDP ports 2456-2458 are open and forwarded
+  - World lost on restart: Ensure /home/steam/valheim is mounted as persistent volume
+  - Players disconnecting: Check server memory/CPU and network stability

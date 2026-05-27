@@ -1,0 +1,287 @@
+id: zitadel
+name: ZITADEL Cloud-Native Identity
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/zitadel/zitadel"
+  port_hints: [8080]
+category: identity
+description: Cloud-native identity provider with OpenID Connect, SAML, and JWT support
+docs_url: https://zitadel.com/docs
+
+common_issues:
+  - id: startup-from-init-required
+    name: First startup fails or skips initialization — requires start-from-init flag
+    symptoms:
+      - "Database schema not initialized"
+      - "Migration pending or not applied"
+      - "Connection errors on first run"
+      - "Empty admin user not created"
+    trigger_conditions:
+      - log_pattern: "schema.*pending"
+      - log_pattern: "migration.*failed"
+    steps:
+      - id: step-1
+        description: Check if this is the first startup of ZITADEL
+        type: check
+        command: "docker logs {container_name} | grep -i 'initialized\\|ready' | head -1"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display startup progress and any initialization errors
+        type: inform
+        command: ""
+      - id: step-3
+        description: Stop ZITADEL container for restart with initialization flag
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "{container_name}"
+      - id: step-4
+        description: Restart ZITADEL with start-from-init mode
+        type: fix
+        command: "docker stop {container_name} && docker run -d --name {container_name}-init -e ZITADEL_EVENTSTORE_SQL_HOST=postgres -e ZITADEL_EVENTSTORE_SQL_PORT=5432 -e ZITADEL_EVENTSTORE_SQL_DATABASE=zitadel -e ZITADEL_EVENTSTORE_SQL_USER=zitadel -e ZITADEL_EVENTSTORE_SQL_PASSWORD=zitadel -p 8080:8080 ghcr.io/zitadel/zitadel:latest start-from-init"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait for schema initialization and verify readiness
+        type: check
+        command: "sleep 30 && docker logs {container_name}-init | grep -i 'initialized\\|ready' | tail -3"
+
+  - id: database-connection-refused
+    name: Cannot connect to PostgreSQL database during startup
+    symptoms:
+      - "Database connection refused"
+      - "Host not found or unreachable"
+      - "ZITADEL_EVENTSTORE_SQL variables not configured"
+      - "Postgres container not running"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+      - log_pattern: "postgresql.*fail"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running and healthy
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers and postgres status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test PostgreSQL connectivity from ZITADEL
+        type: check
+        command: "docker exec {container_name} pg_isready -h postgres -p 5432 -U zitadel"
+        expected_output: "accepting"
+        on_fail: step-4
+      - id: step-4
+        description: Verify database and user were created in PostgreSQL
+        type: check
+        command: "docker exec postgres psql -U postgres -lqt | grep zitadel"
+        expected_output: "zitadel"
+        on_fail: step-5
+      - id: step-5
+        description: Manually create ZITADEL database and user if missing
+        type: fix
+        command: "docker exec postgres psql -U postgres -c 'CREATE DATABASE zitadel; CREATE USER zitadel WITH PASSWORD '\"'\"'zitadel'\"'\"'; GRANT ALL PRIVILEGES ON DATABASE zitadel TO zitadel;'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart ZITADEL to reconnect to database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify database connection succeeded
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'connected\\|ready' | tail -2"
+
+  - id: console-ui-not-loading
+    name: ZITADEL console UI returns 404 or blank page on port 8080
+    symptoms:
+      - "Console loads but shows blank/white page"
+      - "404 Not Found on /ui/console"
+      - "JavaScript errors in browser console"
+      - "Port 8080 open but console inaccessible"
+    trigger_conditions:
+      - log_pattern: "404.*console"
+      - log_pattern: "not found"
+    steps:
+      - id: step-1
+        description: Verify ZITADEL process is listening on port 8080
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8080"
+        expected_output: "LISTEN.*8080"
+        on_fail: step-2
+      - id: step-2
+        description: Check port mapping in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 'PortBindings' | grep 8080"
+        expected_output: "8080"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check ZITADEL startup logs for initialization errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | head -10"
+        expected_output: ""
+      - id: step-5
+        description: Verify ZITADEL_EXTERNAL_SECURE and hostname are correctly configured
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i 'external\\|secure\\|host'"
+        expected_output: ""
+      - id: step-6
+        description: Restart ZITADEL container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify console is accessible
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'ready\\|listening' | tail -2"
+
+  - id: authorization-errors-console
+    name: Cannot access console or admin functions despite correct credentials
+    symptoms:
+      - "403 Forbidden after login"
+      - "Admin panel access denied"
+      - "Insufficient permissions for console access"
+      - "IAM role assignment missing"
+    trigger_conditions:
+      - log_pattern: "forbidden\\|403"
+      - log_pattern: "unauthorized"
+    steps:
+      - id: step-1
+        description: Verify user was created with iam.admin role
+        type: check
+        command: "docker logs {container_name} | grep -i 'admin\\|created.*user' | head -3"
+        expected_output: ""
+      - id: step-2
+        description: Check database directly for user and roles
+        type: check
+        command: "docker exec postgres psql -U zitadel -d zitadel -c 'SELECT username FROM users;' 2>/dev/null | grep -v '^-'"
+        expected_output: ""
+      - id: step-3
+        description: Display current user and role information
+        type: inform
+        command: ""
+      - id: step-4
+        description: Recreate default admin user via ZITADEL setup
+        type: fix
+        command: "docker exec {container_name} zitadel setup --init"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify admin user was re-created and console is accessible
+        type: check
+        command: "docker logs {container_name} | tail -10"
+
+default_config:
+  compose_template: |
+    services:
+      zitadel:
+        image: ghcr.io/zitadel/zitadel:latest
+        container_name: zitadel
+        restart: unless-stopped
+        environment:
+          ZITADEL_DATABASE_POSTGRES_HOST: ${DB_HOST:-postgres}
+          ZITADEL_DATABASE_POSTGRES_PORT: ${DB_PORT:-5432}
+          ZITADEL_DATABASE_POSTGRES_DATABASE: ${DB_NAME:-zitadel}
+          ZITADEL_DATABASE_POSTGRES_USER: ${DB_USER:-zitadel}
+          ZITADEL_DATABASE_POSTGRES_PASSWORD: ${DB_PASSWORD:-zitadel}
+          ZITADEL_EXTERNALSECURE: ${EXTERNAL_SECURE:-false}
+          ZITADEL_EXTERNALHOST: ${EXTERNAL_HOST:-zitadel.example.com}
+        ports:
+          - "8080:8080"
+        depends_on:
+          postgres:
+            condition: service_healthy
+        command: start-from-init
+
+      postgres:
+        image: postgres:15-alpine
+        container_name: zitadel-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8
+          POSTGRES_DB: ${POSTGRES_DB:-zitadel}
+          POSTGRES_USER: ${POSTGRES_USER:-zitadel}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zitadel}
+        volumes:
+          - ${DB_PATH:-./postgres-data}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U zitadel -d zitadel"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+  required_vars:
+    - name: DB_HOST
+      description: PostgreSQL hostname
+      default: "postgres"
+    - name: DB_PORT
+      description: PostgreSQL port
+      default: "5432"
+    - name: DB_NAME
+      description: ZITADEL database name
+      default: "zitadel"
+    - name: DB_USER
+      description: ZITADEL database user
+      default: "zitadel"
+    - name: DB_PASSWORD
+      description: ZITADEL database password
+      default: "zitadel"
+    - name: EXTERNAL_HOST
+      description: External hostname (e.g., zitadel.example.com)
+      default: "zitadel.example.com"
+    - name: EXTERNAL_SECURE
+      description: Use HTTPS (true if behind reverse proxy with SSL)
+      default: "false"
+    - name: DB_PATH
+      description: Host path for PostgreSQL data
+      default: "./postgres-data"
+
+  known_mounts:
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database storage
+      recommended_permissions: "700"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  ZITADEL is a modern cloud-native identity provider written in Go. It requires PostgreSQL for data storage (CockroachDB schema compatible).
+
+  **Startup modes:**
+  - `start-from-init`: First startup — initializes database schema, creates default admin user, sets up instance
+  - `start`: Normal operation — assumes database is already initialized
+
+  **First-run workflow:**
+  1. Use `start-from-init` on initial deployment
+  2. Wait for schema initialization (30-60 seconds)
+  3. Access console at http://localhost:8080/ui/console
+  4. Default admin user credentials displayed in logs
+  5. Subsequent restarts can use `start` (not start-from-init)
+
+  **Database:** PostgreSQL 12+ required. ZITADEL uses CockroachDB-compatible schema and migrations. Never manually modify schema — use ZITADEL setup tools.
+
+  **HTTPS / Reverse proxy:**
+  - For production, place ZITADEL behind reverse proxy with valid HTTPS certificate
+  - Set ZITADEL_EXTERNALSECURE=true if reverse proxy handles SSL
+  - Set ZITADEL_EXTERNALHOST to the external FQDN (e.g., zitadel.example.com)
+
+  **Default credentials:** On first `start-from-init`, admin user is created with credentials shown in console output. Change password immediately via UI.
+
+  **Logs:** Check docker logs for startup progress, schema migrations, and user creation messages.
+
+  **Common gotchas:**
+  - Using `start` instead of `start-from-init` on first run — database not initialized
+  - PostgreSQL connection string incorrect — verify ZITADEL_DATABASE_POSTGRES_* env vars
+  - EXTERNAL_HOST mismatch — ZITADEL issues redirects with wrong URL if host is misconfigured
+  - Console blank page — often caused by incorrect EXTERNALSECURE or EXTERNALHOST settings

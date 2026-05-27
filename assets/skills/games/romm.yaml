@@ -1,0 +1,328 @@
+id: romm
+name: RomM ROM Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "rommapp/romm"
+  port_hints: [8080]
+category: games
+description: Web interface for organizing, managing, and playing ROM collections with metadata scraping and multi-platform support
+docs_url: https://github.com/rommapp/romm
+
+common_issues:
+  - id: database-initialization-failed
+    name: Database initialization fails on startup
+    symptoms:
+      - "Database connection failed"
+      - "Migration error"
+      - "Cannot initialize database"
+      - "RomM starts then exits"
+      - "No database found"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "migration.*fail"
+    steps:
+      - id: step-1
+        description: Verify database service is running and accessible
+        type: check
+        command: "docker ps | grep -E 'postgres|mysql|mariadb'"
+        expected_output: "postgres|mysql"
+        on_fail: step-2
+      - id: step-2
+        description: Display currently running services
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check RomM database connection environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'DB_|DATABASE_'"
+        expected_output: "DB_"
+        on_fail: step-4
+      - id: step-4
+        description: Display current database configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test connectivity from RomM container to database
+        type: check
+        command: "docker exec {container_name} curl -s -X GET 'http://localhost:8080/api/health' | head -20"
+        expected_output: ""
+      - id: step-6
+        description: Run database initialization (creates tables if missing)
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor for successful database initialization
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'database.*initialized\\|ready\\|listening' | tail -5"
+    resolution: |
+      RomM requires a PostgreSQL or MySQL database to store ROM metadata and user library data. The database connection has been verified or the container has been restarted to trigger initialization. Ensure DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, and DB_DATABASE environment variables are set correctly and match a running database service. If this is the first start, the database will be automatically initialized on successful connection.
+
+  - id: rom-files-not-detected
+    name: ROM files not scanning or appearing in library
+    symptoms:
+      - "No ROMs found in library"
+      - "Scan completes with 0 items"
+      - "Files present but library remains empty"
+      - "Added new ROM but not appearing"
+      - "Incorrect platform detection"
+    trigger_conditions:
+      - log_pattern: "no.*roms.*found"
+      - log_pattern: "scan.*0 items"
+    steps:
+      - id: step-1
+        description: Verify ROM directory is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "/roms"
+        on_fail: step-2
+      - id: step-2
+        description: Display mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify ROM files exist in mounted directory
+        type: check
+        command: "ls -la {roms_path}/ | head -30"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Check if directory is empty or inaccessible
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify supported file extensions are present
+        type: check
+        command: "find {roms_path}/ -type f \\( -name '*.iso' -o -name '*.bin' -o -name '*.cue' -o -name '*.rom' -o -name '*.nes' -o -name '*.sfc' -o -name '*.z64' \\) 2>/dev/null | head -10"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display sample of ROM file types found
+        type: inform
+        command: ""
+      - id: step-7
+        description: Trigger manual library scan
+        type: fix
+        command: "docker exec {container_name} curl -s -X POST 'http://localhost:8080/api/scan' 2>/dev/null"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor scan progress in logs
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'scan\\|found\\|import' | tail -10"
+    resolution: |
+      RomM scans the /roms directory for supported ROM files and platforms. The scan has been triggered manually. Ensure the /roms directory is mounted, contains ROM files with recognized extensions (ISO, BIN/CUE, ROM, NES, SNES, N64, etc.), and RomM has read permissions on the files. Scan time depends on library size and CPU. Consider organizing ROMs into platform-specific subdirectories (e.g., /roms/nes/, /roms/snes/) to improve detection accuracy.
+
+  - id: metadata-not-enriched
+    name: ROM metadata (covers, descriptions) not loading
+    symptoms:
+      - "ROMs appear but with no metadata"
+      - "No cover art displayed"
+      - "Missing descriptions and ratings"
+      - "Metadata enrichment service unreachable"
+      - "API rate limit exceeded"
+    trigger_conditions:
+      - log_pattern: "metadata.*fail"
+      - log_pattern: "rate.*limit"
+    steps:
+      - id: step-1
+        description: Check if metadata enrichment is configured
+        type: check
+        command: "docker exec {container_name} curl -s 'http://localhost:8080/api/settings' | grep -i 'metadata\\|enrichment\\|provider'"
+        expected_output: ""
+      - id: step-2
+        description: Display current metadata settings
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify internet connectivity for metadata services
+        type: check
+        command: "docker exec {container_name} curl -s -I 'https://www.igdb.com' | head -1"
+        expected_output: "HTTP"
+        on_fail: step-4
+      - id: step-4
+        description: Check firewall or proxy settings
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check for API key configuration (IGDB, MobyGames, etc)
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i 'api.*key\\|igdb\\|moby'"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Inform about metadata service API keys
+        type: inform
+        command: ""
+      - id: step-7
+        description: Retry metadata enrichment for all ROMs
+        type: fix
+        command: "docker exec {container_name} curl -s -X POST 'http://localhost:8080/api/roms/enrich' 2>/dev/null"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor enrichment progress in logs
+        type: check
+        command: "sleep 20 && docker logs {container_name} | grep -i 'enrich\\|metadata' | tail -10"
+    resolution: |
+      RomM enriches ROM metadata by querying external services like IGDB (Internet Game Database) and MobyGames. Enrichment requires internet connectivity and optional API keys for higher rate limits. The enrichment process has been retriggered. If metadata remains unavailable, check your internet connectivity, firewall rules, and whether API rate limits have been exceeded. Some ROM platforms (especially homebrew or very old games) may not have available metadata.
+
+  - id: users-cannot-login
+    name: Login fails or user accounts not created
+    symptoms:
+      - "Cannot log in to RomM UI"
+      - "Login button unresponsive"
+      - "User registration fails"
+      - "Session not persisting"
+      - "404 on login endpoint"
+    trigger_conditions:
+      - log_pattern: "login.*fail"
+      - log_pattern: "authentication.*error"
+    steps:
+      - id: step-1
+        description: Verify RomM API is responding
+        type: check
+        command: "docker exec {container_name} curl -s 'http://localhost:8080/api/health'"
+        expected_output: "ok|healthy|running"
+        on_fail: step-2
+      - id: step-2
+        description: Display API health status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if user database table exists
+        type: check
+        command: "docker exec {container_name} curl -s 'http://localhost:8080/api/users' | head -10"
+        expected_output: ""
+      - id: step-4
+        description: Check authentication logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|login\\|user' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Verify session/JWT configuration is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i 'secret\\|jwt\\|session'"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display current configuration
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart RomM to reset authentication state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Wait and verify login endpoint is accessible
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s 'http://localhost:8080/api/auth/login' 2>&1 | head -5"
+    resolution: |
+      RomM requires a valid user account to access the library. The container has been restarted to reinitialize authentication. On first startup, an admin user is automatically created with credentials from DATABASE or environment configuration. If login still fails, verify the database was successfully initialized and contains the users table. Check RomM logs for specific authentication errors.
+
+default_config:
+  compose_template: |
+    services:
+      romm:
+        image: rommapp/romm:latest
+        container_name: romm
+        restart: unless-stopped
+        environment:
+          DB_HOST: ${DB_HOST:-postgres}
+          DB_PORT: ${DB_PORT:-5432}
+          DB_USER: ${DB_USER:-romm}
+          DB_PASSWD: ${DB_PASSWD:-romm}
+          DB_NAME: ${DB_NAME:-romm}
+        volumes:
+          - ${ROMS_PATH:-./roms}:/roms:ro
+          - ${CONFIG_PATH:-./config}:/config
+          - ${LIBRARY_PATH:-./library}:/library
+        ports:
+          - "8080:8080/tcp"
+        depends_on:
+          - postgres
+        stdin_open: true
+        tty: true
+
+      postgres:
+        image: postgres:15-alpine
+        container_name: romm-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${DB_USER:-romm}
+          POSTGRES_PASSWORD: ${DB_PASSWD:-romm}
+          POSTGRES_DB: ${DB_NAME:-romm}
+        volumes:
+          - ${DB_PATH:-./database}:/var/lib/postgresql/data
+
+  required_vars:
+    - name: DB_HOST
+      description: PostgreSQL hostname or container name
+      default: "postgres"
+    - name: DB_PORT
+      description: PostgreSQL port
+      default: "5432"
+    - name: DB_USER
+      description: PostgreSQL username for RomM
+      default: "romm"
+    - name: DB_PASSWD
+      description: PostgreSQL password for RomM user
+      default: "romm"
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "romm"
+    - name: ROMS_PATH
+      description: Host path to ROM files directory (read-only from RomM perspective)
+      default: "./roms"
+    - name: CONFIG_PATH
+      description: Host path for RomM configuration
+      default: "./config"
+    - name: LIBRARY_PATH
+      description: Host path for RomM library metadata and cache
+      default: "./library"
+    - name: DB_PATH
+      description: Host path for PostgreSQL data persistence
+      default: "./database"
+
+  known_mounts:
+    - container_path: /roms
+      purpose: ROM files (read-only from RomM perspective)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /config
+      purpose: RomM configuration and settings
+      recommended_permissions: "755"
+      owner: "1000:1000"
+    - container_path: /library
+      purpose: ROM metadata, cover art cache, and library state
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  RomM (ROM Manager) is a web-based ROM collection organizer and emulator launcher. It requires PostgreSQL for metadata storage and supports multiple emulation platforms.
+
+  Supported platforms: NES, SNES, Nintendo 64, GameBoy, GameBoy Advance, Genesis/Mega Drive, Sega Saturn, PlayStation, Dreamcast, Arcade (MAME), and others via IGDB/MobyGames integration.
+
+  ROM directory: Organize ROMs into platform subdirectories (/roms/nes/, /roms/snes/, etc.) for accurate platform detection. RomM scans recursively, so nested subdirectories are supported.
+
+  Database: PostgreSQL is the primary supported backend. SQLite is not recommended for production use with RomM. The included postgres service in the compose template provides persistence via the ./database volume.
+
+  Metadata enrichment: RomM enriches ROM metadata from IGDB (Internet Game Database) and MobyGames. Internet connectivity is required. API keys can be configured for higher rate limits.
+
+  ROM files: Supported file types include ISO, BIN/CUE, ROM (cartridge), NES, SNES, N64, Genesis, Game Boy, GBA, PSX, Dreamcast, and many others. Each file should contain a single game.
+
+  Cover art: RomM automatically fetches cover art and screenshots during metadata enrichment. Cache is stored in /library and can grow significantly depending on library size.
+
+  User accounts: RomM is single-user by default, but supports multiple user accounts with per-user library views and preferences (requires manual account creation or API).
+
+  Metadata accuracy: Accuracy depends on the external metadata source. Homebrew, ROM hacks, and unofficial games may not be found. Manual metadata editing is available in the UI.
+
+  Common issues:
+  - ROMs not detected: Verify /roms is mounted and files have recognized extensions.
+  - No cover art: Check internet connectivity and metadata enrichment service status.
+  - Database errors: Ensure PostgreSQL is running and DB_* environment variables match database credentials.
+  - Login fails: Restart RomM after database is initialized to recreate admin user.

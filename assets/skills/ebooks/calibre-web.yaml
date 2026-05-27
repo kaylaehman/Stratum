@@ -1,0 +1,250 @@
+id: calibre-web
+name: Calibre-Web Ebook Reader
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/calibre-web"
+  port_hints: [8083]
+category: ebooks
+description: Web-based ebook library reader and manager, lighter alternative to full Calibre desktop
+
+docs_url: https://hub.docker.com/r/linuxserver/calibre-web
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write configuration files"
+      - "Database access denied"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "database.*locked"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents Calibre-Web from writing configuration and database files. The fix changed ownership to match the container process. Calibre-Web should now function properly.
+
+  - id: library-not-loading
+    name: Ebook library not loading or empty
+    symptoms:
+      - "No books appear in library"
+      - "Library shows 0 books"
+      - "Cannot see books from Calibre database"
+      - "Library path not found error"
+    trigger_conditions:
+      - log_pattern: "library.*not found"
+      - log_pattern: "calibre.*database"
+    steps:
+      - id: step-1
+        description: Verify library path is mounted in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check if library directory contains Calibre database
+        type: check
+        command: "ls -la {library_path} | grep -i metadata"
+        expected_output: "metadata"
+        on_fail: step-3
+      - id: step-3
+        description: Display library directory contents
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify library path is readable by container
+        type: check
+        command: "docker exec {container_name} ls {library_path}"
+        expected_output: ""
+      - id: step-5
+        description: Restart Calibre-Web to reload library
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check library loading status in logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i library"
+    resolution: |
+      Calibre-Web has been restarted and will re-scan your library. Ensure the library path points to a valid Calibre database directory containing a metadata.db file. If books still don't appear, verify the library path is correctly mounted and contains valid Calibre books.
+
+  - id: web-ui-timeout
+    name: Web interface is slow or timing out
+    symptoms:
+      - "Web pages load very slowly"
+      - "Request timeout errors"
+      - "High CPU usage in container"
+      - "Unresponsive UI when browsing library"
+    trigger_conditions:
+      - log_pattern: "timeout"
+      - log_pattern: "slow query"
+    steps:
+      - id: step-1
+        description: Check CPU and memory usage of Calibre-Web
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Check database integrity
+        type: check
+        command: "docker exec {container_name} sqlite3 {config_path}/calibre-web.db 'PRAGMA integrity_check;'"
+        expected_output: "ok"
+        on_fail: step-3
+      - id: step-3
+        description: Display database integrity check results
+        type: inform
+        command: ""
+      - id: step-4
+        description: Clear browser cache and temporary data
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Calibre-Web to clear memory and cache
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor performance after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      Calibre-Web has been restarted. Performance issues are often caused by a large library or database fragmentation. If slowness persists, consider optimizing your library in Calibre desktop before using Calibre-Web. Ensure your host has sufficient RAM (at least 1GB available) for smooth operation.
+
+  - id: authentication-failed
+    name: Login or authentication issues
+    symptoms:
+      - "Cannot log in with correct credentials"
+      - "Session expires immediately"
+      - "Keeps redirecting to login page"
+      - "Authentication error messages"
+    trigger_conditions:
+      - log_pattern: "authentication"
+      - log_pattern: "login"
+      - log_pattern: "unauthorized"
+    steps:
+      - id: step-1
+        description: Check if user database is accessible
+        type: check
+        command: "docker exec {container_name} ls -la {config_path}/calibre-web.db"
+        expected_output: "calibre-web.db"
+        on_fail: step-2
+      - id: step-2
+        description: Verify database file is readable by container
+        type: check
+        command: "docker exec {container_name} file {config_path}/calibre-web.db"
+        expected_output: "SQLite"
+        on_fail: step-3
+      - id: step-3
+        description: Display authentication database status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Clear session cache in container
+        type: fix
+        command: "docker exec {container_name} rm -rf {config_path}/cache/*"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart container to reset authentication
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify login is working after restart
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      The authentication cache has been cleared and the container restarted. Try logging in again with your credentials. If the issue persists, verify your username and password are correct. You may need to reset your password through Calibre-Web settings or recreate the user account.
+
+default_config:
+  compose_template: |
+    services:
+      calibre-web:
+        image: linuxserver/calibre-web:latest
+        container_name: calibre-web
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          DOCKER_MODS: ${DOCKER_MODS:-}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${LIBRARY_PATH:-./library}:/books
+        ports:
+          - "8083:8083/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run Calibre-Web as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Calibre-Web
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (Calibre-Web configuration and database)
+      default: "./config"
+    - name: LIBRARY_PATH
+      description: Host path for /books (Calibre library location)
+      default: "./library"
+  known_mounts:
+    - container_path: /config
+      purpose: Calibre-Web configuration, database, and user preferences
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /books
+      purpose: Calibre ebook library (read from Calibre database)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Calibre-Web is a lightweight, web-based reader for Calibre ebook libraries. It provides user management and access control for sharing libraries securely.
+
+  Library path: Should point to an existing Calibre database (directory containing metadata.db file). Can be exported from full Calibre or created through Calibre-Web.
+
+  Database: Calibre-Web maintains its own SQLite database for users, settings, and reading progress separate from the Calibre library database.
+
+  User management: Create users in Calibre-Web settings to control access and reading permissions per user.
+
+  DOCKER_MODS: Optional LinuxServer mods for additional functionality (e.g., Kepubify for Kobo ereader format conversion).
+
+  Permission issues: Ensure both /config and /books directories have correct ownership to allow read/write access.
+
+  Common gotchas:
+  - Library not loading: Verify /books points to a directory containing a valid Calibre metadata.db file.
+  - Permission denied: Check UID/GID match between host and container.
+  - Slow performance: Large libraries can impact performance; ensure adequate RAM and fast storage.
+  - Authentication issues: Database may be corrupted; restart container to rebuild user sessions.

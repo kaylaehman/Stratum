@@ -1,0 +1,309 @@
+id: keycloak
+name: Keycloak Identity Provider
+version: "1.0"
+container_match:
+  image_patterns:
+    - "quay.io/keycloak/keycloak"
+  port_hints: [8080, 8443]
+category: identity
+description: Open-source identity and access management platform supporting OIDC, SAML, and Kerberos
+docs_url: https://www.keycloak.org/documentation
+
+common_issues:
+  - id: startup-missing-database
+    name: Startup fails — database not reachable or not initialized
+    symptoms:
+      - "Database connection refused"
+      - "Connection pool timeout"
+      - "Failed to obtain JDBC Connection"
+      - "Waiting for database schema initialization"
+    trigger_conditions:
+      - log_pattern: "Connection refused"
+      - log_pattern: "database.*fail"
+    steps:
+      - id: step-1
+        description: Check if database container is running
+        type: check
+        command: "docker ps | grep -E 'postgres|mariadb'"
+        expected_output: "postgres|mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display database service status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database connection string in Keycloak environment
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i db"
+        expected_output: "DB_ADDR"
+        on_fail: step-4
+      - id: step-4
+        description: Display current Keycloak environment variables
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Keycloak after ensuring database is healthy
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait and verify database connection succeeded
+        type: check
+        command: "sleep 20 && docker logs {container_name} | grep -i 'database.*connected\\|schema.*updated' | tail -3"
+
+  - id: admin-console-unreachable
+    name: Admin console returns 404 or connection refused on port 8080
+    symptoms:
+      - "404 Not Found when accessing /admin"
+      - "Cannot connect to http://host:8080"
+      - "Connection refused on 8080"
+      - "Admin console loads but shows blank page"
+    trigger_conditions:
+      - log_pattern: "404"
+      - log_pattern: "refused.*8080"
+    steps:
+      - id: step-1
+        description: Verify Keycloak is listening on port 8080 inside container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8080"
+        expected_output: "LISTEN.*8080"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 8080 is exposed in docker-compose or docker run
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 'PortBindings' | grep 8080"
+        expected_output: "8080"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mappings
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Keycloak startup logs for errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Check if Keycloak is configured for reverse proxy mode
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i 'proxy'"
+        expected_output: "PROXY"
+        on_fail: step-6
+      - id: step-6
+        description: If no proxy env found, Keycloak may expect HTTPS redirect
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart Keycloak with fresh database schema
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify admin console is accessible
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'ready\\|started' | tail -2"
+
+  - id: start-dev-mode-confusion
+    name: Container running in production mode but start-dev mode intended
+    symptoms:
+      - "Migration validation errors on first startup"
+      - "Keycloak won't import realm files"
+      - "Slow initial startup with schema initialization"
+      - "User expects fast development iteration"
+    trigger_conditions:
+      - log_pattern: "KC_BOOTSTRAP_ADMIN_USERNAME"
+    steps:
+      - id: step-1
+        description: Check if KC_SPI_THEME_STATIC_MAX_AGE is set (indicates production mode)
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep KC_SPI"
+        expected_output: "KC_SPI"
+      - id: step-2
+        description: Display current startup command
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Cmd}}'"
+        expected_output: ""
+      - id: step-3
+        description: Display current Keycloak configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Stop Keycloak and reconfigure for start-dev mode
+        type: confirm
+        command: ""
+      - id: step-5
+        description: Update container to use 'start-dev' instead of production start
+        type: fix
+        command: "docker stop {container_name} && docker rm {container_name} && docker run -d --name {container_name} -e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=change-me -p 8080:8080 quay.io/keycloak/keycloak:latest start-dev"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify start-dev mode is running (check for verbose logs)
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'dev mode\\|development' | tail -2"
+
+  - id: admin-password-reset-needed
+    name: Lost admin credentials or need to reset KEYCLOAK_ADMIN user
+    symptoms:
+      - "Cannot login to admin console"
+      - "Forgot admin password"
+      - "KEYCLOAK_ADMIN_PASSWORD env not preserved between restarts"
+    trigger_conditions:
+      - log_pattern: "invalid.*credential"
+    steps:
+      - id: step-1
+        description: Check if admin user exists in database
+        type: check
+        command: "docker exec {container_name} /opt/keycloak/bin/kc.sh config --help 2>&1 | head -5"
+        expected_output: ""
+      - id: step-2
+        description: Display warning that admin reset requires database access
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify KEYCLOAK_ADMIN and KEYCLOAK_ADMIN_PASSWORD are set in environment
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep KEYCLOAK_ADMIN"
+        expected_output: "KEYCLOAK_ADMIN"
+        on_fail: step-4
+      - id: step-4
+        description: If env vars missing, they must be re-supplied on next startup
+        type: inform
+        command: ""
+      - id: step-5
+        description: Delete Keycloak database volume to reset all users (destructive)
+        type: confirm
+        command: ""
+      - id: step-6
+        description: Remove Keycloak container and database volume
+        type: fix
+        command: "docker stop {container_name} && docker rm {container_name} && docker volume rm keycloak_data"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Keycloak with fresh database and new admin credentials
+        type: fix
+        command: "docker run -d --name {container_name} -e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=newpassword123 -v keycloak_data:/opt/keycloak/data -p 8080:8080 quay.io/keycloak/keycloak:latest start"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify new admin user can authenticate
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'ready\\|started' | tail -1"
+
+default_config:
+  compose_template: |
+    services:
+      keycloak:
+        image: quay.io/keycloak/keycloak:latest
+        container_name: keycloak
+        restart: unless-stopped
+        environment:
+          KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+          KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-changeme}
+          KC_DB: ${KC_DB:-postgres}
+          KC_DB_URL: ${KC_DB_URL:-jdbc:postgresql://postgres:5432/keycloak}
+          KC_DB_USERNAME: ${KC_DB_USERNAME:-keycloak}
+          KC_DB_PASSWORD: ${KC_DB_PASSWORD:-keycloak}
+          KC_PROXY: ${KC_PROXY:-edge}
+          KC_HOSTNAME: ${KC_HOSTNAME:-keycloak.example.com}
+          KC_HOSTNAME_STRICT: ${KC_HOSTNAME_STRICT:-false}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/opt/keycloak/data
+        ports:
+          - "8080:8080"
+          - "8443:8443"
+        depends_on:
+          postgres:
+            condition: service_healthy
+        command: start
+
+      postgres:
+        image: postgres:15-alpine
+        container_name: keycloak-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${POSTGRES_DB:-keycloak}
+          POSTGRES_USER: ${POSTGRES_USER:-keycloak}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-keycloak}
+        volumes:
+          - ${DB_PATH:-./postgres-data}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U keycloak"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+  required_vars:
+    - name: KEYCLOAK_ADMIN
+      description: Initial admin username
+      default: "admin"
+    - name: KEYCLOAK_ADMIN_PASSWORD
+      description: Initial admin password (change after first login)
+      default: "changeme"
+    - name: KC_DB
+      description: Database type (postgres, mariadb, mysql)
+      default: "postgres"
+    - name: KC_DB_URL
+      description: JDBC connection string to database
+      default: "jdbc:postgresql://postgres:5432/keycloak"
+    - name: KC_DB_USERNAME
+      description: Database username
+      default: "keycloak"
+    - name: KC_DB_PASSWORD
+      description: Database password
+      default: "keycloak"
+    - name: KC_HOSTNAME
+      description: External hostname (e.g., keycloak.example.com)
+      default: "keycloak.example.com"
+    - name: KC_PROXY
+      description: Proxy mode (edge for reverse proxy, passthrough, reencrypt)
+      default: "edge"
+    - name: CONFIG_PATH
+      description: Host path for Keycloak data persistence
+      default: "./config"
+    - name: DB_PATH
+      description: Host path for PostgreSQL data
+      default: "./postgres-data"
+
+  known_mounts:
+    - container_path: /opt/keycloak/data
+      purpose: Keycloak configuration, realm exports, and local data storage
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Keycloak supports two startup modes: start (production) and start-dev (development).
+
+  **start-dev** is recommended for initial setup and testing:
+  - Faster startup
+  - HTTP-only (no HTTPS required)
+  - Realm files can be imported via IMPORT_REALM_FILE
+  - Verbose logging
+  - Perfect for homelab and development
+
+  **start** (production mode) requires:
+  - Proper HTTPS certificate (via reverse proxy or configured directly)
+  - Database (PostgreSQL recommended for production; H2 in-memory in start-dev)
+  - KC_PROXY configuration when behind reverse proxy
+  - KC_HOSTNAME set to external FQDN
+  - Performance tuning for production load
+
+  **Database:** PostgreSQL is recommended over H2 for production use. PostgreSQL persists across container restarts. H2 (embedded) is used in start-dev mode and data is lost on container removal.
+
+  **First-run:** On first startup with KEYCLOAK_ADMIN and KEYCLOAK_ADMIN_PASSWORD environment variables, Keycloak automatically creates the admin user. On subsequent restarts, these env vars are ignored — password changes must be done via admin console.
+
+  **OIDC / SAML:** Configure in admin console Settings → Realm Settings → OpenID Connect / SAML endpoints. Clients are defined per realm.
+
+  **Custom themes:** Mount to `/opt/keycloak/themes/{theme-name}` if needed. Default theme is Keycloak's built-in theme.
+
+  **Common setup gotchas:**
+  - Reverse proxy without KC_PROXY=edge causes redirect loop (browser gets internal IP)
+  - H2 database loss on container rm — use PostgreSQL for persistence
+  - HTTPS redirect (port 8443) requires valid certificate or must be disabled in dev
+  - Admin user created only on first startup; reset requires DB reset or database tool

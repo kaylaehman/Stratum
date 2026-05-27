@@ -1,0 +1,247 @@
+id: calibre
+name: Calibre Ebook Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/calibre"
+  port_hints: [8080, 8081]
+category: ebooks
+description: Desktop ebook manager with web UI and content server for organizing and managing digital books
+
+docs_url: https://hub.docker.com/r/linuxserver/calibre
+
+common_issues:
+  - id: permission-denied-library
+    name: Permission denied on library mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to library directory"
+      - "Failed to create or modify book files"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host library path
+        type: check
+        command: "stat {library_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the library path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {library_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {library_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The library directory ownership was mismatched with the container's running UID/GID. This prevents Calibre from reading and writing book metadata. The fix changed ownership to match the container process. Calibre should now be able to manage your library.
+
+  - id: web-ui-unreachable
+    name: Web UI not accessible on port 8080
+    symptoms:
+      - "Cannot connect to localhost:8080"
+      - "Connection refused or timeout"
+      - "Web UI not starting"
+      - "Port 8080 not listening"
+    trigger_conditions:
+      - log_pattern: "address already in use"
+      - log_pattern: "port.*in use"
+    steps:
+      - id: step-1
+        description: Check if port 8080 is open and listening in the container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8080"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 8080 is published in Docker
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '8080'"
+        expected_output: "8080"
+        on_fail: step-3
+      - id: step-3
+        description: Display port configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if another process is using port 8080 on the host
+        type: check
+        command: "ss -tlnp | grep 8080"
+        expected_output: ""
+      - id: step-5
+        description: Restart Calibre to reinitialize web UI
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait and verify port 8080 is listening
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -tlnp | grep 8080"
+    resolution: |
+      Calibre's web UI has been restarted. The service should now be accessible on port 8080. If the issue persists, check your firewall rules, verify no other service is using port 8080, and ensure the container port mapping is correctly configured in docker-compose.
+
+  - id: content-server-unavailable
+    name: Content server not responding on port 8081
+    symptoms:
+      - "Cannot access book content server on port 8081"
+      - "Content server shows as unavailable"
+      - "Books not accessible through web browser"
+      - "HTTP 503 or connection refused on port 8081"
+    trigger_conditions:
+      - log_pattern: "content server"
+      - log_pattern: "8081"
+    steps:
+      - id: step-1
+        description: Verify content server process is running in container
+        type: check
+        command: "docker exec {container_name} ps aux | grep -i calibre"
+        expected_output: "calibre"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 8081 is accessible
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8081"
+        expected_output: "LISTEN"
+        on_fail: step-3
+      - id: step-3
+        description: Display current process and port status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart the container to reinitialize content server
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify content server is listening after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -tlnp | grep 8081"
+    resolution: |
+      The content server has been restarted and should now be accessible on port 8081. Your ebook library should be browsable through the web interface. If the issue persists, check your firewall rules and ensure port 8081 is properly exposed in your Docker configuration.
+
+  - id: kasmvnc-display-issues
+    name: KasmVNC desktop display not working
+    symptoms:
+      - "KasmVNC not starting or showing blank screen"
+      - "Cannot access desktop environment through VNC"
+      - "Display server (Xvfb) not initializing"
+      - "Black screen or connection to VNC viewer fails"
+    trigger_conditions:
+      - log_pattern: "xvfb"
+      - log_pattern: "vnc"
+      - log_pattern: "display"
+    steps:
+      - id: step-1
+        description: Check if X11 display is running in the container
+        type: check
+        command: "docker exec {container_name} ps aux | grep -i xvfb"
+        expected_output: "xvfb"
+        on_fail: step-2
+      - id: step-2
+        description: Check VNC server status
+        type: check
+        command: "docker exec {container_name} ps aux | grep -i vnc"
+        expected_output: "vnc"
+        on_fail: step-3
+      - id: step-3
+        description: Display display server and VNC status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check available disk space in container
+        type: check
+        command: "docker exec {container_name} df -h /tmp"
+        expected_output: ""
+      - id: step-5
+        description: Restart container to reinitialize display environment
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify display and VNC are running after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} ps aux | grep -E 'xvfb|vnc'"
+    resolution: |
+      The KasmVNC display environment has been restarted. You should now be able to access the Calibre desktop interface through the VNC viewer. Ensure you have sufficient disk space and system resources. The VNC port configuration may vary depending on your setup.
+
+default_config:
+  compose_template: |
+    services:
+      calibre:
+        image: linuxserver/calibre:latest
+        container_name: calibre
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${LIBRARY_PATH:-./library}:/library
+        ports:
+          - "8080:8080/tcp"
+          - "8081:8081/tcp"
+          - "5900:5900/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run Calibre as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Calibre
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (Calibre configuration and database)
+      default: "./config"
+    - name: LIBRARY_PATH
+      description: Host path for /library (ebook library location)
+      default: "./library"
+  known_mounts:
+    - container_path: /config
+      purpose: Calibre configuration, database, and preferences
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /library
+      purpose: Ebook library and book files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Calibre is the industry-standard ebook manager for organizing, converting, and managing digital books. This LinuxServer image includes the desktop application via KasmVNC for web-based access.
+
+  Web UI: Port 8080 provides access to the Calibre web interface for library management.
+
+  Content server: Port 8081 hosts the content server for direct browser access to your ebook library.
+
+  KasmVNC: Port 5900 provides VNC access to the full Calibre desktop environment with graphical interface.
+
+  Library location: Store your ebook library on a dedicated volume for better performance and data safety.
+
+  Permission issues: Ensure the library directory is owned by the container's UID/GID to allow read/write operations on books.
+
+  Common gotchas:
+  - Permission denied on library: Check UID/GID match between host and container.
+  - Web UI not accessible: Verify port 8080 is open and no other service is using it.
+  - Content server unavailable: Restart the container to reinitialize the server process.
+  - KasmVNC display issues: Check X11 display and VNC server status in container logs.

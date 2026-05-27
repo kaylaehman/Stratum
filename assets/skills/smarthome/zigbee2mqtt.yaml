@@ -1,0 +1,260 @@
+id: zigbee2mqtt
+name: Zigbee2MQTT Gateway
+version: "1.0"
+container_match:
+  image_patterns:
+    - "koenkk/zigbee2mqtt"
+  port_hints: [8080]
+category: smarthome
+description: Bridge between Zigbee devices and MQTT, enabling home automation integration
+docs_url: https://www.zigbee2mqtt.io/guide/getting-started/
+
+common_issues:
+  - id: coordinator-not-detected
+    name: Zigbee coordinator device not detected
+    symptoms:
+      - "Failed to connect to the adapter"
+      - "No such file or directory /dev/ttyUSB"
+      - "Failed to find a matching device"
+      - "Zigbee adapter not found"
+    trigger_conditions:
+      - log_pattern: "Failed to connect to the adapter"
+      - log_pattern: "No such file or directory /dev/ttyUSB"
+    steps:
+      - id: step-1
+        description: Check if USB coordinator is visible on the host
+        type: check
+        command: "lsusb | grep -iE 'silabs|texas|zigbee|coordinator'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display all USB devices found on host
+        type: inform
+        command: ""
+      - id: step-3
+        description: Find the exact device path for the coordinator
+        type: check
+        command: "ls -la /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || echo 'No TTY devices found'"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display available serial devices
+        type: inform
+        command: ""
+      - id: step-5
+        description: Add USB device passthrough to the container
+        type: inform
+        command: ""
+      - id: step-6
+        description: Update docker-compose with USB device mount
+        type: fix
+        command: "echo 'Add devices section to docker-compose: devices:\\n  - /dev/ttyUSB0:/dev/ttyUSB0 (replace ttyUSB0 with actual device)'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Zigbee2MQTT with device passthrough
+        type: fix
+        command: "docker-compose restart zigbee2mqtt"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify coordinator is now detected
+        type: check
+        command: "docker logs zigbee2mqtt | grep -i 'adapter|coordinator|connected' | tail -3"
+    resolution: |
+      The Zigbee USB coordinator was not accessible inside the container. This is fixed by adding the device path to the docker-compose configuration. The exact device path (/dev/ttyUSB0, /dev/ttyACM0, etc.) must match your coordinator hardware. If the device keeps changing between restarts, consider using udev rules or the persistent device path from dmesg.
+
+  - id: mqtt-broker-connection-failed
+    name: Cannot connect to MQTT broker
+    symptoms:
+      - "Connection refused"
+      - "MQTT connection failed"
+      - "Unable to connect to the MQTT broker"
+      - "Authentication failed"
+      - "MQTT connection reset by peer"
+    trigger_conditions:
+      - log_pattern: "Connection refused.*mqtt|broker"
+      - log_pattern: "authentication failed"
+    steps:
+      - id: step-1
+        description: Check MQTT broker hostname and port in configuration
+        type: check
+        command: "docker exec zigbee2mqtt cat /app/data/configuration.yaml | grep -A 3 mqtt:"
+        expected_output: "mqtt:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test connectivity to MQTT broker from container
+        type: check
+        command: "docker exec zigbee2mqtt nc -zv {mqtt_host} {mqtt_port} 2>&1 || echo 'Connection test failed'"
+        expected_output: "succeeded"
+        on_fail: step-4
+      - id: step-4
+        description: Verify MQTT broker is running and accessible
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check MQTT broker credentials in configuration
+        type: check
+        command: "docker exec zigbee2mqtt grep -E 'user|password' /app/data/configuration.yaml | head -5"
+        expected_output: ""
+      - id: step-6
+        description: Update MQTT connection configuration
+        type: fix
+        command: "echo 'Edit /app/data/configuration.yaml:\\nmqtt:\\n  server: mqtt://mosquitto:1883 (or your broker)\\n  user: zigbee\\n  password: your_password'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Zigbee2MQTT to reconnect to MQTT
+        type: fix
+        command: "docker restart zigbee2mqtt"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Check for successful MQTT connection in logs
+        type: check
+        command: "docker logs zigbee2mqtt | grep -i 'connected.*mqtt\\|mqtt.*connected' | tail -2"
+    resolution: |
+      Zigbee2MQTT could not connect to the MQTT broker. This is typically due to incorrect hostname, port, or credentials in the configuration.yaml file. Ensure the MQTT broker is running, the hostname/IP is correct, and any required credentials are set. For Mosquitto brokers with authentication, verify the user account exists and permissions are set.
+
+  - id: devices-not-pairing
+    name: Zigbee devices not pairing or discovering
+    symptoms:
+      - "No devices found during pairing"
+      - "Pairing mode not responding"
+      - "Devices appear briefly then disconnect"
+      - "Failed to add device"
+    trigger_conditions:
+      - log_pattern: "pairing.*failed|failed.*pair"
+    steps:
+      - id: step-1
+        description: Verify Zigbee2MQTT is in pairing mode
+        type: check
+        command: "docker logs zigbee2mqtt | grep -i 'permit\\|pairing' | tail -3"
+        expected_output: ""
+      - id: step-2
+        description: Display current pairing status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if devices are visible on the network
+        type: check
+        command: "docker exec zigbee2mqtt curl -s http://localhost:8080/api/devices 2>/dev/null | grep -c '\"type\"' || echo '0'"
+        expected_output: ""
+      - id: step-4
+        description: Enable pairing mode with extended timeout
+        type: fix
+        command: "docker exec zigbee2mqtt curl -X POST http://localhost:8080/api/permit_join -H 'Content-Type: application/json' -d '{\"value\": true, \"time\": 120}'"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Instructions for device pairing
+        type: inform
+        command: ""
+      - id: step-6
+        description: Check if new devices were detected after pairing attempt
+        type: check
+        command: "docker logs zigbee2mqtt | grep -i 'zigbee device' | tail -5"
+    resolution: |
+      Pairing mode has been enabled for 120 seconds. Place your Zigbee device in pairing mode (usually by holding a button for 3-5 seconds) and it should be detected. If devices still don't appear, check that your coordinator has a clear line of sight and is not too far from the devices (Zigbee typical range is 10-50 meters). Some devices may require specific pairing procedures; consult your device manufacturer's documentation.
+
+  - id: web-ui-unavailable
+    name: Web UI not accessible on port 8080
+    symptoms:
+      - "Cannot access Zigbee2MQTT web interface"
+      - "Connection refused on port 8080"
+      - "Web interface times out"
+      - "Port 8080 not listening"
+    trigger_conditions:
+      - log_pattern: "listen.*8080"
+    steps:
+      - id: step-1
+        description: Verify port 8080 is published in docker configuration
+        type: check
+        command: "docker inspect zigbee2mqtt | grep -A 2 '8080'"
+        expected_output: "8080"
+        on_fail: step-2
+      - id: step-2
+        description: Display current port mappings
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if port 8080 is listening inside the container
+        type: check
+        command: "docker exec zigbee2mqtt ss -tlnp | grep 8080"
+        expected_output: "LISTEN.*8080"
+        on_fail: step-4
+      - id: step-4
+        description: Check Zigbee2MQTT startup logs for errors
+        type: check
+        command: "docker logs zigbee2mqtt | grep -iE 'error|failed|startup' | head -5"
+      - id: step-5
+        description: Restart Zigbee2MQTT container
+        type: fix
+        command: "docker restart zigbee2mqtt"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify web UI is responding
+        type: check
+        command: "sleep 3 && docker exec zigbee2mqtt curl -s http://localhost:8080/ | head -c 100"
+    resolution: |
+      The web UI has been restarted. The Zigbee2MQTT interface should now be accessible at http://host:8080. If the issue persists, check your docker-compose ports configuration to ensure 8080 is properly mapped. Also verify no firewall is blocking access to the port on the host.
+
+default_config:
+  compose_template: |
+    services:
+      zigbee2mqtt:
+        image: koenkk/zigbee2mqtt:latest
+        container_name: zigbee2mqtt
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./data}:/app/data
+        ports:
+          - "8080:8080"
+        devices:
+          - /dev/ttyUSB0:/dev/ttyUSB0
+        networks:
+          - default
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for Zigbee2MQTT configuration and database
+      default: "./data"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: MQTT_HOST
+      description: MQTT broker hostname or IP
+      default: "mosquitto"
+    - name: MQTT_PORT
+      description: MQTT broker port
+      default: "1883"
+    - name: COORDINATOR_DEVICE
+      description: USB device path for Zigbee coordinator
+      default: "/dev/ttyUSB0"
+  known_mounts:
+    - container_path: /app/data
+      purpose: Zigbee2MQTT configuration, database, and device list
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Zigbee2MQTT is a popular open-source bridge that allows Zigbee devices to communicate via MQTT, integrating with Home Assistant, Node-RED, and other home automation platforms.
+
+  Coordinator setup: The USB Zigbee coordinator must be passed through to the container via the devices section in docker-compose. Common coordinators include CC2652RB (Texas Instruments), CP2102 (Silicon Labs), and derivatives.
+
+  Device pairing: Zigbee2MQTT can only pair devices when in pairing mode (permit_join enabled). The web UI at port 8080 provides a convenient interface for this.
+
+  MQTT broker: Zigbee2MQTT requires an MQTT broker (typically Mosquitto) to relay messages. If using the same docker-compose stack, reference the service name (e.g., mqtt:1883).
+
+  Configuration: All settings are in /app/data/configuration.yaml, including MQTT credentials, Zigbee channel, pan ID, and advanced radio settings.
+
+  Troubleshooting:
+  - Device not pairing: Check coordinator is powered, pairing mode is enabled, and device is in range.
+  - High latency: Reduce Zigbee channel congestion (choose less crowded WiFi channel 11 or 26).
+  - MQTT connection issues: Verify broker is running and credentials are correct in configuration.yaml.

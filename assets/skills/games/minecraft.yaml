@@ -1,0 +1,241 @@
+id: minecraft
+name: Minecraft Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "itzg/minecraft-server"
+  port_hints: [25565]
+category: games
+description: Self-hosted Minecraft Java Edition multiplayer server with configurable difficulty, gamemode, and memory limits
+docs_url: https://hub.docker.com/r/itzg/minecraft-server
+
+common_issues:
+  - id: eula-not-accepted
+    name: EULA not accepted - server won't start
+    symptoms:
+      - "Must accept the Minecraft EULA"
+      - "EULA=FALSE"
+      - "Server stops immediately after starting"
+      - "eula.txt file missing or set to false"
+    trigger_conditions:
+      - log_pattern: "EULA"
+      - log_pattern: "must accept"
+    steps:
+      - id: step-1
+        description: Check if EULA environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep EULA"
+        expected_output: "EULA=TRUE"
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Explain EULA requirement
+        type: inform
+        command: ""
+      - id: step-4
+        description: Set EULA=TRUE environment variable and restart
+        type: fix
+        command: "docker exec -e EULA=TRUE {container_name} /bin/bash -c 'echo EULA=TRUE > /data/eula.txt && echo \"EULA accepted\"'"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify EULA file is properly set
+        type: check
+        command: "docker exec {container_name} cat /data/eula.txt"
+        expected_output: "EULA=TRUE"
+    resolution: |
+      The Minecraft EULA (End User License Agreement) must be explicitly accepted to run a Minecraft server. The EULA environment variable has been set to TRUE and the eula.txt file updated. The server can now start. You must also ensure the EULA=TRUE environment variable is set in your docker-compose.yml to persist this setting across container restarts.
+
+  - id: out-of-memory-crash
+    name: Server crashes with out of memory errors
+    symptoms:
+      - "java.lang.OutOfMemoryError"
+      - "GC overhead limit exceeded"
+      - "Unable to create new native thread"
+      - "Server stops unexpectedly after running for a while"
+    trigger_conditions:
+      - log_pattern: "OutOfMemoryError"
+      - log_pattern: "GC overhead"
+    steps:
+      - id: step-1
+        description: Check current JVM memory allocation from MEMORY env var
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MEMORY"
+        expected_output: "MEMORY="
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment and memory settings
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check available memory on the host
+        type: check
+        command: "free -h"
+        expected_output: ""
+      - id: step-4
+        description: Inform about memory requirements
+        type: inform
+        command: ""
+      - id: step-5
+        description: Increase JVM heap size (requires container restart with updated env)
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor memory usage after restart
+        type: check
+        command: "docker stats {container_name} --no-stream | awk 'NR==2 {print $6, $7}'"
+    resolution: |
+      Minecraft servers consume significant Java heap memory, especially with many players or loaded chunks. The MEMORY environment variable controls the JVM heap size (e.g., MEMORY=2G, MEMORY=4G). Update your docker-compose.yml with an appropriate value based on your player count and available host memory. Typical recommendations: 1-2GB for small servers (1-5 players), 2-4GB for medium (5-20 players), 4GB+ for large servers. The container has been restarted to apply changes.
+
+  - id: slow-chunk-loading
+    name: Slow chunk loading or high server lag
+    symptoms:
+      - "Players report lag when exploring new areas"
+      - "Chunk loading is slow"
+      - "Ticks Per Second (TPS) dropping below 20"
+      - "Player movement is choppy or delayed"
+    trigger_conditions:
+      - log_pattern: "TPS.*[0-9]\\.[0-9]"
+      - log_pattern: "Can't keep up"
+    steps:
+      - id: step-1
+        description: Check server TPS from logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'tps\\|keep.*up' | tail -5"
+        expected_output: ""
+      - id: step-2
+        description: Check server view-distance setting
+        type: check
+        command: "docker exec {container_name} cat /data/server.properties | grep view-distance"
+        expected_output: "view-distance="
+        on_fail: step-3
+      - id: step-3
+        description: Display server.properties content
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check max player count
+        type: check
+        command: "docker exec {container_name} cat /data/server.properties | grep max-players"
+        expected_output: "max-players="
+      - id: step-5
+        description: Monitor CPU and memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+    resolution: |
+      Server lag is typically caused by view-distance being too high, too many players, insufficient CPU, or insufficient memory. Common optimizations: reduce view-distance (from default 10 to 8-10), reduce max-players to match server capacity, enable Bukkit/Paper plugins for optimization (Purpur, Paper servers offer better performance), allocate more JVM memory, or use a dedicated machine with better CPU. Check server logs for specific bottlenecks (redstone, mob spawning, chunk loading).
+
+  - id: data-not-persisted
+    name: World data lost after restart
+    symptoms:
+      - "Player builds disappeared after container restart"
+      - "World is reset each time container starts"
+      - "/data directory not mounted"
+      - "Nether/End dimensions missing"
+    trigger_conditions:
+      - log_pattern: "Creating.*world"
+      - exit_code: 0
+    steps:
+      - id: step-1
+        description: Check if /data volume is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "/data"
+        on_fail: step-2
+      - id: step-2
+        description: Display current mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify world files exist on host
+        type: check
+        command: "ls -la {data_path}/ | grep -E 'world|level.dat'"
+        expected_output: "world"
+        on_fail: step-4
+      - id: step-4
+        description: Display data directory contents
+        type: inform
+        command: ""
+      - id: step-5
+        description: Explain persistent volume requirement
+        type: inform
+        command: ""
+    resolution: |
+      Minecraft world data must be stored in a persistent volume mounted to /data inside the container. Ensure your docker-compose.yml includes a volume binding like `./data:/data` or a named volume. Without this, all world data is lost when the container is removed. If you need to migrate an existing world, copy the world folders to the host data directory before restarting the container.
+
+default_config:
+  compose_template: |
+    services:
+      minecraft:
+        image: itzg/minecraft-server:latest
+        container_name: minecraft
+        restart: unless-stopped
+        environment:
+          EULA: "TRUE"
+          MEMORY: ${MEMORY:-2G}
+          VERSION: ${VERSION:-latest}
+          DIFFICULTY: ${DIFFICULTY:-2}
+          GAMEMODE: ${GAMEMODE:-survival}
+          MAX_PLAYERS: ${MAX_PLAYERS:-10}
+          MOTD: ${MOTD:-Minecraft Server}
+          VIEW_DISTANCE: ${VIEW_DISTANCE:-10}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "25565:25565/tcp"
+        stdin_open: true
+        tty: true
+  required_vars:
+    - name: EULA
+      description: Accept Minecraft EULA (must be TRUE)
+      default: "TRUE"
+    - name: MEMORY
+      description: JVM heap memory (e.g., 2G, 4G, 8G)
+      default: "2G"
+    - name: VERSION
+      description: Minecraft server version (latest or specific version)
+      default: "latest"
+    - name: DIFFICULTY
+      description: Game difficulty (0=peaceful, 1=easy, 2=normal, 3=hard)
+      default: "2"
+    - name: GAMEMODE
+      description: Game mode (survival, creative, adventure, spectator)
+      default: "survival"
+    - name: MAX_PLAYERS
+      description: Maximum number of concurrent players
+      default: "10"
+    - name: MOTD
+      description: Message of the day shown in server list
+      default: "Minecraft Server"
+    - name: DATA_PATH
+      description: Host path for persistent world data
+      default: "./data"
+  known_mounts:
+    - container_path: /data
+      purpose: World saves, player data, server.properties, and logs
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  The itzg/minecraft-server image is the most popular community-maintained Minecraft server image. It supports vanilla Minecraft as well as modded servers (Paper, Spigot, Purpur, Forge) via the TYPE environment variable.
+
+  EULA acceptance: Launching a Minecraft server requires explicit acceptance of the EULA. This is set via the EULA=TRUE environment variable.
+
+  Memory allocation: The MEMORY variable controls JVM heap size. For small servers (1-5 players), 1-2GB is sufficient. For larger servers (10+ players), allocate 4-8GB. Always leave 1-2GB free on the host for the OS and other containers.
+
+  Data persistence: The /data directory must be mounted as a volume to persist world saves, player inventories, and server configuration. Without this mount, all progress is lost on container restart.
+
+  Paper/Purpur servers: For better performance, consider using TYPE=paper or TYPE=purpur instead of the default TYPE=vanilla. These are drop-in replacements with optimizations, but some plugins may not be compatible.
+
+  Common issues:
+  - EULA not accepted: Set EULA=TRUE and restart
+  - Out of memory: Increase MEMORY environment variable
+  - Chunk loading lag: Reduce VIEW_DISTANCE or enable Paper/Purpur for optimization
+  - World lost: Verify /data volume is mounted before first start
+  - Spawn chunks not loading: Ensure server has sufficient memory and CPU

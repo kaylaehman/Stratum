@@ -1,0 +1,253 @@
+id: ollama
+name: Ollama Local LLM Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ollama/ollama"
+  port_hints: [11434]
+category: ai
+description: Run large language models locally without internet dependency; supports GPU acceleration
+docs_url: https://hub.docker.com/r/ollama/ollama
+
+common_issues:
+  - id: gpu-not-detected
+    name: GPU not detected or not being used for inference
+    symptoms:
+      - "WARNING: GPU not available"
+      - "Using CPU instead of GPU"
+      - "Running on cpu"
+      - "CUDA not found"
+      - "AMD GPU not detected"
+    trigger_conditions:
+      - log_pattern: "GPU not available"
+      - log_pattern: "cpu"
+    steps:
+      - id: step-1
+        description: Check if GPU device is accessible inside container
+        type: check
+        command: "docker exec {container_name} nvidia-smi 2>&1 | head -5"
+        expected_output: "NVIDIA-SMI"
+        on_fail: step-2
+      - id: step-2
+        description: Verify NVIDIA Container Toolkit is installed on host
+        type: check
+        command: "which nvidia-container-runtime"
+        expected_output: "nvidia-container-runtime"
+        on_fail: step-3
+      - id: step-3
+        description: Display GPU detection status and available devices
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart container with GPU runtime enabled
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify GPU is now available after restart
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'gpu\\|cuda\\|rocm' | tail -3"
+    resolution: |
+      GPU acceleration requires the NVIDIA Container Toolkit (for NVIDIA GPUs) or AMD ROCm support (for AMD GPUs) to be installed on your host. The container has been restarted. If GPU is still not detected, install the appropriate toolkit on the host and ensure the container runtime is configured to use it. Without GPU, inference will be slow on CPU for large models.
+
+  - id: model-not-loading
+    name: Model fails to load or hangs during download
+    symptoms:
+      - "Pulling model... stuck indefinitely"
+      - "Out of memory"
+      - "OOM killed"
+      - "Model load failed"
+      - "Connection timeout during model pull"
+    trigger_conditions:
+      - log_pattern: "out of memory"
+      - log_pattern: "OOM"
+      - log_pattern: "download.*failed"
+    steps:
+      - id: step-1
+        description: Check available memory on host
+        type: check
+        command: "free -h | head -2"
+        expected_output: "Mem:"
+      - id: step-2
+        description: Check model download progress and disk space
+        type: check
+        command: "du -sh /root/.ollama/models 2>/dev/null || echo 'Model directory not accessible'"
+        expected_output: ""
+      - id: step-3
+        description: Check container memory limits
+        type: check
+        command: "docker inspect {container_name} --format='{{.HostConfig.Memory}}' | awk '{print $1 / 1024 / 1024 / 1024 \" GB\"}'"
+        expected_output: ""
+      - id: step-4
+        description: Display disk usage and available space for model storage
+        type: inform
+        command: ""
+      - id: step-5
+        description: Ensure model storage directory exists and has sufficient space
+        type: check
+        command: "df -h {model_path} 2>/dev/null | tail -1"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display recommendation for model size requirements
+        type: inform
+        command: ""
+    resolution: |
+      Model loading requires sufficient RAM and disk space. Large models (7B+ parameters) need 8-16GB of available memory and corresponding disk space for download. Check your free memory with `free -h` and available disk with `df -h`. If memory is constrained, try smaller models (mistral, neural-chat, dolphin-mixtral) or increase container memory limits. Ensure the model storage directory at /root/.ollama/models has write permissions and adequate space.
+
+  - id: api-timeout
+    name: API requests timeout or return 503/connection refused
+    symptoms:
+      - "Connection refused on port 11434"
+      - "curl: (7) Failed to connect"
+      - "503 Service Unavailable"
+      - "Request timeout"
+      - "Cannot connect to Ollama server"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+      - log_pattern: "503"
+    steps:
+      - id: step-1
+        description: Verify container is running
+        type: check
+        command: "docker ps --filter name={container_name} --format '{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check if container exited abnormally
+        type: check
+        command: "docker inspect {container_name} --format='{{.State.ExitCode}}'"
+        expected_output: "0"
+        on_fail: step-3
+      - id: step-3
+        description: Display container logs for errors
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify port 11434 is exposed and accessible
+        type: check
+        command: "docker exec {container_name} ss -tlnp 2>/dev/null | grep 11434"
+        expected_output: "11434"
+        on_fail: step-5
+      - id: step-5
+        description: Check from host that service is listening
+        type: check
+        command: "curl -s http://localhost:11434/api/status 2>&1 | head -c 50"
+        expected_output: ""
+      - id: step-6
+        description: Restart Ollama container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for service to be ready and verify connectivity
+        type: check
+        command: "sleep 5 && curl -s http://localhost:11434/api/status | head -c 50"
+    resolution: |
+      The Ollama API server has been restarted. Port 11434 should now be accessible. If the issue persists, check that the container has sufficient resources (CPU, memory) and that no other service is already using port 11434 on the host. You may also need to verify network connectivity between your client and the Ollama container.
+
+  - id: model-storage-full
+    name: Model storage fills disk or cannot save new models
+    symptoms:
+      - "No space left on device"
+      - "Model download failed - disk full"
+      - "Cannot save model layers"
+      - "Disk usage at 100%"
+    trigger_conditions:
+      - log_pattern: "No space left"
+      - log_pattern: "disk full"
+    steps:
+      - id: step-1
+        description: Check available disk space for model storage
+        type: check
+        command: "df -h {model_path} 2>/dev/null | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Display size of current models
+        type: check
+        command: "du -sh /root/.ollama/models/*/ 2>/dev/null | sort -rh | head -10"
+        expected_output: ""
+      - id: step-3
+        description: Check for unused or duplicate model layers
+        type: check
+        command: "docker exec {container_name} find /root/.ollama/models -type f -exec ls -lh {} \\; 2>/dev/null | wc -l"
+        expected_output: ""
+      - id: step-4
+        description: Display models available locally
+        type: inform
+        command: ""
+      - id: step-5
+        description: Remove unused model to free space
+        type: fix
+        command: "docker exec {container_name} rm -rf /root/.ollama/models/path-to-model"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify disk space recovered after removal
+        type: check
+        command: "df -h {model_path} | tail -1"
+    resolution: |
+      Model storage at /root/.ollama/models is full. Large models can occupy 4-40GB each depending on size and quantization. To free space, identify and remove unused models via `ollama rm <model-name>`. Consider mounting the model directory on a dedicated large partition or external drive. Monitor disk usage regularly to prevent future issues. You can also configure model storage location by mounting a different volume to /root/.ollama/models.
+
+default_config:
+  compose_template: |
+    services:
+      ollama:
+        image: ollama/ollama:latest
+        container_name: ollama
+        restart: unless-stopped
+        environment:
+          OLLAMA_HOST: 0.0.0.0:11434
+          OLLAMA_MODELS: /root/.ollama/models
+        ports:
+          - "11434:11434"
+        volumes:
+          - ${MODELS_PATH:-./models}:/root/.ollama/models
+        networks:
+          - stratum
+        # For NVIDIA GPU support, uncomment and ensure nvidia-docker is installed:
+        # runtime: nvidia
+        # deploy:
+        #   resources:
+        #     reservations:
+        #       devices:
+        #         - driver: nvidia
+        #           count: 1
+        #           capabilities: [gpu]
+  required_vars:
+    - name: MODELS_PATH
+      description: Host path for model storage (requires significant disk space, e.g., 50GB+)
+      default: "./models"
+  known_mounts:
+    - container_path: /root/.ollama/models
+      purpose: Local model storage and cache
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Ollama runs large language models locally without requiring internet or external API access. It provides a local HTTP API compatible with OpenAI client libraries.
+
+  GPU support: Enable GPU acceleration by installing NVIDIA Container Toolkit (NVIDIA GPUs) or AMD ROCm (AMD GPUs) on the host, then uncomment the runtime and gpu config in the compose file.
+
+  Model selection: Start with smaller quantized models (7B parameters) for resource-constrained systems. Recommended entry points:
+  - mistral:7b (8GB RAM)
+  - neural-chat:7b (8GB RAM)
+  - dolphin-mixtral:8x7b (40GB RAM for full model, 16GB for quantized)
+  - llama2:7b (8GB RAM)
+
+  Storage: Model files are persistent; one pulled model supports multiple concurrent API requests. Expect 4-40GB per model depending on size and quantization.
+
+  Port binding: Default 11434; change OLLAMA_HOST env var to customize. Ensure firewall rules allow access from clients (localhost-only vs. network-wide).
+
+  Integration with Stratum: Can be used as the backend for the AI Assistant panel (Feature #31); configure OLLAMA_BASE_URL in Stratum backend env.
+
+  Common gotchas:
+  - GPU not detected: Install NVIDIA Container Toolkit on host; ensure docker runtime is configured.
+  - Model fails to load: Insufficient RAM or disk space; free space first, use quantized models.
+  - API timeouts: Container may be overloaded; check resource usage, restart container.
+  - Model storage full: Monitor disk; remove unused models; mount larger partition if needed.
