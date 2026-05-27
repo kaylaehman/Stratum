@@ -33,6 +33,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/recreate"
 	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/backup"
@@ -128,6 +129,7 @@ func run(logger *slog.Logger) error {
 	cveSvc := cve.New(store, cve.ClientProvider(dockerForNode), cve.NewScanner())
 	backupSvc := backup.New(store, filesSvc.Exec)
 	twoFASvc := twofa.New(store, cipher)
+	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -152,6 +154,7 @@ func run(logger *slog.Logger) error {
 		CVE:            cveSvc,
 		Backups:        backupSvc,
 		TwoFA:          twoFASvc,
+		Recreate:       recreateSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

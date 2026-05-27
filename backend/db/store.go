@@ -236,6 +236,21 @@ type BackupRow struct {
 	FinishedAt *time.Time
 }
 
+// Snapshot is a rollback checkpoint of a container's full create-spec
+// (Feature 15/17). SpecJSON is docker.RecreateSpec marshaled. Listed by
+// (NodeID, ContainerName) since a recreate changes the container's docker id.
+type Snapshot struct {
+	ID            string
+	ContainerID   string
+	NodeID        string
+	ContainerName string
+	Reason        string
+	ImageRef      string
+	ImageDigest   string
+	SpecJSON      string
+	CreatedAt     time.Time
+}
+
 // Script is a saved shell script for the script runner (Feature 27).
 type Script struct {
 	ID          string
@@ -454,6 +469,14 @@ type Store interface {
 	CreateBackup(ctx context.Context, b BackupRow) error
 	UpdateBackup(ctx context.Context, b BackupRow) error
 	ListBackups(ctx context.Context) ([]BackupRow, error)
+
+	// Snapshots / rollback (Feature 15/17)
+	CreateSnapshot(ctx context.Context, s Snapshot) error
+	GetSnapshot(ctx context.Context, id string) (Snapshot, error)
+	ListSnapshotsByContainer(ctx context.Context, nodeID, containerName string) ([]Snapshot, error)
+	// PruneSnapshots keeps the newest `keep` snapshots for (nodeID, containerName)
+	// and deletes the rest.
+	PruneSnapshots(ctx context.Context, nodeID, containerName string, keep int) error
 
 	// Script runner (Feature 27)
 	CreateScript(ctx context.Context, s Script) error

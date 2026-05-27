@@ -21,6 +21,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/recreate"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
@@ -55,6 +56,7 @@ type Handlers struct {
 	CVE            *cve.Service
 	Backups        *backup.Service
 	TwoFA          *twofa.Service
+	Recreate       *recreate.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

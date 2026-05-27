@@ -101,6 +101,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Container healthcheck config + history (read-only).
 			r.Get("/containers/{id}/health", d.Handlers.ContainerHealth)
 
+			// Rollback snapshots list (read-only; update/snapshot/rollback audited below).
+			r.Get("/containers/{id}/snapshots", d.Handlers.ListSnapshots)
+
 			// Network topology (read-only; per node).
 			r.Get("/nodes/{id}/topology", d.Handlers.NodeTopology)
 
@@ -191,6 +194,9 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/{id}/sshkeys/delete", d.Handlers.DeleteSSHKey)
 			audited.Put("/nodes/{id}/cron", d.Handlers.SetCron)
 			audited.Post("/containers/{id}/cve-scan", d.Handlers.CVEScanContainer)
+			audited.Post("/containers/{id}/update", d.Handlers.UpdateContainer)
+			audited.Post("/containers/{id}/snapshot", d.Handlers.SnapshotContainer)
+			audited.Post("/containers/{id}/rollback/{snap}", d.Handlers.RollbackContainer)
 			audited.Post("/scripts", d.Handlers.CreateScript)
 			audited.Put("/scripts/{id}", d.Handlers.UpdateScript)
 			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)

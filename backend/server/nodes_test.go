@@ -29,6 +29,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/recreate"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
@@ -96,6 +97,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		CVE:            cve.New(store, cve.ClientProvider(noDocker), cve.NewScanner()),
 		Backups:        backup.New(store, filesSvc.Exec),
 		TwoFA:          twofa.New(store, cipher),
+		Recreate:       recreate.New(store, recreate.ClientProvider(noDocker)),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),
