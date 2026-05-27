@@ -121,9 +121,7 @@ func run(logger *slog.Logger) error {
 	updateSvc := updates.New(store, updates.ClientProvider(dockerForNode), 6*time.Hour)
 	secretSvc := secrets.New(store, cipher)
 	filesSvc := fs.NewService(store, cipher, uploadMaxBytes())
-	schedulerSvc := scheduler.New(filesSvc.Exec, func(ctx context.Context, nid, p string, c []byte) error {
-		return filesSvc.Write(ctx, nid, p, c, nil)
-	})
+	schedulerSvc := scheduler.New(filesSvc.Exec)
 
 	handlers := &api.Handlers{
 		Store:          store,

@@ -89,7 +89,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Webhooks:       webhooks.New(store),
 		Updater:        updates.New(store, updates.ClientProvider(noDocker), time.Minute),
 		Secrets:        secrets.New(store, cipher),
-		Scheduler:      scheduler.New(filesSvc.Exec, func(ctx context.Context, nid, p string, c []byte) error { return filesSvc.Write(ctx, nid, p, c, nil) }),
+		Scheduler:      scheduler.New(filesSvc.Exec),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

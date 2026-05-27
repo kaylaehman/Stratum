@@ -2,15 +2,13 @@ package scheduler
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 )
 
 // ExecFunc runs a command on a node over SSH (matches fs.Service.Exec).
 type ExecFunc func(ctx context.Context, nodeID, cmd string, args ...string) (string, error)
-
-// WriteFunc writes a file on a node (matches an adapter over fs.Service.Write).
-type WriteFunc func(ctx context.Context, nodeID, path string, content []byte) error
 
 // Schedule is a node's scheduled tasks.
 type Schedule struct {
@@ -31,13 +29,12 @@ done`
 
 // Service reads and edits a node's scheduled tasks over SSH.
 type Service struct {
-	exec  ExecFunc
-	write WriteFunc
+	exec ExecFunc
 }
 
-// New wires the SSH exec + file-write adapters.
-func New(exec ExecFunc, write WriteFunc) *Service {
-	return &Service{exec: exec, write: write}
+// New wires the SSH exec adapter.
+func New(exec ExecFunc) *Service {
+	return &Service{exec: exec}
 }
 
 // Read returns the node's cron jobs (across users) and systemd timers.
@@ -77,18 +74,18 @@ func parseCronBlocks(out string) []CronJob {
 	return jobs
 }
 
-// SetCrontab installs new crontab content for a user by writing it to a temp
-// file and running `crontab -u <user> <file>`. The caller must validate user.
+// SetCrontab installs new crontab content for a user. The content is
+// base64-encoded and piped to `crontab -u <user> -` over stdin in a single
+// command — no temp file is ever created, eliminating the /tmp symlink/TOCTOU
+// race. The base64 alphabet and the charset-validated user are both safe inside
+// single quotes, so there is no shell-injection surface.
 func (s *Service) SetCrontab(ctx context.Context, nodeID, user, content string) error {
 	if !ValidUser(user) {
 		return fmt.Errorf("scheduler: invalid user %q", user)
 	}
-	tmp := "/tmp/stratum-cron-" + user
-	if err := s.write(ctx, nodeID, tmp, []byte(ensureTrailingNewline(content))); err != nil {
-		return err
-	}
-	defer func() { _, _ = s.exec(ctx, nodeID, "rm", "-f", tmp) }()
-	if _, err := s.exec(ctx, nodeID, "crontab", "-u", user, tmp); err != nil {
+	b64 := base64.StdEncoding.EncodeToString([]byte(ensureTrailingNewline(content)))
+	script := "printf '%s' '" + b64 + "' | base64 -d | crontab -u '" + user + "' -"
+	if _, err := s.exec(ctx, nodeID, "sh", "-c", script); err != nil {
 		return err
 	}
 	return nil
