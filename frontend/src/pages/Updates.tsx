@@ -1,0 +1,317 @@
+import { ArrowUpCircle, CheckCircle, HelpCircle, RefreshCw, Loader } from 'lucide-react'
+import { AppShell } from '../components/layout/AppShell'
+import { useMe } from '../hooks/useMe'
+import { useTree } from '../lib/api/tree'
+import { useUpdates, useRescanUpdates } from '../lib/api/updates'
+import type { ImageUpdate, UpdateStatus, TreeNode } from '../types/api'
+
+// ---- Helpers ----
+
+function resolveContainerName(containerId: string, nodes: TreeNode[]): string {
+  for (const node of nodes) {
+    const found = node.containers.find((c) => c.id === containerId)
+    if (found) return found.name
+  }
+  return containerId
+}
+
+function resolveNodeName(nodeId: string, nodes: TreeNode[]): string {
+  return nodes.find((n) => n.id === nodeId)?.name ?? nodeId
+}
+
+function sortUpdates(updates: ImageUpdate[]): ImageUpdate[] {
+  const order: Record<UpdateStatus, number> = {
+    update_available: 0,
+    unknown: 1,
+    up_to_date: 2,
+  }
+  return [...updates].sort((a, b) => order[a.status] - order[b.status])
+}
+
+// ---- Status chip ----
+
+function StatusChip({ status }: { status: UpdateStatus }) {
+  if (status === 'update_available') {
+    return (
+      <span
+        className="flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
+        style={{
+          color: 'var(--status-warn)',
+          background: 'rgba(240,160,32,0.12)',
+          border: '1px solid rgba(240,160,32,0.4)',
+          borderRadius: '3px',
+          fontSize: '10px',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <ArrowUpCircle size={10} />
+        Update available
+      </span>
+    )
+  }
+
+  if (status === 'up_to_date') {
+    return (
+      <span
+        className="flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
+        style={{
+          color: 'var(--status-ok, #40c878)',
+          background: 'rgba(64,200,120,0.1)',
+          border: '1px solid rgba(64,200,120,0.3)',
+          borderRadius: '3px',
+          fontSize: '10px',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <CheckCircle size={10} />
+        Up to date
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className="flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
+      style={{
+        color: 'var(--text-muted)',
+        background: 'transparent',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: '3px',
+        fontSize: '10px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <HelpCircle size={10} />
+      Unknown
+    </span>
+  )
+}
+
+// ---- Table row ----
+
+interface UpdateRowProps {
+  update: ImageUpdate
+  containerName: string
+  nodeName: string
+}
+
+function UpdateRow({ update, containerName, nodeName }: UpdateRowProps) {
+  return (
+    <tr>
+      <td
+        className="px-3 py-2 font-mono text-xs"
+        style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        {containerName}
+      </td>
+      <td
+        className="px-3 py-2 text-xs"
+        style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        {nodeName}
+      </td>
+      <td
+        className="px-3 py-2 font-mono text-xs"
+        style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)', maxWidth: '240px' }}
+      >
+        <span className="truncate block" title={update.image}>{update.image}</span>
+      </td>
+      <td
+        className="px-3 py-2"
+        style={{ borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        <StatusChip status={update.status} />
+      </td>
+      <td
+        className="px-3 py-2 text-xs"
+        style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', whiteSpace: 'nowrap' }}
+      >
+        {new Date(update.checked_at).toLocaleString()}
+      </td>
+    </tr>
+  )
+}
+
+// ---- Summary bar ----
+
+function SummaryBar({ updates }: { updates: ImageUpdate[] }) {
+  const available = updates.filter((u) => u.status === 'update_available').length
+  const upToDate = updates.filter((u) => u.status === 'up_to_date').length
+  const unknown = updates.filter((u) => u.status === 'unknown').length
+
+  return (
+    <div className="flex items-center gap-4 mb-5">
+      <span
+        className="text-xs font-medium"
+        style={{ color: available > 0 ? 'var(--status-warn)' : 'var(--text-muted)' }}
+      >
+        {available} update{available !== 1 ? 's' : ''} available
+      </span>
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        {upToDate} up to date
+      </span>
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        {unknown} unknown
+      </span>
+    </div>
+  )
+}
+
+// ---- Main page ----
+
+const TABLE_COLS = ['Container', 'Node', 'Image', 'Status', 'Last Checked']
+
+export default function Updates() {
+  const { data: me } = useMe()
+  const isAdmin = me?.role === 'admin'
+
+  const { data: tree } = useTree()
+  const nodes = tree?.nodes ?? []
+
+  const { data, isLoading } = useUpdates()
+  const { mutate: rescan, isPending: isRescanning } = useRescanUpdates()
+
+  const updates = sortUpdates(data?.updates ?? [])
+
+  return (
+    <AppShell>
+      <div
+        className="flex flex-col flex-1 min-h-0 h-full w-full p-6"
+        style={{ maxWidth: '1100px', margin: '0 auto' }}
+      >
+        {/* Page header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <ArrowUpCircle size={16} style={{ color: 'var(--text-secondary)' }} />
+            <h1
+              className="text-sm font-medium uppercase tracking-wider"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              Update Assistant
+            </h1>
+          </div>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => rescan()}
+              disabled={isRescanning || isLoading}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+              style={{
+                backgroundColor: isRescanning ? 'rgba(74,82,104,0.2)' : 'var(--bg-elevated)',
+                border: '1px solid var(--border-default)',
+                color: isRescanning ? 'var(--text-muted)' : 'var(--text-secondary)',
+                borderRadius: '3px',
+                cursor: isRescanning ? 'default' : 'pointer',
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              {isRescanning ? (
+                <>
+                  <Loader size={11} className="animate-spin" />
+                  Checking registries…
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={11} />
+                  Rescan
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Loading state */}
+        {isLoading && (
+          <div className="flex items-center gap-2 py-8">
+            <Loader size={13} className="animate-spin" style={{ color: 'var(--accent)' }} />
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Loading update status…
+            </span>
+          </div>
+        )}
+
+        {/* Content */}
+        {!isLoading && (
+          <>
+            {updates.length === 0 ? (
+              <div
+                className="px-3 py-4 text-xs"
+                style={{
+                  color: 'var(--text-muted)',
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '3px',
+                }}
+              >
+                No containers checked yet — try Rescan.
+              </div>
+            ) : (
+              <>
+                <SummaryBar updates={updates} />
+
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '3px',
+                    overflowX: 'auto',
+                  }}
+                >
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        {TABLE_COLS.map((col) => (
+                          <th
+                            key={col}
+                            className="px-3 py-2 text-left text-xs uppercase tracking-wider font-medium"
+                            style={{
+                              color: 'var(--text-muted)',
+                              borderBottom: '1px solid var(--border-subtle)',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {updates.map((u) => (
+                        <UpdateRow
+                          key={`${u.node_id}:${u.container_id}`}
+                          update={u}
+                          containerName={resolveContainerName(u.container_id, nodes)}
+                          nodeName={resolveNodeName(u.node_id, nodes)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {/* Footer note */}
+            <div
+              className="flex items-start gap-2 mt-5 px-3 py-2.5 text-xs"
+              style={{
+                backgroundColor: 'rgba(74,82,104,0.12)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '3px',
+                color: 'var(--text-muted)',
+                lineHeight: '1.6',
+              }}
+            >
+              <HelpCircle size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
+              <span>
+                <strong style={{ color: 'var(--text-secondary)' }}>Unknown</strong> status means the image
+                was built locally, comes from a private registry, or the registry is rate-limiting checks.
+                Applying updates is not yet available — this view is detection only.
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+    </AppShell>
+  )
+}

@@ -772,6 +772,24 @@ export interface SetWOLRequest {
   port?: number
 }
 
+// Update Assistant types (Feature 15)
+
+export type UpdateStatus = 'up_to_date' | 'update_available' | 'unknown'
+
+export interface ImageUpdate {
+  container_id: string
+  node_id: string
+  image: string
+  status: UpdateStatus
+  current_digest: string
+  latest_digest: string
+  checked_at: string
+}
+
+export interface UpdatesResponse {
+  updates: ImageUpdate[]
+}
+
 // Smart Search types (Feature 23)
 
 export interface SearchNodeHit {
