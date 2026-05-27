@@ -596,3 +596,26 @@ export interface VolumeView {
 export interface VolumesResponse {
   volumes: VolumeView[]
 }
+
+// Resource Timeline types (Feature 9)
+
+export interface MetricSample {
+  sampled_at: string
+  cpu_pct: number
+  mem_bytes: number
+  mem_limit_bytes: number
+  disk_read_bytes: number
+  disk_write_bytes: number
+}
+
+export interface MetricSpike {
+  metric: 'cpu' | 'mem'
+  from: string
+  to: string
+  peak: number
+}
+
+export interface MetricsResponse {
+  samples: MetricSample[]
+  spikes: MetricSpike[]
+}

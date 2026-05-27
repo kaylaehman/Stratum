@@ -14,6 +14,7 @@ import Logs from './pages/Logs'
 import Security from './pages/Security'
 import Activity from './pages/Activity'
 import Volumes from './pages/Volumes'
+import Metrics from './pages/Metrics'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -88,6 +89,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Volumes />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/metrics"
+          element={
+            <AuthGuard>
+              <Metrics />
             </AuthGuard>
           }
         />
