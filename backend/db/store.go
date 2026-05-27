@@ -381,6 +381,9 @@ type Store interface {
 	DeleteSecretGroup(ctx context.Context, id string) error
 	UpsertSecret(ctx context.Context, s SecretRow) error
 	ListSecretsByGroup(ctx context.Context, groupID string) ([]SecretRow, error)
+	// ListSecretKeysByGroup returns only id+key (never the encrypted blob), so a
+	// listing can't accidentally carry secret material into a response.
+	ListSecretKeysByGroup(ctx context.Context, groupID string) ([]SecretRow, error)
 	GetSecret(ctx context.Context, id string) (SecretRow, error)
 	DeleteSecret(ctx context.Context, id string) error
 

@@ -89,11 +89,20 @@ func ParseEnv(text string) map[string]string {
 	return out
 }
 
+// unquote strips matching surrounding quotes. Single-quoted values are literal
+// (shell convention). Double-quoted values expand the common escapes \n \t \r
+// \\ \" so an imported .env value matches what the runtime app would see.
 func unquote(v string) string {
-	if len(v) >= 2 {
-		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
-			return v[1 : len(v)-1]
-		}
+	if len(v) < 2 {
+		return v
+	}
+	if v[0] == '\'' && v[len(v)-1] == '\'' {
+		return v[1 : len(v)-1]
+	}
+	if v[0] == '"' && v[len(v)-1] == '"' {
+		inner := v[1 : len(v)-1]
+		r := strings.NewReplacer(`\n`, "\n", `\t`, "\t", `\r`, "\r", `\"`, `"`, `\\`, `\`)
+		return r.Replace(inner)
 	}
 	return v
 }

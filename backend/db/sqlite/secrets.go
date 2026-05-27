@@ -98,6 +98,25 @@ func (s *Store) ListSecretsByGroup(ctx context.Context, groupID string) ([]appdb
 	return out, rows.Err()
 }
 
+// ListSecretKeysByGroup returns only id+key — the encrypted blob is never read
+// into memory, so it can't leak into a listing response.
+func (s *Store) ListSecretKeysByGroup(ctx context.Context, groupID string) ([]appdb.SecretRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, key FROM secrets WHERE group_id = ? ORDER BY key ASC`, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list secret keys: %w", err)
+	}
+	defer rows.Close()
+	var out []appdb.SecretRow
+	for rows.Next() {
+		var sec appdb.SecretRow
+		if err := rows.Scan(&sec.ID, &sec.Key); err != nil {
+			return nil, fmt.Errorf("sqlite: scan secret key: %w", err)
+		}
+		out = append(out, sec)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) GetSecret(ctx context.Context, id string) (appdb.SecretRow, error) {
 	sec, err := scanSecret(s.db.QueryRowContext(ctx,
 		`SELECT id, group_id, key, value_encrypted, created_at, updated_at FROM secrets WHERE id = ?`, id))

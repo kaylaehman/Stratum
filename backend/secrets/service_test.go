@@ -15,6 +15,8 @@ FOO=bar
 export BAZ = qux
 QUOTED="hello world"
 SINGLE='single'
+ESCAPED="line1\nline2\ttab"
+LITERAL='no\nescape'
 EMPTY=
 notakeyline
 =novalue
@@ -23,7 +25,10 @@ WITH_EQUALS=a=b=c
 	got := ParseEnv(in)
 	want := map[string]string{
 		"FOO": "bar", "BAZ": "qux", "QUOTED": "hello world",
-		"SINGLE": "single", "EMPTY": "", "WITH_EQUALS": "a=b=c",
+		"SINGLE":  "single",
+		"ESCAPED": "line1\nline2\ttab", // double-quoted: escapes expanded
+		"LITERAL": `no\nescape`,        // single-quoted: literal backslash
+		"EMPTY":   "", "WITH_EQUALS": "a=b=c",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parsed %d keys, want %d: %+v", len(got), len(want), got)

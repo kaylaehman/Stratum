@@ -37,10 +37,10 @@ func (h *Handlers) ListSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]secretGroupView, 0, len(groups))
 	for _, g := range groups {
-		secrets, _ := h.Store.ListSecretsByGroup(r.Context(), g.ID)
+		secrets, _ := h.Store.ListSecretKeysByGroup(r.Context(), g.ID) // id+key only; blob never loaded
 		keys := make([]secretKeyView, len(secrets))
 		for i, s := range secrets {
-			keys[i] = secretKeyView{ID: s.ID, Key: s.Key} // value_encrypted intentionally omitted
+			keys[i] = secretKeyView{ID: s.ID, Key: s.Key}
 		}
 		out = append(out, secretGroupView{ID: g.ID, Name: g.Name, Description: g.Description, Secrets: keys})
 	}
@@ -127,6 +127,10 @@ func (h *Handlers) ImportSecrets(w http.ResponseWriter, r *http.Request) {
 	var body importBody
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if len(body.Env) > 1<<20 { // cap .env import at 1 MiB to bound the O(n) write fan-out
+		writeError(w, http.StatusBadRequest, "env_too_large")
 		return
 	}
 	n, err := h.Secrets.ImportEnv(r.Context(), groupID, body.Env)
