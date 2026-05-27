@@ -1352,6 +1352,19 @@ export interface SetFeatureRequest {
   enabled: boolean
 }
 
+// Chat Integration types (Feature F8)
+
+export interface ChatConfig {
+  provider: 'telegram'
+  has_token: boolean
+  allowed_chats: number[]
+}
+
+export interface SetChatConfigRequest {
+  allowed_chats: number[]
+  token?: string
+}
+
 // DNS Record Management types (Feature F3)
 
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'PTR' | 'TXT' | 'SRV'

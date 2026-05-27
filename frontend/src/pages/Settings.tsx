@@ -12,6 +12,10 @@ import {
   Flag,
   ToggleLeft,
   ToggleRight,
+  MessageSquare,
+  Plus,
+  X,
+  Save,
 } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 import {
@@ -33,7 +37,8 @@ import { ApiError } from '../lib/api'
 import type { TwoFASetupResponse, UserRole } from '../types/api'
 import { AISettingsSection } from '../components/ai/AISettingsSection'
 import { MemoryPanel } from '../components/ai/MemoryPanel'
-import { useFeatures, useSetFeature } from '../lib/api/features'
+import { useFeatures, useSetFeature, useFeatureEnabled } from '../lib/api/features'
+import { useChatConfig, useSetChatConfig } from '../lib/api/chat'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1182,6 +1187,412 @@ function FeaturesSection() {
   )
 }
 
+// ── Chat Integration section (admin-only) ────────────────────────────────────
+
+function ChatIntegrationSection() {
+  const { data, isLoading } = useChatConfig()
+  const setConfig = useSetChatConfig()
+  const isEnabled = useFeatureEnabled('feature.chat_integration')
+
+  // Token state: 'keep' | 'replace' | 'clear'
+  const [tokenMode, setTokenMode] = useState<'keep' | 'replace' | 'clear'>('keep')
+  const [tokenValue, setTokenValue] = useState('')
+  const [tokenFocused, setTokenFocused] = useState(false)
+
+  // Allowed chat IDs
+  const [chats, setChats] = useState<number[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatInputFocused, setChatInputFocused] = useState(false)
+
+  // Sync chats from fetched data (only on first load)
+  const [synced, setSynced] = useState(false)
+  if (data && !synced) {
+    setChats(data.allowed_chats)
+    setSynced(true)
+  }
+
+  const [status, setStatus] = useState<'idle' | 'ok' | 'error'>('idle')
+  const [errorMsg, setErrorMsg] = useState('')
+
+  function addChat() {
+    const n = parseInt(chatInput.trim(), 10)
+    if (!Number.isFinite(n)) return
+    if (chats.includes(n)) { setChatInput(''); return }
+    setChats(prev => [...prev, n])
+    setChatInput('')
+  }
+
+  function removeChat(id: number) {
+    setChats(prev => prev.filter(c => c !== id))
+  }
+
+  async function handleSave() {
+    setStatus('idle')
+    setErrorMsg('')
+    const req: Parameters<typeof setConfig.mutateAsync>[0] = {
+      allowed_chats: chats,
+    }
+    if (tokenMode === 'replace' && tokenValue.trim()) {
+      req.token = tokenValue.trim()
+    } else if (tokenMode === 'clear') {
+      req.token = ''
+    }
+    // tokenMode === 'keep': omit token field entirely
+    try {
+      await setConfig.mutateAsync(req)
+      setSynced(false) // re-sync on next data arrival
+      setTokenMode('keep')
+      setTokenValue('')
+      setStatus('ok')
+    } catch {
+      setStatus('error')
+      setErrorMsg('Save failed. Check the bot token and try again.')
+    }
+  }
+
+  const hasToken = data?.has_token ?? false
+
+  return (
+    <section
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '3px',
+        padding: '20px',
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+        <MessageSquare size={16} style={{ color: 'var(--accent)' }} />
+        <div style={{ flex: 1 }}>
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)', margin: 0 }}>
+            Chat Integration
+          </h2>
+          <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+            Telegram bot for read-only commands (/status, /nodes, /help)
+          </p>
+        </div>
+      </div>
+
+      {/* Feature-flag hint */}
+      {!isEnabled && (
+        <div
+          style={{
+            backgroundColor: 'var(--bg-elevated)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '3px',
+            padding: '8px 12px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
+            Enable "Chat Integration" in Features above to activate the bot. You can still configure it here.
+          </span>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+          <Loader size={14} className="animate-spin" />
+          <span className="text-xs">Loading…</span>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+
+          {/* Help line */}
+          <p className="font-mono text-xs" style={{ color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+            Message your bot, then add the chat ID shown by @userinfobot (or the chat's numeric ID).
+            Only listed chats can run commands: /status, /nodes, /help.
+          </p>
+
+          {/* Bot token field */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+              Bot Token
+            </label>
+
+            {/* Status / affordances row */}
+            {tokenMode === 'keep' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  className="font-mono text-xs"
+                  style={{
+                    color: hasToken ? 'var(--status-ok)' : 'var(--text-muted)',
+                    backgroundColor: 'var(--bg-elevated)',
+                    border: `1px solid ${hasToken ? 'var(--status-ok)' : 'var(--border-subtle)'}`,
+                    borderRadius: '3px',
+                    padding: '4px 10px',
+                    flex: 1,
+                  }}
+                >
+                  {hasToken ? 'token set' : 'no token stored'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTokenMode('replace')}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '3px',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.7rem',
+                    fontFamily: 'monospace',
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {hasToken ? 'Replace' : 'Set token'}
+                </button>
+                {hasToken && (
+                  <button
+                    type="button"
+                    onClick={() => setTokenMode('clear')}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '3px',
+                      color: 'var(--status-error)',
+                      fontSize: '0.7rem',
+                      fontFamily: 'monospace',
+                      padding: '4px 10px',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
+            {tokenMode === 'clear' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  className="font-mono text-xs"
+                  style={{
+                    color: 'var(--status-warn)',
+                    backgroundColor: 'var(--bg-elevated)',
+                    border: '1px solid var(--status-warn)',
+                    borderRadius: '3px',
+                    padding: '4px 10px',
+                    flex: 1,
+                  }}
+                >
+                  Token will be cleared on save
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTokenMode('keep')}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '3px',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.7rem',
+                    fontFamily: 'monospace',
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {tokenMode === 'replace' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="password"
+                    placeholder="Paste bot token from @BotFather"
+                    value={tokenValue}
+                    onChange={e => setTokenValue(e.target.value)}
+                    onFocus={() => setTokenFocused(true)}
+                    onBlur={() => setTokenFocused(false)}
+                    autoComplete="off"
+                    style={{
+                      backgroundColor: 'var(--bg-elevated)',
+                      border: `1px solid ${tokenFocused ? 'var(--accent)' : 'var(--border-default)'}`,
+                      color: 'var(--text-primary)',
+                      borderRadius: '3px',
+                      outline: 'none',
+                      flex: 1,
+                      padding: '6px 10px',
+                      fontFamily: 'monospace',
+                      fontSize: '0.75rem',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setTokenMode('keep'); setTokenValue('') }}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '3px',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.7rem',
+                      fontFamily: 'monospace',
+                      padding: '4px 10px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Allowed chat IDs */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+              Allowed Chat IDs
+            </label>
+
+            {/* Add row */}
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="e.g. -1001234567890"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value.replace(/[^0-9-]/g, ''))}
+                onFocus={() => setChatInputFocused(true)}
+                onBlur={() => setChatInputFocused(false)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addChat() } }}
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  border: `1px solid ${chatInputFocused ? 'var(--accent)' : 'var(--border-default)'}`,
+                  color: 'var(--text-primary)',
+                  borderRadius: '3px',
+                  outline: 'none',
+                  flex: 1,
+                  padding: '5px 8px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.75rem',
+                }}
+              />
+              <button
+                type="button"
+                onClick={addChat}
+                disabled={!chatInput.trim()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  backgroundColor: chatInput.trim() ? 'var(--accent)' : 'var(--bg-elevated)',
+                  color: chatInput.trim() ? '#fff' : 'var(--text-muted)',
+                  border: chatInput.trim() ? 'none' : '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '5px 12px',
+                  fontSize: '0.7rem',
+                  fontFamily: 'monospace',
+                  cursor: chatInput.trim() ? 'pointer' : 'not-allowed',
+                }}
+              >
+                <Plus size={13} />
+                Add
+              </button>
+            </div>
+
+            {/* Chat ID list */}
+            {chats.length === 0 ? (
+              <p className="font-mono text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+                No chat IDs configured — no chats can run commands.
+              </p>
+            ) : (
+              <div
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '3px',
+                  overflow: 'hidden',
+                }}
+              >
+                {chats.map((id, idx) => (
+                  <div
+                    key={id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      backgroundColor: idx % 2 === 0 ? 'var(--bg-elevated)' : 'var(--bg-surface)',
+                      borderBottom: idx < chats.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                    }}
+                  >
+                    <code className="font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
+                      {id}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => removeChat(id)}
+                      title="Remove"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--text-muted)',
+                        padding: '2px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        lineHeight: 1,
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Save / status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={setConfig.isPending}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: 'var(--accent)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '3px',
+                padding: '6px 16px',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                cursor: setConfig.isPending ? 'not-allowed' : 'pointer',
+                opacity: setConfig.isPending ? 0.6 : 1,
+              }}
+            >
+              {setConfig.isPending
+                ? <Loader size={12} className="animate-spin" />
+                : <Save size={13} />}
+              Save
+            </button>
+            {status === 'ok' && (
+              <span className="font-mono text-xs" style={{ color: 'var(--status-ok)' }}>
+                Saved.
+              </span>
+            )}
+            {status === 'error' && (
+              <span className="font-mono text-xs" style={{ color: 'var(--status-error)' }}>
+                {errorMsg}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Settings() {
@@ -1217,6 +1628,8 @@ export default function Settings() {
         {isAdmin && <AISettingsSection />}
 
         <FeaturesSection />
+
+        {isAdmin && <ChatIntegrationSection />}
 
         <MemoryPanel scope="global" />
       </div>
