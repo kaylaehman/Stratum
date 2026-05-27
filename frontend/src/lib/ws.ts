@@ -6,12 +6,15 @@ interface Subscription {
 }
 
 type OpenCallback = () => void
+type LogLineHandler = (line: import('../types/api').LogLine) => void
 
 class WebSocketManager {
   private socket: WebSocket | null = null
   private subscriptions: Subscription[] = []
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private openCallbacks: OpenCallback[] = []
+  private _clientId: string | null = null
+  private logLineHandlers: LogLineHandler[] = []
 
   /** Register a callback to fire every time the socket (re)opens. */
   onOpen(cb: OpenCallback): () => void {
@@ -37,6 +40,8 @@ class WebSocketManager {
           clearTimeout(this.reconnectTimer)
           this.reconnectTimer = null
         }
+        // Reset client_id; server will send a fresh hello
+        this._clientId = null
         for (const cb of this.openCallbacks) {
           cb()
         }
@@ -68,6 +73,22 @@ class WebSocketManager {
     }, 5000)
   }
 
+  /** Returns the client_id received from the server hello, or null if not yet received. */
+  clientId(): string | null {
+    return this._clientId
+  }
+
+  /**
+   * Register a handler for log-line messages (messages with stream + text fields).
+   * Returns an unsubscribe function.
+   */
+  onLogLine(handler: LogLineHandler): () => void {
+    this.logLineHandlers.push(handler)
+    return () => {
+      this.logLineHandlers = this.logLineHandlers.filter((h) => h !== handler)
+    }
+  }
+
   private dispatch(raw: string): void {
     let parsed: unknown
     try {
@@ -75,6 +96,26 @@ class WebSocketManager {
     } catch {
       parsed = raw
     }
+
+    if (typeof parsed === 'object' && parsed !== null) {
+      const obj = parsed as Record<string, unknown>
+
+      // Hello message: capture client_id
+      if ('client_id' in obj && typeof obj['client_id'] === 'string') {
+        this._clientId = obj['client_id'] as string
+        return
+      }
+
+      // Log line message: has stream + text fields
+      if ('stream' in obj && 'text' in obj) {
+        const line = parsed as import('../types/api').LogLine
+        for (const handler of this.logLineHandlers) {
+          handler(line)
+        }
+        return
+      }
+    }
+
     for (const sub of this.subscriptions) {
       if (typeof parsed === 'object' && parsed !== null) {
         const obj = parsed as Record<string, unknown>

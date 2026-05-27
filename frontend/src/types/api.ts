@@ -387,3 +387,32 @@ export interface DiagnosticResult {
   steps: DiagnosticStep[]
   fixes: SuggestedFix[]
 }
+
+// Log streaming types
+
+export type LogStream = 'stdout' | 'stderr'
+
+/** A single log line pushed over the WebSocket by the server. */
+export interface LogLine {
+  /** UUID of the container (Docker ID, as sent by server after subscribe). */
+  container_id: string
+  /** RFC3339Nano UTC timestamp; may be empty string. */
+  ts: string
+  stream: LogStream
+  text: string
+  truncated?: boolean
+}
+
+/** Hello message sent by server on ws connect. */
+export interface WsHello {
+  client_id: string
+}
+
+export interface LogSubscribeRequest {
+  container_id: string
+  ws_client_id: string
+}
+
+export interface LogSubscribeResponse {
+  topic: string
+}

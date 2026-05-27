@@ -10,6 +10,7 @@ import Setup from './pages/Setup'
 import Dashboard from './pages/Dashboard'
 import Nodes from './pages/Nodes'
 import Resources from './pages/Resources'
+import Logs from './pages/Logs'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -52,6 +53,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Resources />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/logs"
+          element={
+            <AuthGuard>
+              <Logs />
             </AuthGuard>
           }
         />
