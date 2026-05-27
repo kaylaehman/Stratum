@@ -1,5 +1,6 @@
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
+import { FileBrowser } from '../components/filesystem/FileBrowser'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
 import type { TreeSelection } from '../types/api'
@@ -15,6 +16,23 @@ function selectionTitle(sel: TreeSelection): string {
     case 'fs-root':
       return 'Filesystem'
   }
+}
+
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span className="text-xs w-28 shrink-0" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </span>
+      <span
+        className={`text-xs truncate ${mono ? 'font-mono' : ''}`}
+        style={{ color: 'var(--text-primary)' }}
+        title={value}
+      >
+        {value}
+      </span>
+    </div>
+  )
 }
 
 function DetailPane() {
@@ -33,6 +51,18 @@ function DetailPane() {
   }
 
   const node = data?.nodes.find((n) => n.id === selection.nodeId)
+
+  // Filesystem browser takes the full pane
+  if (selection.kind === 'fs-root') {
+    return (
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+        <FileBrowser
+          nodeId={selection.nodeId}
+          containerId={selection.containerId}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 overflow-auto p-5">
@@ -90,37 +120,7 @@ function DetailPane() {
             </div>
           )
         })()}
-
-        {selection.kind === 'fs-root' && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              Filesystem browser is coming in a future sub-project. Select a path in the tree to
-              navigate.
-            </p>
-            {node && <Row label="Host" value={node.host} mono />}
-            {selection.containerId && (
-              <Row label="Container ID" value={selection.containerId.slice(0, 12)} mono />
-            )}
-          </div>
-        )}
       </div>
-    </div>
-  )
-}
-
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-baseline gap-3">
-      <span className="text-xs w-28 shrink-0" style={{ color: 'var(--text-muted)' }}>
-        {label}
-      </span>
-      <span
-        className={`text-xs truncate ${mono ? 'font-mono' : ''}`}
-        style={{ color: 'var(--text-primary)' }}
-        title={value}
-      >
-        {value}
-      </span>
     </div>
   )
 }

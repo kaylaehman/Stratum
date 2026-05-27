@@ -204,3 +204,54 @@ export type TreeSelection =
   | { kind: 'vm'; nodeId: string; vmId: string; vmKind: VMKind }
   | { kind: 'container'; nodeId: string; containerId: string }
   | { kind: 'fs-root'; nodeId: string; containerId?: string }
+
+// Filesystem types
+
+export type FsEntryClass =
+  | 'dir'
+  | 'symlink'
+  | 'world_writable'
+  | 'setuid'
+  | 'setgid'
+  | 'sticky'
+  | 'exec'
+
+export interface FsEntry {
+  name: string
+  is_dir: boolean
+  is_symlink: boolean
+  link_target?: string
+  size: number
+  mod_time: string
+  mode_octal: string
+  mode_rwx: string
+  uid: number
+  gid: number
+  owner?: string
+  group?: string
+  classes?: FsEntryClass[]
+}
+
+export interface FsDirResponse {
+  entries: FsEntry[]
+  truncated: boolean
+}
+
+export interface FsFileResponse {
+  too_large: boolean
+  content?: string
+}
+
+export interface FsMkdirRequest {
+  path: string
+}
+
+export interface FsRenameRequest {
+  from: string
+  to: string
+}
+
+export interface FsUploadResponse {
+  path: string
+  bytes: number
+}
