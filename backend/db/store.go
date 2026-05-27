@@ -178,6 +178,20 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
+// ResourceSample is one 15s-polled CPU/RAM/disk-IO reading for a container
+// (Feature 9). DiskRead/WriteBytes are cumulative since container start.
+type ResourceSample struct {
+	ID             string
+	ContainerID    string
+	NodeID         string
+	CPUPct         float64
+	MemBytes       int64
+	MemLimitBytes  int64
+	DiskReadBytes  int64
+	DiskWriteBytes int64
+	SampledAt      time.Time
+}
+
 // VolumeSample is one daily size/refcount reading for a volume (Feature 7).
 type VolumeSample struct {
 	ID         string
@@ -258,6 +272,11 @@ type Store interface {
 	InsertVolumeSample(ctx context.Context, s VolumeSample) error
 	ListVolumeSamplesByNode(ctx context.Context, nodeID string) ([]VolumeSample, error)
 	PruneVolumeSamplesBefore(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// Resource timeline (Feature 9) — per-container metric samples
+	InsertResourceSample(ctx context.Context, s ResourceSample) error
+	ListResourceSamples(ctx context.Context, containerID string, from, to time.Time) ([]ResourceSample, error)
+	PruneResourceSamplesBefore(ctx context.Context, cutoff time.Time) (int64, error)
 
 	Close() error
 }

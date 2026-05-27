@@ -33,6 +33,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
 	"github.com/kaylaehman/stratum/backend/volumes"
@@ -104,6 +105,7 @@ func run(logger *slog.Logger) error {
 	mountIdx := mountindex.New(store, dockerForNode, 30*time.Second)
 	securityScanner := security.NewScanner(store, security.ClientProvider(dockerForNode), containerUsers, 30*time.Second)
 	volumeSvc := volumes.New(store, volumes.ClientProvider(dockerForNode), mountIdx, volumeAlertBytes())
+	metricsSampler := metrics.NewSampler(store, metrics.ClientProvider(dockerForNode), 15*time.Second, 7*24*time.Hour)
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -133,6 +135,7 @@ func run(logger *slog.Logger) error {
 
 	go poller.Run(ctx)                              // inventory poller; stops on shutdown
 	go volumeSvc.RunDailySampler(ctx, 24*time.Hour) // volume size-trend sampler
+	go metricsSampler.Run(ctx)                      // 15s resource-timeline sampler
 
 	return srv.Run(ctx)
 }

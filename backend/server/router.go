@@ -85,6 +85,10 @@ func NewRouter(d *Deps) http.Handler {
 			// Volume health (read-only; cross-node).
 			r.Get("/volumes", d.Handlers.ListVolumes)
 
+			// Resource timeline (read-only).
+			r.Get("/containers/{id}/metrics", d.Handlers.ContainerMetrics)
+			r.Get("/containers/{id}/metrics.csv", d.Handlers.ContainerMetricsCSV)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
