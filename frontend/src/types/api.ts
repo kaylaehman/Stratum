@@ -707,3 +707,27 @@ export interface BulkRequest {
   container_ids: string[]
   dry_run: boolean
 }
+
+// Bookmarks types (Feature 24)
+
+export type BookmarkResourceType = 'container' | 'node' | 'vm' | 'path' | 'file'
+
+export interface Bookmark {
+  id: string
+  label: string
+  resource_type: BookmarkResourceType
+  resource_ref: string
+  group_name: string
+  order_index: number
+}
+
+export interface BookmarksResponse {
+  bookmarks: Bookmark[]
+}
+
+export interface CreateBookmarkRequest {
+  label: string
+  resource_type: BookmarkResourceType
+  resource_ref: string
+  group_name?: string
+}

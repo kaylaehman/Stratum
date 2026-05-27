@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Square, RotateCw, Loader } from 'lucide-react'
+import { Play, Square, RotateCw, Loader, BookmarkPlus, BookmarkCheck } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
@@ -13,6 +13,7 @@ import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
 import { useContainerLifecycle } from '../lib/api/containers'
+import { useAddBookmark } from '../lib/api/bookmarks'
 import { useMe } from '../hooks/useMe'
 import type { TreeSelection, ContainerStatus } from '../types/api'
 import type { ContainerAction } from '../lib/api/containers'
@@ -115,6 +116,37 @@ function LifecycleControls({ containerId, status }: LifecycleControlsProps) {
   )
 }
 
+function BookmarkButton({ containerId, label }: { containerId: string; label: string }) {
+  const { mutate: add, isPending, isSuccess, reset } = useAddBookmark()
+  const saved = isSuccess
+
+  return (
+    <button
+      type="button"
+      disabled={isPending}
+      onClick={() => {
+        add(
+          { label, resource_type: 'container', resource_ref: containerId },
+          { onSuccess: () => { setTimeout(reset, 2000) } },
+        )
+      }}
+      className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1 self-start mt-1"
+      style={{
+        background: saved ? 'var(--accent-glow)' : 'var(--bg-elevated)',
+        border: `1px solid ${saved ? 'var(--accent)' : 'var(--border-default)'}`,
+        color: saved ? 'var(--accent)' : 'var(--text-secondary)',
+        borderRadius: '3px',
+        cursor: isPending ? 'not-allowed' : 'pointer',
+        opacity: isPending ? 0.6 : 1,
+        transition: 'color 0.15s, border-color 0.15s, background 0.15s',
+      }}
+    >
+      {saved ? <BookmarkCheck size={12} /> : <BookmarkPlus size={12} />}
+      {saved ? 'Saved' : 'Bookmark'}
+    </button>
+  )
+}
+
 function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containerId: string }) {
   const { data: tree } = useTree()
   const { data: inspect } = useContainerInspect(containerId)
@@ -151,6 +183,7 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
             {c.compose_project && <Row label="Compose project" value={c.compose_project} mono />}
             <Row label="Docker ID" value={c.docker_id.slice(0, 12)} mono />
             <LifecycleControls containerId={containerId} status={c.status} />
+            <BookmarkButton containerId={containerId} label={c.name} />
           </div>
         )}
         {inspect && (

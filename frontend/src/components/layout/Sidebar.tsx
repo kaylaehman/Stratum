@@ -1,5 +1,26 @@
-import { LayoutDashboard, HardDrive, GitBranch, Container, FileText, Shield, Activity, Settings, ScrollText, Database, TrendingUp, Share2, Workflow, ListChecks } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import {
+  LayoutDashboard,
+  HardDrive,
+  GitBranch,
+  Container,
+  FileText,
+  Shield,
+  Activity,
+  Settings,
+  ScrollText,
+  Database,
+  TrendingUp,
+  Share2,
+  Workflow,
+  ListChecks,
+  Server,
+  Folder,
+  X,
+} from 'lucide-react'
+import { NavLink, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { useBookmarks, useRemoveBookmark } from '../../lib/api/bookmarks'
+import type { BookmarkResourceType } from '../../types/api'
 
 interface NavItem {
   icon: React.ReactNode
@@ -23,6 +44,96 @@ const navItems: NavItem[] = [
   { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
   { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },
 ]
+
+function bookmarkIcon(type: BookmarkResourceType) {
+  switch (type) {
+    case 'container':
+      return <Container size={12} />
+    case 'node':
+      return <HardDrive size={12} />
+    case 'vm':
+      return <Server size={12} />
+    case 'file':
+      return <FileText size={12} />
+    case 'path':
+    default:
+      return <Folder size={12} />
+  }
+}
+
+function BookmarksSection() {
+  const { data } = useBookmarks()
+  const { mutate: remove } = useRemoveBookmark()
+  const navigate = useNavigate()
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+
+  const bookmarks = data?.bookmarks ?? []
+  if (bookmarks.length === 0) return null
+
+  return (
+    <div className="mt-3">
+      <div className="px-3 mb-2">
+        <span
+          className="text-xs font-medium uppercase tracking-wider"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Bookmarks
+        </span>
+      </div>
+      <ul className="flex flex-col gap-0.5 px-2">
+        {bookmarks.map((bm) => (
+          <li
+            key={bm.id}
+            onMouseEnter={() => setHoveredId(bm.id)}
+            onMouseLeave={() => setHoveredId(null)}
+            className="flex items-center gap-1 rounded"
+            style={{ borderRadius: '3px' }}
+          >
+            <button
+              type="button"
+              onClick={() => navigate('/resources')}
+              className="flex items-center gap-2 px-2.5 py-1.5 flex-1 text-xs truncate text-left"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                borderRadius: '3px',
+                minWidth: 0,
+              }}
+            >
+              <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+                {bookmarkIcon(bm.resource_type)}
+              </span>
+              <span className="truncate">{bm.label}</span>
+            </button>
+            {hoveredId === bm.id && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  remove(bm.id)
+                }}
+                title="Remove bookmark"
+                className="flex items-center justify-center shrink-0 mr-1"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '2px',
+                  borderRadius: '3px',
+                }}
+              >
+                <X size={11} />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
 export function Sidebar() {
   return (
@@ -58,6 +169,7 @@ export function Sidebar() {
           </li>
         ))}
       </ul>
+      <BookmarksSection />
     </nav>
   )
 }
