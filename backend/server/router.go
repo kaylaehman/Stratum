@@ -116,6 +116,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/templates/{id}", d.Handlers.GetTemplate)
 			r.Post("/templates/{id}/render", d.Handlers.RenderTemplate)
 
+			// Secrets vault list (key names only; mutations + reveal audited below).
+			r.Get("/secrets", d.Handlers.ListSecrets)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -158,6 +161,12 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/templates/{id}", d.Handlers.UpdateTemplate)
 			audited.Delete("/templates/{id}", d.Handlers.DeleteTemplate)
 			audited.Post("/templates/{id}/deploy", d.Handlers.DeployTemplate)
+			audited.Post("/secret-groups", d.Handlers.CreateSecretGroup)
+			audited.Delete("/secret-groups/{id}", d.Handlers.DeleteSecretGroup)
+			audited.Post("/secret-groups/{id}/secrets", d.Handlers.SetSecret)
+			audited.Post("/secret-groups/{id}/import", d.Handlers.ImportSecrets)
+			audited.Delete("/secrets/{id}", d.Handlers.DeleteSecret)
+			audited.Post("/secrets/{id}/reveal", d.Handlers.RevealSecret)
 		})
 	})
 

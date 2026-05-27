@@ -189,6 +189,25 @@ type ImageUpdateRow struct {
 	CheckedAt     time.Time
 }
 
+// SecretGroup is a named group of secrets (Feature 12).
+type SecretGroup struct {
+	ID          string
+	Name        string
+	Description string
+	CreatedAt   time.Time
+}
+
+// SecretRow is one stored secret. ValueEncrypted is an AES-256-GCM sealed blob;
+// the plaintext is never stored or listed without an explicit, audited reveal.
+type SecretRow struct {
+	ID             string
+	GroupID        string
+	Key            string
+	ValueEncrypted []byte
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // TemplateVar is one substitution variable in a template (Feature 14).
 type TemplateVar struct {
 	Name        string `json:"name"`
@@ -355,6 +374,15 @@ type Store interface {
 	// Image updates (Feature 15, detection)
 	UpsertImageUpdate(ctx context.Context, row ImageUpdateRow) error
 	ListImageUpdates(ctx context.Context) ([]ImageUpdateRow, error)
+
+	// Secrets vault (Feature 12)
+	CreateSecretGroup(ctx context.Context, g SecretGroup) error
+	ListSecretGroups(ctx context.Context) ([]SecretGroup, error)
+	DeleteSecretGroup(ctx context.Context, id string) error
+	UpsertSecret(ctx context.Context, s SecretRow) error
+	ListSecretsByGroup(ctx context.Context, groupID string) ([]SecretRow, error)
+	GetSecret(ctx context.Context, id string) (SecretRow, error)
+	DeleteSecret(ctx context.Context, id string) error
 
 	// Templates (Feature 14)
 	CreateTemplate(ctx context.Context, t Template) error

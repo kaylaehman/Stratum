@@ -35,6 +35,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/depgraph"
+	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
 	"github.com/kaylaehman/stratum/backend/topology"
@@ -117,6 +118,7 @@ func run(logger *slog.Logger) error {
 	topologySvc := topology.New(store, topology.ClientProvider(dockerForNode))
 	depGraphSvc := depgraph.New(store, depgraph.ClientProvider(dockerForNode), mountIdx)
 	updateSvc := updates.New(store, updates.ClientProvider(dockerForNode), 6*time.Hour)
+	secretSvc := secrets.New(store, cipher)
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -136,6 +138,7 @@ func run(logger *slog.Logger) error {
 		DepGraph:       depGraphSvc,
 		Webhooks:       webhookDispatcher,
 		Updater:        updateSvc,
+		Secrets:        secretSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

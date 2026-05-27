@@ -45,6 +45,13 @@ const (
 	ActionTemplateUpdate = "template.update"
 	ActionTemplateDelete = "template.delete"
 	ActionTemplateDeploy = "template.deploy"
+
+	ActionSecretGroupCreate = "secret.group_create"
+	ActionSecretGroupDelete = "secret.group_delete"
+	ActionSecretSet         = "secret.set"
+	ActionSecretDelete      = "secret.delete"
+	ActionSecretReveal      = "secret.reveal"
+	ActionSecretImport      = "secret.import"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -109,6 +116,13 @@ var actionCatalog = []ActionInfo{
 	{ActionTemplateUpdate, "Template updated", "template", TargetTemplate},
 	{ActionTemplateDelete, "Template deleted", "template", TargetTemplate},
 	{ActionTemplateDeploy, "Template deployed", "template", TargetTemplate},
+
+	{ActionSecretGroupCreate, "Secret group created", "secret", TargetSecret},
+	{ActionSecretGroupDelete, "Secret group deleted", "secret", TargetSecret},
+	{ActionSecretSet, "Secret set", "secret", TargetSecret},
+	{ActionSecretDelete, "Secret deleted", "secret", TargetSecret},
+	{ActionSecretReveal, "Secret revealed", "secret", TargetSecret},
+	{ActionSecretImport, "Secrets imported from .env", "secret", TargetSecret},
 }
 
 var actionByName = func() map[string]ActionInfo {
