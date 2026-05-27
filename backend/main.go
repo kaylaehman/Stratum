@@ -33,6 +33,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
 )
 
@@ -100,6 +101,7 @@ func run(logger *slog.Logger) error {
 	// (feature 30) will replace this with a per-node read-access check.
 	logsMgr := logtail.NewManager(dockerForNode, h, func(context.Context, string, string) (bool, error) { return true, nil })
 	mountIdx := mountindex.New(store, dockerForNode, 30*time.Second)
+	securityScanner := security.NewScanner(store, security.ClientProvider(dockerForNode), containerUsers, 30*time.Second)
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -113,6 +115,7 @@ func run(logger *slog.Logger) error {
 		ContainerUsers: containerUsers,
 		Logs:           logsMgr,
 		Mounts:         mountIdx,
+		Security:       securityScanner,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

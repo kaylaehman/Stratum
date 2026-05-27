@@ -120,6 +120,52 @@ type MountRow struct {
 	RW               bool
 }
 
+// ContainerSecurityRow is a container's classified security posture (SP8).
+type ContainerSecurityRow struct {
+	ContainerID        string
+	NodeID             string
+	Privileged         bool
+	CapAddAll          bool
+	DangerousCaps      []string
+	SeccompUnconfined  bool
+	ApparmorUnconfined bool
+	Devices            []string
+	UsernsHost         bool
+	PidHost            bool
+	NetHost            bool
+	RunsAsRoot         bool
+	RunUID             int
+	ScannedAt          time.Time
+}
+
+// PortExposureRow is one published port. IsNew is durable until acknowledged.
+type PortExposureRow struct {
+	ID             string
+	NodeID         string
+	ContainerID    string
+	HostIP         string
+	HostPort       int
+	ContainerPort  int
+	Protocol       string
+	InterfaceClass string
+	IsNew          bool
+	NotifiedAt     *time.Time
+	FirstSeen      time.Time
+	LastSeen       time.Time
+}
+
+// SecurityAck suppresses a specific flag's badge/alert.
+type SecurityAck struct {
+	ID             string
+	NodeID         string
+	ContainerID    string
+	FlagType       string
+	FlagKey        string
+	AcknowledgedBy *string
+	Note           string
+	CreatedAt      time.Time
+}
+
 // Store is the repository seam. Handlers depend on this interface, never on
 // *sql.DB, so a future Postgres implementation is additive. All methods return
 // Go standard types (never driver-specific nullable wrappers).
@@ -161,6 +207,17 @@ type Store interface {
 	ReplaceContainerMounts(ctx context.Context, containerID string, rows []MountRow) error
 	ListMountsByNode(ctx context.Context, nodeID string) ([]MountRow, error)
 	ListMountsByContainer(ctx context.Context, containerID string) ([]MountRow, error)
+
+	// Security (Feature 18/19)
+	UpsertContainerSecurity(ctx context.Context, row ContainerSecurityRow) error
+	GetContainerSecurity(ctx context.Context, containerID string) (ContainerSecurityRow, error)
+	ListContainerSecurity(ctx context.Context) ([]ContainerSecurityRow, error)
+	SetPortExposures(ctx context.Context, containerID string, rows []PortExposureRow) error
+	ListPortExposuresByContainer(ctx context.Context, containerID string) ([]PortExposureRow, error)
+	ListAllPortExposures(ctx context.Context) ([]PortExposureRow, error)
+	InsertAck(ctx context.Context, a SecurityAck) error
+	DeleteAck(ctx context.Context, id string) error
+	ListAcks(ctx context.Context) ([]SecurityAck, error)
 
 	Close() error
 }

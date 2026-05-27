@@ -26,6 +26,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
 
 	"context"
@@ -57,11 +58,9 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 	cipher, _ := crypto.New(key)
 	jwt := auth.NewJWT([]byte("0123456789abcdef0123456789abcdef"), 15*time.Minute)
 	hb := hub.New()
-	logsMgr := logtail.NewManager(
-		func(context.Context, string) (*docker.Client, error) { return nil, errNoDockerInTest },
-		hb,
-		func(context.Context, string, string) (bool, error) { return true, nil },
-	)
+	noDocker := func(context.Context, string) (*docker.Client, error) { return nil, errNoDockerInTest }
+	logsMgr := logtail.NewManager(noDocker, hb, func(context.Context, string, string) (bool, error) { return true, nil })
+	ctrUsers := permissions.NewContainerCache(func(context.Context, string, string, string) ([]byte, error) { return nil, nil }, time.Minute)
 
 	h := &api.Handlers{
 		Store:          store,
@@ -71,9 +70,10 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Nodes:          nodes.NewService(store, cipher),
 		Files:          fs.NewService(store, cipher, 0),
 		Conn:           nodeconn.NewManager(store, cipher),
-		ContainerUsers: permissions.NewContainerCache(func(context.Context, string, string, string) ([]byte, error) { return nil, nil }, time.Minute),
+		ContainerUsers: ctrUsers,
 		Logs:           logsMgr,
-		Mounts:         mountindex.New(store, func(context.Context, string) (*docker.Client, error) { return nil, errNoDockerInTest }, time.Minute),
+		Mounts:         mountindex.New(store, noDocker, time.Minute),
+		Security:       security.NewScanner(store, security.ClientProvider(noDocker), ctrUsers, time.Minute),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

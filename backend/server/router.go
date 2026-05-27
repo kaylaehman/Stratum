@@ -71,6 +71,12 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/nodes/{id}/mounts", d.Handlers.ReverseMounts)
 			r.Get("/nodes/{id}/mounts/shared", d.Handlers.SharedMounts)
 
+			// Security: ports audit + privileged flag (admin gate enforced in handlers).
+			r.Get("/security/ports", d.Handlers.Ports)
+			r.Get("/security/privileged", d.Handlers.Privileged)
+			r.Get("/containers/security-badges", d.Handlers.SecurityBadges)
+			r.Get("/containers/{id}/security", d.Handlers.ContainerSecurity)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
@@ -89,6 +95,9 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/{id}/fs/mkdir", d.Handlers.FSMkdir)
 			audited.Post("/nodes/{id}/fs/rename", d.Handlers.FSRename)
 			audited.Delete("/nodes/{id}/fs", d.Handlers.FSDelete)
+			audited.Post("/security/acknowledge", d.Handlers.AcknowledgeFlag)
+			audited.Delete("/security/acknowledge/{id}", d.Handlers.RevokeAcknowledgement)
+			audited.Post("/security/rescan", d.Handlers.Rescan)
 		})
 	})
 
