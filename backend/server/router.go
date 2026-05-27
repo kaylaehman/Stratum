@@ -71,6 +71,11 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/nodes/{id}/mounts", d.Handlers.ReverseMounts)
 			r.Get("/nodes/{id}/mounts/shared", d.Handlers.SharedMounts)
 
+			// Activity log (admin gate enforced in handlers).
+			r.Get("/activity", d.Handlers.ActivityList)
+			r.Get("/activity/export.csv", d.Handlers.ActivityExportCSV)
+			r.Get("/activity/actions", d.Handlers.ActivityActions)
+
 			// Security: ports audit + privileged flag (admin gate enforced in handlers).
 			r.Get("/security/ports", d.Handlers.Ports)
 			r.Get("/security/privileged", d.Handlers.Privileged)
