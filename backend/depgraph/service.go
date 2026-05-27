@@ -78,21 +78,24 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) (Graph, error) {
 	}
 	client, err := s.provider(ctx, nodeID)
 	if err != nil {
-		return Graph{}, err
+		return Graph{}, err // node truly unreachable: no client
 	}
-	networks, err := client.ListNetworks(ctx)
-	if err != nil {
-		return Graph{}, err
-	}
+	// Network listing is best-effort: a transient daemon error degrades to a
+	// graph with no network nodes/edges rather than failing the whole request
+	// (containers + volumes still render), matching the volume-edge path.
+	networks, _ := client.ListNetworks(ctx)
 
 	var nodes []GraphNode
 	var edges []GraphEdge
 
-	// Container nodes + a docker-id -> internal-id index for matching network
-	// endpoints (which are keyed by docker id).
+	// Container nodes + indexes: docker-id -> internal-id (to match network
+	// endpoints, keyed by docker id) and a valid-internal-id set (to drop edges
+	// from stale mount rows whose container no longer exists).
 	internalByDocker := map[string]string{}
+	validContainer := map[string]bool{}
 	for _, c := range containers {
 		internalByDocker[c.DockerID] = c.ID
+		validContainer[c.ID] = true
 		nodes = append(nodes, GraphNode{
 			ID:             containerNodeID(c.ID),
 			Kind:           KindContainer,
@@ -122,7 +125,7 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) (Graph, error) {
 	}
 
 	// Volume nodes + container→volume edges (from the mount index).
-	edges = append(edges, s.volumeEdges(ctx, nodeID, &nodes)...)
+	edges = append(edges, s.volumeEdges(ctx, nodeID, validContainer, &nodes)...)
 
 	sort.Slice(nodes, func(i, j int) bool {
 		if nodes[i].Kind != nodes[j].Kind {
@@ -143,7 +146,7 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) (Graph, error) {
 // and a container→volume edge per mount, using the freshened mount index. Mount
 // rows are keyed by the internal container id. Best-effort: a seed failure adds
 // no volume edges (the rest of the graph still renders).
-func (s *Service) volumeEdges(ctx context.Context, nodeID string, nodes *[]GraphNode) []GraphEdge {
+func (s *Service) volumeEdges(ctx context.Context, nodeID string, validContainer map[string]bool, nodes *[]GraphNode) []GraphEdge {
 	if err := s.mounts.EnsureFresh(ctx, nodeID); err != nil {
 		return nil
 	}
@@ -154,7 +157,9 @@ func (s *Service) volumeEdges(ctx context.Context, nodeID string, nodes *[]Graph
 	seenVol := map[string]bool{}
 	var edges []GraphEdge
 	for _, m := range rows {
-		if m.VolumeName == "" {
+		// Skip a stale row whose container is no longer present, else the edge
+		// would point at a container node that isn't in the graph.
+		if m.VolumeName == "" || !validContainer[m.ContainerID] {
 			continue
 		}
 		if !seenVol[m.VolumeName] {
@@ -175,7 +180,9 @@ func (s *Service) volumeEdges(ctx context.Context, nodeID string, nodes *[]Graph
 }
 
 // matchInternal resolves a network endpoint's docker id to an internal container
-// id, tolerating full-vs-short id forms.
+// id, tolerating full-vs-short id forms. Assumes ids don't collide on a 12-char
+// prefix (true for real docker ids); on the astronomically-unlikely ambiguous
+// prefix it returns the first match in map order.
 func matchInternal(internalByDocker map[string]string, dockerID string) string {
 	if id, ok := internalByDocker[dockerID]; ok {
 		return id
