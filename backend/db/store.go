@@ -178,6 +178,18 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
+// Bookmark is a per-user quick-access pointer to a resource (Feature 24).
+type Bookmark struct {
+	ID           string
+	UserID       string
+	Label        string
+	ResourceType string
+	ResourceRef  string
+	GroupName    string
+	OrderIndex   int
+	CreatedAt    time.Time
+}
+
 // ResourceSample is one 15s-polled CPU/RAM/disk-IO reading for a container
 // (Feature 9). DiskRead/WriteBytes are cumulative since container start.
 type ResourceSample struct {
@@ -277,6 +289,12 @@ type Store interface {
 	InsertResourceSample(ctx context.Context, s ResourceSample) error
 	ListResourceSamples(ctx context.Context, containerID string, from, to time.Time) ([]ResourceSample, error)
 	PruneResourceSamplesBefore(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// Bookmarks (Feature 24) — per-user; mutations scoped by user_id
+	CreateBookmark(ctx context.Context, b Bookmark) error
+	ListBookmarksByUser(ctx context.Context, userID string) ([]Bookmark, error)
+	DeleteBookmark(ctx context.Context, id, userID string) error
+	SetBookmarkOrder(ctx context.Context, userID string, orderedIDs []string) error
 
 	Close() error
 }

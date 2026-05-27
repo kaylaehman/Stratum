@@ -95,6 +95,12 @@ func NewRouter(d *Deps) http.Handler {
 			// Dependency graph (read-only; per node).
 			r.Get("/nodes/{id}/depgraph", d.Handlers.NodeDependencyGraph)
 
+			// Bookmarks (per-user prefs; not infra mutations, so not audited).
+			r.Get("/bookmarks", d.Handlers.ListBookmarks)
+			r.Post("/bookmarks", d.Handlers.CreateBookmark)
+			r.Put("/bookmarks/reorder", d.Handlers.ReorderBookmarks)
+			r.Delete("/bookmarks/{id}", d.Handlers.DeleteBookmark)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)

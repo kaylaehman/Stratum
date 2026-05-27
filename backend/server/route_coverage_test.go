@@ -46,6 +46,14 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/logs/unsubscribe":           true,
 	}
 
+	// Per-user preference mutations (bookmarks): user-owned state, not
+	// infrastructure changes, so intentionally not under the activity middleware.
+	userPrefMutating := map[string]bool{
+		"POST /api/bookmarks":        true,
+		"PUT /api/bookmarks/reorder": true,
+		"DELETE /api/bookmarks/{id}": true,
+	}
+
 	// Mutating routes confirmed mounted under the activity middleware (the
 	// `audited` group in router.go). Adding a new POST/PUT/DELETE route forces an
 	// update here — the prompt to confirm the route is audited.
@@ -78,7 +86,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 			return nil
 		}
 		key := method + " " + route
-		if publicMutating[key] || auditedMutating[key] || nonMutatingPost[key] {
+		if publicMutating[key] || auditedMutating[key] || nonMutatingPost[key] || userPrefMutating[key] {
 			return nil
 		}
 		t.Errorf("unclassified mutating route %q: it must be mounted under the activity middleware "+
