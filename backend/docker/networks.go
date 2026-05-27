@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"sort"
 
 	"github.com/docker/docker/api/types/network"
 )
@@ -38,6 +39,8 @@ func (c *Client) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
 		ins, err := c.cli.NetworkInspect(ctx, s.ID, network.InspectOptions{})
 		if err != nil {
 			// Network removed mid-list: fall back to the summary (no members).
+			// network.Summary is a type alias of network.Inspect in this SDK, so
+			// this is a valid value (just without the Containers map populated).
 			out = append(out, mapNetwork(s))
 			continue
 		}
@@ -60,6 +63,9 @@ func mapNetwork(n network.Inspect) NetworkInfo {
 			IPv4Address: ep.IPv4Address,
 		})
 	}
+	// Map iteration is unordered; sort for stable responses (avoids spurious
+	// UI re-renders on polling).
+	sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].ContainerID < endpoints[j].ContainerID })
 	return NetworkInfo{
 		ID:        n.ID,
 		Name:      n.Name,

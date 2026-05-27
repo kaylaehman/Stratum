@@ -7,6 +7,7 @@ package topology
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/docker"
@@ -67,17 +68,21 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) (Topology, error) 
 
 // buildContainerNodes annotates each container with the networks it belongs to
 // (matched by docker id against network endpoints) and the isolated/host-network
-// flags. Pure function — unit-tested without a docker client.
+// flags. Pure function — unit-tested without a docker client. Matching is
+// prefix-tolerant (full 64-char vs short 12-char id) so a short id stored
+// anywhere can't silently mark a container isolated.
 func buildContainerNodes(networks []docker.NetworkInfo, containers []db.Container) []ContainerNode {
-	netsByContainer := map[string][]string{}
-	for _, n := range networks {
-		for _, ep := range n.Endpoints {
-			netsByContainer[ep.ContainerID] = append(netsByContainer[ep.ContainerID], n.Name)
-		}
-	}
 	cnodes := make([]ContainerNode, 0, len(containers))
 	for _, c := range containers {
-		nets := netsByContainer[c.DockerID]
+		var nets []string
+		for _, n := range networks {
+			for _, ep := range n.Endpoints {
+				if idMatch(ep.ContainerID, c.DockerID) {
+					nets = append(nets, n.Name)
+					break
+				}
+			}
+		}
 		sort.Strings(nets)
 		cnodes = append(cnodes, ContainerNode{
 			DockerID:    c.DockerID,
@@ -90,6 +95,21 @@ func buildContainerNodes(networks []docker.NetworkInfo, containers []db.Containe
 	}
 	sort.Slice(cnodes, func(i, j int) bool { return cnodes[i].Name < cnodes[j].Name })
 	return cnodes
+}
+
+// idMatch reports whether two docker container ids refer to the same container,
+// tolerating a short (≥12-char) id being a prefix of the full 64-char id.
+func idMatch(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if len(a) >= 12 && strings.HasPrefix(b, a) {
+		return true
+	}
+	if len(b) >= 12 && strings.HasPrefix(a, b) {
+		return true
+	}
+	return false
 }
 
 func contains(s []string, v string) bool {
