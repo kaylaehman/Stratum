@@ -16,6 +16,8 @@ const (
 	ActionNodeUpdate = "node.update"
 	ActionNodeDelete = "node.delete"
 	ActionNodeProbe  = "node.probe"
+	ActionNodeWake   = "node.wake"
+	ActionNodeWOLSet = "node.wol_config"
 
 	ActionFSWrite  = "fs.write"
 	ActionFSUpload = "fs.upload"
@@ -65,6 +67,8 @@ var actionCatalog = []ActionInfo{
 	{ActionNodeUpdate, "Host updated", "node", TargetNode},
 	{ActionNodeDelete, "Host removed", "node", TargetNode},
 	{ActionNodeProbe, "Host re-probed", "node", TargetNode},
+	{ActionNodeWake, "Wake-on-LAN sent", "node", TargetNode},
+	{ActionNodeWOLSet, "Wake-on-LAN configured", "node", TargetNode},
 
 	{ActionFSWrite, "File written", "fs", TargetFile},
 	{ActionFSUpload, "File uploaded", "fs", TargetFile},

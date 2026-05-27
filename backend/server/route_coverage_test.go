@@ -77,6 +77,8 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/containers/{id}/stop":        true,
 		"POST /api/containers/{id}/restart":     true,
 		"POST /api/containers/bulk":             true,
+		"PUT /api/nodes/{id}/wol":               true,
+		"POST /api/nodes/{id}/wake":             true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

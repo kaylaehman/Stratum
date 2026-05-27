@@ -178,6 +178,14 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
+// WOLConfig is a node's optional Wake-on-LAN settings (Feature 6).
+type WOLConfig struct {
+	NodeID    string
+	MAC       string
+	Broadcast string
+	Port      int
+}
+
 // Bookmark is a per-user quick-access pointer to a resource (Feature 24).
 type Bookmark struct {
 	ID           string
@@ -289,6 +297,10 @@ type Store interface {
 	InsertResourceSample(ctx context.Context, s ResourceSample) error
 	ListResourceSamples(ctx context.Context, containerID string, from, to time.Time) ([]ResourceSample, error)
 	PruneResourceSamplesBefore(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// Wake-on-LAN (Feature 6) — per-node config
+	UpsertWOLConfig(ctx context.Context, c WOLConfig) error
+	GetWOLConfig(ctx context.Context, nodeID string) (WOLConfig, error)
 
 	// Bookmarks (Feature 24) — per-user; mutations scoped by user_id
 	CreateBookmark(ctx context.Context, b Bookmark) error
