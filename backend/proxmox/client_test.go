@@ -93,6 +93,173 @@ func TestVersion_500(t *testing.T) {
 	}
 }
 
+// TestNodes verifies Nodes() parses online/offline members and both forms of
+// the online indicator (numeric "online" field and string "status" field).
+func TestNodes(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api2/json/nodes" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Three members:
+		//  - pve1: online via numeric field (online:1)
+		//  - pve2: offline (online:0, status:"offline")
+		//  - pve3: online via status string only (online:0, status:"online")
+		_, _ = w.Write([]byte(`{"data":[
+			{"node":"pve1","status":"online","online":1},
+			{"node":"pve2","status":"offline","online":0},
+			{"node":"pve3","status":"online","online":0}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+	nodes, err := c.Nodes(context.Background())
+	if err != nil {
+		t.Fatalf("Nodes() error: %v", err)
+	}
+	if len(nodes) != 3 {
+		t.Fatalf("len(nodes) = %d; want 3", len(nodes))
+	}
+
+	cases := []struct {
+		name   string
+		online bool
+	}{
+		{"pve1", true},
+		{"pve2", false},
+		{"pve3", true},
+	}
+	for i, tc := range cases {
+		if nodes[i].Name != tc.name {
+			t.Errorf("nodes[%d].Name = %q; want %q", i, nodes[i].Name, tc.name)
+		}
+		if nodes[i].Online != tc.online {
+			t.Errorf("nodes[%d].Online = %v; want %v", i, nodes[i].Online, tc.online)
+		}
+	}
+}
+
+// TestQemuList verifies QemuList() parses VM data and sends the correct auth header.
+func TestQemuList(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Assert the correct Authorization header.
+		got := r.Header.Get("Authorization")
+		if got != wantAuthHeader {
+			t.Errorf("Authorization header = %q; want %q", got, wantAuthHeader)
+		}
+		if r.URL.Path != "/api2/json/nodes/pve/qemu" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[
+			{"vmid":100,"name":"ubuntu","status":"running"},
+			{"vmid":101,"name":"windows","status":"stopped"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+	guests, err := c.QemuList(context.Background(), "pve")
+	if err != nil {
+		t.Fatalf("QemuList() error: %v", err)
+	}
+	if len(guests) != 2 {
+		t.Fatalf("len(guests) = %d; want 2", len(guests))
+	}
+
+	expected := []proxmox.Guest{
+		{VMID: 100, Name: "ubuntu", Status: "running", Kind: "qemu"},
+		{VMID: 101, Name: "windows", Status: "stopped", Kind: "qemu"},
+	}
+	for i, want := range expected {
+		got := guests[i]
+		if got.VMID != want.VMID || got.Name != want.Name || got.Status != want.Status || got.Kind != want.Kind {
+			t.Errorf("guests[%d] = %+v; want %+v", i, got, want)
+		}
+	}
+}
+
+// TestLxcList_StringVMID verifies LxcList() parses a vmid expressed as a quoted
+// JSON string (as produced by some older PVE versions/endpoints).
+func TestLxcList_StringVMID(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api2/json/nodes/pve/lxc" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// vmid is a quoted string — the tricky case.
+		_, _ = w.Write([]byte(`{"data":[
+			{"vmid":"105","name":"alpine","status":"running"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+	guests, err := c.LxcList(context.Background(), "pve")
+	if err != nil {
+		t.Fatalf("LxcList() error: %v", err)
+	}
+	if len(guests) != 1 {
+		t.Fatalf("len(guests) = %d; want 1", len(guests))
+	}
+	g := guests[0]
+	if g.VMID != 105 {
+		t.Errorf("VMID = %d; want 105", g.VMID)
+	}
+	if g.Kind != "lxc" {
+		t.Errorf("Kind = %q; want %q", g.Kind, "lxc")
+	}
+	if g.Name != "alpine" {
+		t.Errorf("Name = %q; want %q", g.Name, "alpine")
+	}
+	if g.Status != "running" {
+		t.Errorf("Status = %q; want %q", g.Status, "running")
+	}
+}
+
+// TestNonOK_ReturnsError verifies that a non-200 status from the API returns an error.
+func TestNonOK_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+
+	t.Run("nodes_403", func(t *testing.T) {
+		_, err := c.Nodes(context.Background())
+		if err == nil {
+			t.Fatal("expected error for HTTP 403, got nil")
+		}
+	})
+
+	t.Run("qemu_403", func(t *testing.T) {
+		_, err := c.QemuList(context.Background(), "pve")
+		if err == nil {
+			t.Fatal("expected error for HTTP 403, got nil")
+		}
+	})
+
+	t.Run("lxc_403", func(t *testing.T) {
+		_, err := c.LxcList(context.Background(), "pve")
+		if err == nil {
+			t.Fatal("expected error for HTTP 403, got nil")
+		}
+	})
+}
+
 // TestVersion_TLS verifies the insecureSkipVerify toggle using httptest.NewTLSServer
 // (which always presents a self-signed certificate).
 func TestVersion_TLS(t *testing.T) {
