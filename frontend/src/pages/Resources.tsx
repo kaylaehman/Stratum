@@ -13,6 +13,7 @@ import { MountList } from '../components/containers/MountList'
 import { HealthCheck } from '../components/containers/HealthCheck'
 import { SharedMountsView } from '../components/containers/SharedMountsView'
 import { ReverseMountPanel } from '../components/containers/ReverseMountPanel'
+import { SnapshotsPanel } from '../components/containers/SnapshotsPanel'
 import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
@@ -154,6 +155,7 @@ function BookmarkButton({ containerId, label }: { containerId: string; label: st
 function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containerId: string }) {
   const { data: tree } = useTree()
   const { data: inspect } = useContainerInspect(containerId)
+  const { isAdmin } = useCan()
   const [hostPath, setHostPath] = useState('')
   const [submittedPath, setSubmittedPath] = useState('')
   const [showDiagnostic, setShowDiagnostic] = useState(false)
@@ -224,6 +226,14 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
       <div style={{ maxWidth: '720px' }}>
         <UidGidVisualizer containerId={containerId} />
       </div>
+
+      {/* Snapshots & Rollback (admin only) */}
+      {isAdmin && (
+        <SnapshotsPanel
+          containerId={containerId}
+          containerName={c?.name ?? containerId}
+        />
+      )}
 
       {/* Health Check */}
       <HealthCheck containerId={containerId} />

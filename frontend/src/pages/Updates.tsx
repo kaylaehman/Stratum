@@ -1,8 +1,11 @@
-import { ArrowUpCircle, CheckCircle, HelpCircle, RefreshCw, Loader } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowUpCircle, CheckCircle, HelpCircle, RefreshCw, Loader, RotateCcw } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
 import { useUpdates, useRescanUpdates } from '../lib/api/updates'
+import { useUpdateContainer } from '../lib/api/recreate'
+import { ApiError } from '../lib/api'
 import type { ImageUpdate, UpdateStatus, TreeNode } from '../types/api'
 
 // ---- Helpers ----
@@ -87,48 +90,190 @@ function StatusChip({ status }: { status: UpdateStatus }) {
   )
 }
 
+// ---- Update confirm box ----
+
+interface UpdateConfirmProps {
+  containerName: string
+  onConfirm: () => void
+  onCancel: () => void
+  isPending: boolean
+  errorMsg: string | null
+}
+
+function UpdateConfirm({ containerName, onConfirm, onCancel, isPending, errorMsg }: UpdateConfirmProps) {
+  return (
+    <div
+      className="flex flex-col gap-2 p-3 mt-1"
+      style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--status-warn)',
+        borderRadius: '3px',
+      }}
+    >
+      <p className="font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
+        Update <strong>{containerName}</strong>?
+      </p>
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        Pulls the latest image and recreates the container. A snapshot is saved first so you can roll back.
+      </p>
+      {errorMsg && (
+        <span className="font-mono text-xs" style={{ color: 'var(--status-error)' }}>
+          {errorMsg}
+        </span>
+      )}
+      <div className="flex items-center gap-2 mt-1">
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={onConfirm}
+          className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+          style={{
+            background: 'rgba(240,160,32,0.15)',
+            border: '1px solid var(--status-warn)',
+            color: isPending ? 'var(--text-muted)' : 'var(--status-warn)',
+            borderRadius: '3px',
+            cursor: isPending ? 'not-allowed' : 'pointer',
+            opacity: isPending ? 0.6 : 1,
+          }}
+        >
+          {isPending ? <Loader size={12} className="animate-spin" /> : <ArrowUpCircle size={12} />}
+          Update now
+        </button>
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={onCancel}
+          className="font-mono text-xs px-2.5 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+            cursor: isPending ? 'not-allowed' : 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ---- Table row ----
 
 interface UpdateRowProps {
   update: ImageUpdate
   containerName: string
   nodeName: string
+  isAdmin: boolean
 }
 
-function UpdateRow({ update, containerName, nodeName }: UpdateRowProps) {
+function UpdateRow({ update, containerName, nodeName, isAdmin }: UpdateRowProps) {
+  const [confirming, setConfirming] = useState(false)
+  const { mutate: doUpdate, isPending, error, reset, isSuccess } = useUpdateContainer()
+
+  const errorMsg = error
+    ? (error as ApiError).status === 502
+      ? 'Update failed — container could not be recreated'
+      : (error as ApiError).status === 404
+      ? 'Container not found'
+      : 'Update failed'
+    : null
+
+  const cellStyle = { borderBottom: '1px solid var(--border-subtle)' }
+
   return (
-    <tr>
-      <td
-        className="px-3 py-2 font-mono text-xs"
-        style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}
-      >
-        {containerName}
-      </td>
-      <td
-        className="px-3 py-2 text-xs"
-        style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}
-      >
-        {nodeName}
-      </td>
-      <td
-        className="px-3 py-2 font-mono text-xs"
-        style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)', maxWidth: '240px' }}
-      >
-        <span className="truncate block" title={update.image}>{update.image}</span>
-      </td>
-      <td
-        className="px-3 py-2"
-        style={{ borderBottom: '1px solid var(--border-subtle)' }}
-      >
-        <StatusChip status={update.status} />
-      </td>
-      <td
-        className="px-3 py-2 text-xs"
-        style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', whiteSpace: 'nowrap' }}
-      >
-        {new Date(update.checked_at).toLocaleString()}
-      </td>
-    </tr>
+    <>
+      <tr>
+        <td
+          className="px-3 py-2 font-mono text-xs"
+          style={{ color: 'var(--text-primary)', ...cellStyle }}
+        >
+          {containerName}
+        </td>
+        <td
+          className="px-3 py-2 text-xs"
+          style={{ color: 'var(--text-secondary)', ...cellStyle }}
+        >
+          {nodeName}
+        </td>
+        <td
+          className="px-3 py-2 font-mono text-xs"
+          style={{ color: 'var(--text-secondary)', ...cellStyle, maxWidth: '240px' }}
+        >
+          <span className="truncate block" title={update.image}>{update.image}</span>
+        </td>
+        <td
+          className="px-3 py-2"
+          style={cellStyle}
+        >
+          {isSuccess ? (
+            <span
+              className="flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
+              style={{
+                color: 'var(--status-ok, #40c878)',
+                background: 'rgba(64,200,120,0.1)',
+                border: '1px solid rgba(64,200,120,0.3)',
+                borderRadius: '3px',
+                fontSize: '10px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <CheckCircle size={10} />
+              Updated
+            </span>
+          ) : (
+            <StatusChip status={update.status} />
+          )}
+        </td>
+        <td
+          className="px-3 py-2 text-xs"
+          style={{ color: 'var(--text-muted)', ...cellStyle, whiteSpace: 'nowrap' }}
+        >
+          {new Date(update.checked_at).toLocaleString()}
+        </td>
+        <td className="px-3 py-2" style={cellStyle}>
+          {isAdmin && update.status === 'update_available' && !isSuccess && (
+            <button
+              type="button"
+              disabled={confirming || isPending}
+              onClick={() => { reset(); setConfirming(true) }}
+              className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+              style={{
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-default)',
+                color: confirming || isPending ? 'var(--text-muted)' : 'var(--accent)',
+                borderRadius: '3px',
+                cursor: confirming || isPending ? 'default' : 'pointer',
+                opacity: confirming || isPending ? 0.5 : 1,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {isPending ? <Loader size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+              Update
+            </button>
+          )}
+        </td>
+      </tr>
+      {confirming && (
+        <tr>
+          <td colSpan={6} className="px-3 pb-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+            <UpdateConfirm
+              containerName={containerName}
+              onConfirm={() => {
+                doUpdate(update.container_id, {
+                  onSuccess: () => setConfirming(false),
+                  onError: () => {/* keep open to show error */},
+                })
+              }}
+              onCancel={() => { reset(); setConfirming(false) }}
+              isPending={isPending}
+              errorMsg={errorMsg}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
@@ -159,7 +304,7 @@ function SummaryBar({ updates }: { updates: ImageUpdate[] }) {
 
 // ---- Main page ----
 
-const TABLE_COLS = ['Container', 'Node', 'Image', 'Status', 'Last Checked']
+const TABLE_COLS = ['Container', 'Node', 'Image', 'Status', 'Last Checked', '']
 
 export default function Updates() {
   const { data: me } = useMe()
@@ -283,6 +428,7 @@ export default function Updates() {
                           update={u}
                           containerName={resolveContainerName(u.container_id, nodes)}
                           nodeName={resolveNodeName(u.node_id, nodes)}
+                          isAdmin={isAdmin}
                         />
                       ))}
                     </tbody>
@@ -306,7 +452,7 @@ export default function Updates() {
               <span>
                 <strong style={{ color: 'var(--text-secondary)' }}>Unknown</strong> status means the image
                 was built locally, comes from a private registry, or the registry is rate-limiting checks.
-                Applying updates is not yet available — this view is detection only.
+                Updates pull the latest image and recreate the container — a snapshot is saved automatically before each update.
               </span>
             </div>
           </>

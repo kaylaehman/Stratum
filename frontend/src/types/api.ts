@@ -1125,6 +1125,38 @@ export interface StartBackupResponse {
   backup_id: string
 }
 
+// Snapshot & Rollback types (Features 15 & 17)
+
+export type SnapshotReason = 'manual' | 'pre-update' | 'pre-rollback'
+
+export interface Snapshot {
+  id: string
+  reason: SnapshotReason
+  image_ref: string
+  image_digest?: string
+  created_at: string
+}
+
+export interface SnapshotsResponse {
+  snapshots: Snapshot[]
+}
+
+export interface SaveSnapshotResponse {
+  id: string
+  reason: SnapshotReason
+  image_ref: string
+  image_digest?: string
+  created_at: string
+}
+
+export interface UpdateContainerResponse {
+  new_container_id: string
+}
+
+export interface RollbackResponse {
+  new_container_id: string
+}
+
 // Two-Factor Auth (TOTP) types (Feature 7 Phase 2)
 
 export interface TwoFAStatus {
