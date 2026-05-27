@@ -4,6 +4,7 @@ import { Topbar } from './Topbar'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from '../search/CommandPalette'
 import { AIAssistantPanel } from '../ai/AIAssistantPanel'
+import { StepUpModal } from '../auth/StepUpModal'
 import { useAuthStore } from '../../store/auth'
 import { useCan } from '../../lib/roles'
 import { apiPost } from '../../lib/api'
@@ -71,6 +72,7 @@ export function AppShell({ children, treeSlot }: AppShellProps) {
       </div>
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       {isOperator && <AIAssistantPanel />}
+      <StepUpModal />
     </div>
   )
 }

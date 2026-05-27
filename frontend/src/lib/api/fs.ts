@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/auth'
-import { apiFetch } from '../api'
+import { apiFetch, requestStepUp } from '../api'
 import type {
   FsDirResponse,
   FsFileResponse,
@@ -81,10 +81,25 @@ export async function writeFile(
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
   if (lastModified) headers['If-Unmodified-Since'] = lastModified
 
-  const res = await fetch(
-    `/api/nodes/${nodeId}/fs/file?path=${encodeURIComponent(path)}`,
-    { method: 'PUT', headers, body: content },
-  )
+  const reqUrl = `/api/nodes/${nodeId}/fs/file?path=${encodeURIComponent(path)}`
+  const reqInit: RequestInit = { method: 'PUT', headers, body: content }
+
+  let res = await fetch(reqUrl, reqInit)
+
+  // Step-up 2FA: retry once after a successful challenge
+  if (res.status === 428) {
+    let body428: unknown
+    try { body428 = await res.json() } catch { body428 = {} }
+    if ((body428 as { error?: string }).error === '2fa_required') {
+      await requestStepUp()
+      // Rebuild auth headers in case token refreshed during challenge
+      const { accessToken: tok } = useAuthStore.getState()
+      const retryHeaders: Record<string, string> = { ...headers }
+      if (tok) retryHeaders['Authorization'] = `Bearer ${tok}`
+      res = await fetch(reqUrl, { ...reqInit, headers: retryHeaders })
+    }
+  }
+
   if (res.status === 412) throw new StaleWriteError()
   if (!res.ok) {
     let msg = res.statusText
