@@ -52,6 +52,8 @@ const (
 	ActionSecretDelete      = "secret.delete"
 	ActionSecretReveal      = "secret.reveal"
 	ActionSecretImport      = "secret.import"
+
+	ActionSSHKeyDelete = "sshkey.delete"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -65,6 +67,7 @@ const (
 	TargetVolume          = "volume"
 	TargetWebhook         = "webhook"
 	TargetTemplate        = "template"
+	TargetSSHKey          = "sshkey"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -123,6 +126,8 @@ var actionCatalog = []ActionInfo{
 	{ActionSecretDelete, "Secret deleted", "secret", TargetSecret},
 	{ActionSecretReveal, "Secret revealed", "secret", TargetSecret},
 	{ActionSecretImport, "Secrets imported from .env", "secret", TargetSecret},
+
+	{ActionSSHKeyDelete, "SSH key removed", "sshkey", TargetSSHKey},
 }
 
 var actionByName = func() map[string]ActionInfo {

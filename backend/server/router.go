@@ -119,6 +119,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Secrets vault list (key names only; mutations + reveal audited below).
 			r.Get("/secrets", d.Handlers.ListSecrets)
 
+			// SSH key audit (admin-gated in handler; delete is audited below).
+			r.Get("/nodes/{id}/sshkeys", d.Handlers.ListSSHKeys)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -167,6 +170,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/secret-groups/{id}/import", d.Handlers.ImportSecrets)
 			audited.Delete("/secrets/{id}", d.Handlers.DeleteSecret)
 			audited.Post("/secrets/{id}/reveal", d.Handlers.RevealSecret)
+			audited.Post("/nodes/{id}/sshkeys/delete", d.Handlers.DeleteSSHKey)
 		})
 	})
 

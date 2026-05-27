@@ -95,6 +95,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/secret-groups/{id}/import":   true,
 		"DELETE /api/secrets/{id}":              true,
 		"POST /api/secrets/{id}/reveal":         true, // reveal is audited (who revealed what)
+		"POST /api/nodes/{id}/sshkeys/delete":   true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
