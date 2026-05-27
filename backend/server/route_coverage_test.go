@@ -83,6 +83,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/webhooks":                    true,
 		"PUT /api/webhooks/{id}":                true,
 		"DELETE /api/webhooks/{id}":             true,
+		"POST /api/updates/rescan":              true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

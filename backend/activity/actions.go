@@ -38,6 +38,8 @@ const (
 	ActionWebhookCreate = "webhook.create"
 	ActionWebhookUpdate = "webhook.update"
 	ActionWebhookDelete = "webhook.delete"
+
+	ActionUpdatesRescan = "updates.rescan"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -94,6 +96,8 @@ var actionCatalog = []ActionInfo{
 	{ActionWebhookCreate, "Notification webhook created", "webhook", TargetWebhook},
 	{ActionWebhookUpdate, "Notification webhook updated", "webhook", TargetWebhook},
 	{ActionWebhookDelete, "Notification webhook deleted", "webhook", TargetWebhook},
+
+	{ActionUpdatesRescan, "Image updates re-checked", "updates", TargetContainer},
 }
 
 var actionByName = func() map[string]ActionInfo {

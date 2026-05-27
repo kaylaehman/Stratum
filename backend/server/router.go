@@ -105,6 +105,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/webhooks", d.Handlers.ListWebhooks)
 			r.Post("/webhooks/{id}/test", d.Handlers.TestWebhook)
 
+			// Image update detection (read-only; cross-node).
+			r.Get("/updates", d.Handlers.Updates)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -142,6 +145,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/webhooks", d.Handlers.CreateWebhook)
 			audited.Put("/webhooks/{id}", d.Handlers.UpdateWebhook)
 			audited.Delete("/webhooks/{id}", d.Handlers.DeleteWebhook)
+			audited.Post("/updates/rescan", d.Handlers.RescanUpdates)
 		})
 	})
 

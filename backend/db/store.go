@@ -178,6 +178,17 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
+// ImageUpdateRow is a container's cached image update-availability (Feature 15).
+type ImageUpdateRow struct {
+	ContainerID   string
+	NodeID        string
+	Image         string
+	Status        string // up_to_date | update_available | unknown
+	CurrentDigest string
+	LatestDigest  string
+	CheckedAt     time.Time
+}
+
 // WebhookConfig is a Slack/Discord notification target (Feature 26).
 type WebhookConfig struct {
 	ID        string
@@ -312,6 +323,10 @@ type Store interface {
 	// Wake-on-LAN (Feature 6) — per-node config
 	UpsertWOLConfig(ctx context.Context, c WOLConfig) error
 	GetWOLConfig(ctx context.Context, nodeID string) (WOLConfig, error)
+
+	// Image updates (Feature 15, detection)
+	UpsertImageUpdate(ctx context.Context, row ImageUpdateRow) error
+	ListImageUpdates(ctx context.Context) ([]ImageUpdateRow, error)
 
 	// Notification webhooks (Feature 26)
 	CreateWebhook(ctx context.Context, c WebhookConfig) error

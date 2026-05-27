@@ -20,6 +20,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/topology"
+	"github.com/kaylaehman/stratum/backend/updates"
 	"github.com/kaylaehman/stratum/backend/volumes"
 	"github.com/kaylaehman/stratum/backend/webhooks"
 )
@@ -42,6 +43,7 @@ type Handlers struct {
 	Topology       *topology.Service
 	DepGraph       *depgraph.Service
 	Webhooks       *webhooks.Dispatcher
+	Updater        *updates.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
