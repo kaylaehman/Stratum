@@ -29,6 +29,7 @@ import { useCan } from '../lib/roles'
 import { ApiError } from '../lib/api'
 import type { TwoFASetupResponse, UserRole } from '../types/api'
 import { AISettingsSection } from '../components/ai/AISettingsSection'
+import { MemoryPanel } from '../components/ai/MemoryPanel'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1050,6 +1051,8 @@ export default function Settings() {
         {isAdmin && <UsersSection />}
 
         {isAdmin && <AISettingsSection />}
+
+        <MemoryPanel scope="global" />
       </div>
     </div>
   )

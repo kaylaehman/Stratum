@@ -1259,3 +1259,36 @@ export interface TwoFASetupResponse {
 export interface TwoFACodeRequest {
   code: string
 }
+
+// Agent Memory types (Feature F9)
+
+export type MemoryScope = 'global' | 'node' | 'container'
+export type MemorySource = 'user' | 'ai' | 'observed'
+
+export interface Memory {
+  id: string
+  scope: MemoryScope
+  scope_id?: string
+  key: string
+  value: string
+  source: MemorySource
+  confirmed: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface MemoryListResponse {
+  memories: Memory[]
+}
+
+export interface CreateMemoryRequest {
+  scope: MemoryScope
+  scope_id?: string
+  key: string
+  value: string
+}
+
+export interface UpdateMemoryRequest {
+  value?: string
+  confirmed?: boolean
+}

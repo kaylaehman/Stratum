@@ -14,6 +14,7 @@ import { HealthCheck } from '../components/containers/HealthCheck'
 import { SharedMountsView } from '../components/containers/SharedMountsView'
 import { ReverseMountPanel } from '../components/containers/ReverseMountPanel'
 import { SnapshotsPanel } from '../components/containers/SnapshotsPanel'
+import { MemoryPanel } from '../components/ai/MemoryPanel'
 import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
@@ -238,6 +239,9 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
       {/* Health Check */}
       <HealthCheck containerId={containerId} />
 
+      {/* AI Memory */}
+      <MemoryPanel scope="container" scopeId={containerId} />
+
       {/* Bind mounts */}
       <MountList containerId={containerId} nodeId={nodeId} />
 
@@ -412,6 +416,7 @@ function DetailPane() {
         <>
           <SharedMountsView nodeId={selection.nodeId} />
           <ReverseMountPanel nodeId={selection.nodeId} />
+          <MemoryPanel scope="node" scopeId={selection.nodeId} />
         </>
       )}
     </div>
