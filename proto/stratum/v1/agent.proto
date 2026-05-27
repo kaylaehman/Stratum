@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package stratum.v1;
+
+option go_package = "github.com/kaylaehman/stratum/proto/gen/stratum/v1;stratumv1";
+
+// AgentService is the gRPC contract between the Stratum backend and the
+// per-host agent. SP0 ships only a Ping RPC to prove the contract compiles and
+// both modules can import the generated package. Real file-ops, permissions,
+// cron, and watch RPCs land with their feature sub-projects.
+service AgentService {
+  // Ping is a liveness check. The agent echoes the nonce and reports its
+  // version so the backend can confirm connectivity and compatibility.
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+message PingRequest {
+  // Opaque value echoed back by the agent to correlate request/response.
+  string nonce = 1;
+}
+
+message PingResponse {
+  // The nonce from the request, echoed unchanged.
+  string nonce = 1;
+  // Agent build version (semver or git describe).
+  string agent_version = 2;
+}

@@ -1,0 +1,81 @@
+version: "3"
+
+# Stratum cross-platform task runner (go-task). Works on the Windows dev host
+# and Linux CI. See docs/superpowers/specs for the per-sub-project build plan.
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  proto:gen:
+    desc: Regenerate Go from proto/ via buf (commit the result)
+    dir: proto
+    cmds:
+      - buf generate
+
+  proto:lint:
+    dir: proto
+    cmds:
+      - buf lint
+
+  backend:build:
+    desc: Build the backend binary
+    dir: backend
+    cmds:
+      - go build -o bin/stratum ./...
+
+  backend:test:
+    desc: Run backend tests with the race detector
+    dir: backend
+    cmds:
+      - go test -race ./...
+
+  backend:vet:
+    dir: backend
+    cmds:
+      - go vet ./...
+
+  backend:run:
+    desc: Run the backend (uses .env / environment)
+    dir: backend
+    cmds:
+      - go run .
+
+  agent:build:
+    dir: agent
+    cmds:
+      - go build -o bin/stratum-agent ./...
+
+  agent:test:
+    dir: agent
+    cmds:
+      - go test ./...
+
+  frontend:dev:
+    desc: Start the Vite dev server
+    dir: frontend
+    cmds:
+      - npm run dev
+
+  frontend:build:
+    dir: frontend
+    cmds:
+      - npm run build
+
+  frontend:check:
+    dir: frontend
+    cmds:
+      - npm run typecheck
+      - npm run lint
+
+  test:
+    desc: Run all backend + agent tests
+    cmds:
+      - task: backend:test
+      - task: agent:test
+
+  dev:
+    desc: Run backend + frontend dev servers (use two terminals or a runner)
+    cmds:
+      - echo "Run 'task backend:run' and 'task frontend:dev' in separate terminals"
