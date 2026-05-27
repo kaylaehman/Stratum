@@ -78,3 +78,20 @@ func (s *Service) List(ctx context.Context) ([]Flag, error) {
 func (s *Service) Set(ctx context.Context, key string, enabled bool) error {
 	return s.store.SetFeatureFlag(ctx, key, enabled)
 }
+
+// Enabled resolves a single flag (stored override or built-in default). Unknown
+// keys are reported disabled.
+func (s *Service) Enabled(ctx context.Context, key string) bool {
+	def, ok := known[key]
+	if !ok {
+		return false
+	}
+	overrides, err := s.store.ListFeatureFlags(ctx)
+	if err != nil {
+		return def.Default
+	}
+	if v, ok := overrides[key]; ok {
+		return v
+	}
+	return def.Default
+}

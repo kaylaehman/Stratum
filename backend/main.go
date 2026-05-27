@@ -40,6 +40,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
+	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/cve"
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/features"
@@ -139,6 +140,9 @@ func run(logger *slog.Logger) error {
 	proxySvc := proxy.New(store, cipher)
 	dnsSvc := dnspkg.New(store, cipher)
 	featureSvc := features.New(store)
+	chatSvc := chatbot.New(store, cipher, logger, func(ctx context.Context) bool {
+		return featureSvc.Enabled(ctx, "feature.chat_integration")
+	})
 	certSvc := certs.New(store, filesSvc.Exec, 6*time.Hour)
 	certSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
@@ -173,6 +177,7 @@ func run(logger *slog.Logger) error {
 		Proxy:          proxySvc,
 		DNS:            dnsSvc,
 		Features:       featureSvc,
+		Chat:           chatSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -188,6 +193,7 @@ func run(logger *slog.Logger) error {
 	go poller.Run(ctx)                              // inventory poller; stops on shutdown
 	go volumeSvc.RunDailySampler(ctx, 24*time.Hour) // volume size-trend sampler
 	go metricsSampler.Run(ctx)                      // 15s resource-timeline sampler
+	go chatSvc.Run(ctx)                             // inbound chat-command poller (no-op until enabled+configured)
 
 	return srv.Run(ctx)
 }

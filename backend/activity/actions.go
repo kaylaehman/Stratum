@@ -82,6 +82,7 @@ const (
 	ActionProxyConfig   = "proxy.config"
 	ActionDNSConfig     = "dns.config"
 	ActionFeatureToggle = "feature.toggle"
+	ActionChatConfig    = "chat.config"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -186,6 +187,7 @@ var actionCatalog = []ActionInfo{
 	{ActionProxyConfig, "Reverse-proxy endpoint configured", "proxy", TargetNode},
 	{ActionDNSConfig, "DNS endpoint configured", "dns", TargetNode},
 	{ActionFeatureToggle, "Feature toggled", "feature", TargetUser},
+	{ActionChatConfig, "Chat bot configured", "chat", TargetUser},
 }
 
 var actionByName = func() map[string]ActionInfo {

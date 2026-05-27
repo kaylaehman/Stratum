@@ -131,6 +131,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Feature flags (read; toggle audited below).
 			r.Get("/features", d.Handlers.ListFeatures)
 
+			// Chat bot config (admin gate in handler; set audited below).
+			r.Get("/chat/config", d.Handlers.ChatConfigGet)
+
 			// Wake-on-LAN config read (set/wake are audited mutations below).
 			r.Get("/nodes/{id}/wol", d.Handlers.GetWOL)
 
@@ -235,6 +238,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/nodes/{id}/proxy/config", d.Handlers.SetNodeProxyConfig)
 			audited.Put("/nodes/{id}/dns/config", d.Handlers.SetNodeDNSConfig)
 			audited.Put("/features/{key}", d.Handlers.SetFeature)
+			audited.Put("/chat/config", d.Handlers.ChatConfigSet)
 			audited.Post("/memory", d.Handlers.CreateMemory)
 			audited.Put("/memory/{id}", d.Handlers.UpdateMemory)
 			audited.Delete("/memory/{id}", d.Handlers.DeleteMemory)

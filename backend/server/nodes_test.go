@@ -31,6 +31,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/features"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
+	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/proxy"
@@ -108,6 +109,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Proxy:          proxy.New(store, cipher),
 		DNS:            dnspkg.New(store, cipher),
 		Features:       features.New(store),
+		Chat:           chatbot.New(store, cipher, nil, func(context.Context) bool { return true }),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

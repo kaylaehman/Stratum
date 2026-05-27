@@ -268,6 +268,15 @@ type DNSConfig struct {
 	UpdatedAt      time.Time
 }
 
+// ChatConfig is the inbound chat-bot config (Feature F8), a single row. The bot
+// token is AES-sealed; AllowedChats are the authorized chat IDs.
+type ChatConfig struct {
+	Provider       string
+	TokenEncrypted []byte
+	AllowedChats   []int64
+	UpdatedAt      time.Time
+}
+
 // AgentMemory is a persistent per-scope note the AI assistant uses (Feature F9).
 // Scope is "global" | "node" | "container"; ScopeID is "" for global. Source is
 // "user" | "ai" | "observed"; AI-proposed memories stay Confirmed=false until a
@@ -557,6 +566,10 @@ type Store interface {
 	// Feature flags (FEATURES.md) — only explicitly-set rows are stored
 	ListFeatureFlags(ctx context.Context) (map[string]bool, error)
 	SetFeatureFlag(ctx context.Context, key string, enabled bool) error
+
+	// Chat bot config (Feature F8) — single row
+	GetChatConfig(ctx context.Context) (ChatConfig, error)
+	UpsertChatConfig(ctx context.Context, c ChatConfig) error
 
 	// Agent memory (Feature F9)
 	CreateAgentMemory(ctx context.Context, m AgentMemory) error

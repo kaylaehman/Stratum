@@ -12,6 +12,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
+	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/db"
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
@@ -67,6 +68,7 @@ type Handlers struct {
 	Proxy          *proxy.Service
 	DNS            *dnspkg.Service
 	Features       *features.Service
+	Chat           *chatbot.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
