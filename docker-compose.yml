@@ -1,0 +1,31 @@
+# Production-ish Stratum stack. Provide JWT_SECRET and ENCRYPTION_KEY via a .env
+# file (never committed) or the environment. Generate them with:
+#   openssl rand -base64 48   (JWT_SECRET)
+#   openssl rand -hex 32      (ENCRYPTION_KEY)
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      PORT: "8080"
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      DATABASE_URL: sqlite:///data/stratum.db
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+    volumes:
+      - stratum-data:/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  stratum-data:

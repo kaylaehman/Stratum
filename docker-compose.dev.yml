@@ -1,0 +1,28 @@
+# Dev overrides: run the backend with `go run` and Vite's dev server with hot
+# reload, bind-mounting source. Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: build
+    working_dir: /src
+    command: ["go", "run", "."]
+    environment:
+      GOWORK: "off"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/src
+
+  frontend:
+    image: node:24-alpine
+    working_dir: /app
+    command: ["sh", "-c", "npm install && npm run dev -- --host"]
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080

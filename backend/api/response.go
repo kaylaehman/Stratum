@@ -3,11 +3,8 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
-
-	"github.com/kaylaehman/stratum/backend/capabilities"
 )
 
 // writeJSON encodes v as JSON with the given status code.
@@ -24,20 +21,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // writeError writes a JSON error body {"error": code}.
 func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
-}
-
-// writeCapabilityError maps an *ErrCapabilityUnavailable to a 422 response with
-// the capability name; any other error becomes a generic 500.
-func writeCapabilityError(w http.ResponseWriter, err error) {
-	var capErr *capabilities.ErrCapabilityUnavailable
-	if errors.As(err, &capErr) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
-			"error":      "capability_unavailable",
-			"capability": string(capErr.Capability),
-		})
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error")
 }
 
 // decodeJSON reads a JSON request body into v, capping its size.

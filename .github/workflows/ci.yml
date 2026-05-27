@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: vet
+        working-directory: backend
+        run: go vet ./...
+      - name: staticcheck
+        working-directory: backend
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+      - name: test (race)
+        working-directory: backend
+        run: go test -race ./...
+
+  agent:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: build
+        working-directory: agent
+        run: go build ./...
+      - name: vet
+        working-directory: agent
+        run: go vet ./...
+      - name: test
+        working-directory: agent
+        run: go test ./...
+
+  proto:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.70.0"
+      - name: lint
+        working-directory: proto
+        run: buf lint
+      - name: generate is up to date
+        working-directory: proto
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          buf generate
+          git diff --exit-code
+      - name: build
+        working-directory: proto
+        run: go build ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: install
+        working-directory: frontend
+        run: npm ci
+      - name: typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: lint
+        working-directory: frontend
+        run: npm run lint
+      - name: build
+        working-directory: frontend
+        run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build backend image
+        run: docker build -f backend/Dockerfile -t stratum-backend .
+      - name: build frontend image
+        run: docker build -f frontend/Dockerfile -t stratum-frontend .

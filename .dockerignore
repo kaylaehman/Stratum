@@ -1,0 +1,13 @@
+.git
+**/node_modules
+**/bin
+**/dist
+**/.vite
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+data/
+docs/
+assets/
+*.log
