@@ -13,6 +13,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
 	"github.com/kaylaehman/stratum/backend/logtail"
+	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
@@ -30,6 +31,7 @@ type Handlers struct {
 	Conn           *nodeconn.Manager
 	ContainerUsers *permissions.ContainerCache
 	Logs           *logtail.Manager
+	Mounts         *mountindex.Index
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

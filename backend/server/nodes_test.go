@@ -22,6 +22,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/logtail"
+	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
@@ -72,6 +73,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Conn:           nodeconn.NewManager(store, cipher),
 		ContainerUsers: permissions.NewContainerCache(func(context.Context, string, string, string) ([]byte, error) { return nil, nil }, time.Minute),
 		Logs:           logsMgr,
+		Mounts:         mountindex.New(store, func(context.Context, string) (*docker.Client, error) { return nil, errNoDockerInTest }, time.Minute),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

@@ -21,7 +21,8 @@ import (
 // Mount is a faithful subset of a container mount point.
 type Mount struct {
 	Type        string `json:"type"`        // bind | volume | tmpfs
-	Source      string `json:"source"`      // host path (bind) or volume name
+	Name        string `json:"name"`        // Docker volume name (type=volume only); canonical volume identity
+	Source      string `json:"source"`      // host path (bind) or driver _data path (volume)
 	Destination string `json:"destination"` // path inside container
 	Mode        string `json:"mode"`
 	RW          bool   `json:"rw"`
@@ -55,6 +56,7 @@ func mapMounts(mps []container.MountPoint) []Mount {
 	for i, mp := range mps {
 		out[i] = Mount{
 			Type:        string(mp.Type),
+			Name:        mp.Name,
 			Source:      mp.Source,
 			Destination: mp.Destination,
 			Mode:        mp.Mode,

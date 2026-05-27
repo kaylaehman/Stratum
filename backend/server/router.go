@@ -66,6 +66,11 @@ func NewRouter(d *Deps) http.Handler {
 			r.Post("/logs/subscribe", d.Handlers.LogsSubscribe)
 			r.Post("/logs/unsubscribe", d.Handlers.LogsUnsubscribe)
 
+			// Bind-mount tracer (read-only).
+			r.Get("/containers/{id}/mounts", d.Handlers.ContainerMounts)
+			r.Get("/nodes/{id}/mounts", d.Handlers.ReverseMounts)
+			r.Get("/nodes/{id}/mounts/shared", d.Handlers.SharedMounts)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)

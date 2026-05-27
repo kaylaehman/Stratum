@@ -107,6 +107,19 @@ type Container struct {
 	LastSeen       time.Time
 }
 
+// MountRow is one container mount in the bind-mount index.
+type MountRow struct {
+	ID               string
+	NodeID           string
+	ContainerID      string
+	Type             string // bind | volume | tmpfs | ...
+	Source           string
+	NormalizedSource string
+	VolumeName       string
+	Destination      string
+	RW               bool
+}
+
 // Store is the repository seam. Handlers depend on this interface, never on
 // *sql.DB, so a future Postgres implementation is additive. All methods return
 // Go standard types (never driver-specific nullable wrappers).
@@ -143,6 +156,11 @@ type Store interface {
 	ListContainersByNode(ctx context.Context, nodeID string) ([]Container, error)
 	GetContainer(ctx context.Context, id string) (Container, error)
 	DeleteContainer(ctx context.Context, id string) error
+
+	// Mounts (bind-mount index)
+	ReplaceContainerMounts(ctx context.Context, containerID string, rows []MountRow) error
+	ListMountsByNode(ctx context.Context, nodeID string) ([]MountRow, error)
+	ListMountsByContainer(ctx context.Context, containerID string) ([]MountRow, error)
 
 	Close() error
 }

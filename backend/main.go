@@ -29,6 +29,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
 	"github.com/kaylaehman/stratum/backend/logtail"
+	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
@@ -98,6 +99,7 @@ func run(logger *slog.Logger) error {
 	// MVP single-admin: any authenticated user may read any node's logs; RBAC
 	// (feature 30) will replace this with a per-node read-access check.
 	logsMgr := logtail.NewManager(dockerForNode, h, func(context.Context, string, string) (bool, error) { return true, nil })
+	mountIdx := mountindex.New(store, dockerForNode, 30*time.Second)
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -110,6 +112,7 @@ func run(logger *slog.Logger) error {
 		Conn:           conn,
 		ContainerUsers: containerUsers,
 		Logs:           logsMgr,
+		Mounts:         mountIdx,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

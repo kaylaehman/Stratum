@@ -67,3 +67,30 @@ func volumeName(source string) string {
 	}
 	return ""
 }
+
+// Relationship classifies how two absolute paths relate, by segments.
+type Relationship string
+
+const (
+	RelEqual     Relationship = "equal"
+	RelAParentB  Relationship = "a_parent_of_b" // a is an ancestor dir of b
+	RelBParentA  Relationship = "b_parent_of_a" // b is an ancestor dir of a
+	RelUnrelated Relationship = "unrelated"
+)
+
+// Relation reports how two cleaned absolute paths relate (segment-aware, so
+// /data is NOT a parent of /data-archive). Used as the reverse-lookup post-filter.
+func Relation(a, b string) Relationship {
+	a = path.Clean(a)
+	b = path.Clean(b)
+	switch {
+	case a == b:
+		return RelEqual
+	case strings.HasPrefix(b, a+"/"):
+		return RelAParentB
+	case strings.HasPrefix(a, b+"/"):
+		return RelBParentA
+	default:
+		return RelUnrelated
+	}
+}
