@@ -18,6 +18,7 @@ import Metrics from './pages/Metrics'
 import Network from './pages/Network'
 import Dependencies from './pages/Dependencies'
 import Bulk from './pages/Bulk'
+import Notifications from './pages/Notifications'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -124,6 +125,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Bulk />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <AuthGuard>
+              <Notifications />
             </AuthGuard>
           }
         />

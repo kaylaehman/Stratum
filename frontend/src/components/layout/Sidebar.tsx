@@ -16,6 +16,7 @@ import {
   Server,
   Folder,
   X,
+  Bell,
 } from 'lucide-react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
@@ -42,6 +43,7 @@ const navItems: NavItem[] = [
   { icon: <Shield size={14} />, label: 'Security', to: '/security' },
   { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
   { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
+  { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications' },
   { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },
 ]
 

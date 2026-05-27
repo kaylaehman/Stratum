@@ -732,6 +732,32 @@ export interface CreateBookmarkRequest {
   group_name?: string
 }
 
+// Notification Hooks types (Feature 26)
+
+export type WebhookProvider = 'slack' | 'discord'
+
+export interface Webhook {
+  id: string
+  name: string
+  url: string
+  provider: WebhookProvider
+  triggers: string[]
+  enabled: boolean
+}
+
+export interface WebhooksResponse {
+  webhooks: Webhook[]
+  available_triggers: string[]
+}
+
+export interface WebhookRequest {
+  name: string
+  url: string
+  provider: WebhookProvider
+  triggers: string[]
+  enabled: boolean
+}
+
 // Wake-on-LAN types (Feature 6)
 
 export interface WOLConfig {
