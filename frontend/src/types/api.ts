@@ -1060,3 +1060,33 @@ export interface RunScriptResponse {
 export interface RunScriptRequest {
   node_ids: string[]
 }
+
+// Backup Orchestration types (Feature 28)
+
+export type BackupStatus = 'running' | 'ok' | 'error'
+
+export interface Backup {
+  id: string
+  node_id: string
+  kind: string
+  target: string
+  dest_path: string
+  size_bytes: number
+  status: BackupStatus
+  error?: string
+  started_at: string
+  finished_at?: string
+}
+
+export interface BackupsResponse {
+  backups: Backup[]
+}
+
+export interface StartBackupRequest {
+  volume: string
+  dest_dir: string
+}
+
+export interface StartBackupResponse {
+  backup_id: string
+}

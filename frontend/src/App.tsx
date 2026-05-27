@@ -24,6 +24,7 @@ import Templates from './pages/Templates'
 import Secrets from './pages/Secrets'
 import CVE from './pages/CVE'
 import Scripts from './pages/Scripts'
+import Backups from './pages/Backups'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -178,6 +179,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Scripts />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/backups"
+          element={
+            <AuthGuard>
+              <Backups />
             </AuthGuard>
           }
         />
