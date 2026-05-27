@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
@@ -77,6 +79,7 @@ func run(logger *slog.Logger) error {
 		Hub:            h,
 		Nodes:          nodes.NewService(store, cipher),
 		Poller:         poller,
+		Files:          fs.NewService(store, cipher, uploadMaxBytes()),
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -92,6 +95,16 @@ func run(logger *slog.Logger) error {
 	go poller.Run(ctx) // inventory poller; stops on shutdown
 
 	return srv.Run(ctx)
+}
+
+// uploadMaxBytes reads STRATUM_UPLOAD_MAX_BYTES (default fs.DefaultUploadMax).
+func uploadMaxBytes() int64 {
+	if v := os.Getenv("STRATUM_UPLOAD_MAX_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fs.DefaultUploadMax
 }
 
 // maybeSeedAdmin creates the first admin from STRATUM_ADMIN_USER/PASSWORD when

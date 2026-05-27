@@ -9,6 +9,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
 	"github.com/kaylaehman/stratum/backend/nodes"
@@ -22,6 +23,7 @@ type Handlers struct {
 	Hub       *hub.Hub
 	Nodes     *nodes.Service
 	Poller    *inventory.Poller
+	Files     *fs.Service
 	Logger    *slog.Logger
 	StartedAt time.Time
 

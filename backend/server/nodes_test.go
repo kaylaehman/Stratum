@@ -18,6 +18,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/crypto"
 	appdb "github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/server"
@@ -53,6 +54,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		JWT:            jwt,
 		Hub:            hub.New(),
 		Nodes:          nodes.NewService(store, cipher),
+		Files:          fs.NewService(store, cipher, 0),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

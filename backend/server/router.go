@@ -52,6 +52,11 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/nodes/{id}/vms", d.Handlers.NodeVMs)
 			r.Get("/nodes/{id}/containers", d.Handlers.NodeContainers)
 
+			// Filesystem reads (admin-gated writes are in the audited group).
+			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
+			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
+			r.Get("/nodes/{id}/fs/download", d.Handlers.FSDownload)
+
 			// Authenticated + audited mutations.
 			audited := r.With(mw.Activity(d.Handlers.Activity))
 			audited.Post("/auth/logout", d.Handlers.Logout)
@@ -60,6 +65,11 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/nodes/{id}", d.Handlers.DeleteNode)
 			audited.Post("/nodes/{id}/probe", d.Handlers.ReprobeNode)
 			audited.Post("/nodes/probe-preview", d.Handlers.ProbePreview)
+			audited.Put("/nodes/{id}/fs/file", d.Handlers.FSWriteFile)
+			audited.Post("/nodes/{id}/fs/upload", d.Handlers.FSUpload)
+			audited.Post("/nodes/{id}/fs/mkdir", d.Handlers.FSMkdir)
+			audited.Post("/nodes/{id}/fs/rename", d.Handlers.FSRename)
+			audited.Delete("/nodes/{id}/fs", d.Handlers.FSDelete)
 		})
 	})
 
