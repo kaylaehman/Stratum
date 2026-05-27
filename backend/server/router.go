@@ -116,6 +116,9 @@ func NewRouter(d *Deps) http.Handler {
 			// AI assistant config (admin gate in handler; set/ask are audited below).
 			r.Get("/ai/config", d.Handlers.AIConfigGet)
 
+			// Certificate inventory (admin gate in handler; rescan is audited below).
+			r.Get("/certs", d.Handlers.CertList)
+
 			// Wake-on-LAN config read (set/wake are audited mutations below).
 			r.Get("/nodes/{id}/wol", d.Handlers.GetWOL)
 
@@ -208,6 +211,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/{id}/backups", d.Handlers.StartBackup)
 			audited.Put("/ai/config", d.Handlers.AIConfigSet)
 			audited.Post("/ai/ask", d.Handlers.AIAsk)
+			audited.Post("/certs/rescan", d.Handlers.CertRescan)
 			audited.Post("/me/2fa/setup", d.Handlers.TwoFASetup)
 			audited.Post("/me/2fa/enable", d.Handlers.TwoFAEnable)
 			audited.Post("/me/2fa/disable", d.Handlers.TwoFADisable)

@@ -11,6 +11,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/backup"
+	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/depgraph"
@@ -59,6 +60,7 @@ type Handlers struct {
 	TwoFA          *twofa.Service
 	Recreate       *recreate.Service
 	AI             *ai.Service
+	Certs          *certs.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

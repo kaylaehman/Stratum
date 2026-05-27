@@ -109,6 +109,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/nodes/{id}/backups":              true,
 		"PUT /api/ai/config":                        true,
 		"POST /api/ai/ask":                          true,
+		"POST /api/certs/rescan":                    true,
 		"POST /api/me/2fa/setup":                    true,
 		"POST /api/me/2fa/enable":                   true,
 		"POST /api/me/2fa/disable":                  true,

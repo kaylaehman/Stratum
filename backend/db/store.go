@@ -251,6 +251,21 @@ type Snapshot struct {
 	CreatedAt     time.Time
 }
 
+// CertInfo is a TLS certificate discovered on a node's filesystem (Feature F4).
+// Monitor-only: Stratum surfaces expiry, never issues certs.
+type CertInfo struct {
+	ID          string     `json:"id"`
+	NodeID      string     `json:"node_id"`
+	Source      string     `json:"source"`
+	Domain      string     `json:"domain"`
+	SANs        []string   `json:"sans"`
+	Issuer      string     `json:"issuer"`
+	Path        string     `json:"path"`
+	NotBefore   *time.Time `json:"not_before,omitempty"`
+	NotAfter    *time.Time `json:"not_after,omitempty"`
+	LastChecked time.Time  `json:"last_checked"`
+}
+
 // AIConfig is the single-row AI Assistant provider configuration (Feature 31).
 // APIKeyEncrypted is an AES-sealed blob; the plaintext key is never stored.
 type AIConfig struct {
@@ -493,6 +508,10 @@ type Store interface {
 	// AI Assistant config (Feature 31) — single row
 	GetAIConfig(ctx context.Context) (AIConfig, error)
 	UpsertAIConfig(ctx context.Context, c AIConfig) error
+
+	// Certificates (Feature F4) — replaced wholesale per node on scan
+	ReplaceCertsByNode(ctx context.Context, nodeID string, certs []CertInfo) error
+	ListCerts(ctx context.Context) ([]CertInfo, error)
 
 	// Script runner (Feature 27)
 	CreateScript(ctx context.Context, s Script) error

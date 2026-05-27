@@ -28,6 +28,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/backup"
+	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/recreate"
@@ -100,6 +101,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		TwoFA:          twofa.New(store, cipher),
 		Recreate:       recreate.New(store, recreate.ClientProvider(noDocker)),
 		AI:             ai.New(store, cipher, "", ""),
+		Certs:          certs.New(store, filesSvc.Exec, time.Minute),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

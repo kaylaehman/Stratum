@@ -72,6 +72,8 @@ const (
 
 	ActionAIAsk    = "ai.ask"
 	ActionAIConfig = "ai.config"
+
+	ActionCertRescan = "cert.rescan"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -166,6 +168,8 @@ var actionCatalog = []ActionInfo{
 
 	{ActionAIAsk, "AI assistant query", "ai", TargetAI},
 	{ActionAIConfig, "AI provider configured", "ai", TargetAI},
+
+	{ActionCertRescan, "Certificates re-scanned", "cert", TargetNode},
 }
 
 var actionByName = func() map[string]ActionInfo {
