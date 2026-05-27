@@ -8,6 +8,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/cve"
@@ -57,6 +58,7 @@ type Handlers struct {
 	Backups        *backup.Service
 	TwoFA          *twofa.Service
 	Recreate       *recreate.Service
+	AI             *ai.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

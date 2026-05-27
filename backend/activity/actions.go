@@ -68,6 +68,9 @@ const (
 	ActionScriptRun    = "script.run"
 
 	ActionBackupStart = "backup.start"
+
+	ActionAIAsk    = "ai.ask"
+	ActionAIConfig = "ai.config"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -83,6 +86,7 @@ const (
 	TargetTemplate        = "template"
 	TargetSSHKey          = "sshkey"
 	TargetScript          = "script"
+	TargetAI              = "ai"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -157,6 +161,9 @@ var actionCatalog = []ActionInfo{
 	{ActionScriptRun, "Script run", "script", TargetScript},
 
 	{ActionBackupStart, "Backup started", "backup", TargetNode},
+
+	{ActionAIAsk, "AI assistant query", "ai", TargetAI},
+	{ActionAIConfig, "AI provider configured", "ai", TargetAI},
 }
 
 var actionByName = func() map[string]ActionInfo {

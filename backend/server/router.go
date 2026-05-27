@@ -113,6 +113,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Global search (read-only).
 			r.Get("/search", d.Handlers.Search)
 
+			// AI assistant config (admin gate in handler; set/ask are audited below).
+			r.Get("/ai/config", d.Handlers.AIConfigGet)
+
 			// Wake-on-LAN config read (set/wake are audited mutations below).
 			r.Get("/nodes/{id}/wol", d.Handlers.GetWOL)
 
@@ -202,6 +205,8 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)
 			audited.Post("/scripts/{id}/run", d.Handlers.RunScript)
 			audited.Post("/nodes/{id}/backups", d.Handlers.StartBackup)
+			audited.Put("/ai/config", d.Handlers.AIConfigSet)
+			audited.Post("/ai/ask", d.Handlers.AIAsk)
 			audited.Post("/me/2fa/setup", d.Handlers.TwoFASetup)
 			audited.Post("/me/2fa/enable", d.Handlers.TwoFAEnable)
 			audited.Post("/me/2fa/disable", d.Handlers.TwoFADisable)

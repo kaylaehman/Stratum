@@ -18,6 +18,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/config"
@@ -130,6 +131,7 @@ func run(logger *slog.Logger) error {
 	backupSvc := backup.New(store, filesSvc.Exec)
 	twoFASvc := twofa.New(store, cipher)
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
+	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL)
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -155,6 +157,7 @@ func run(logger *slog.Logger) error {
 		Backups:        backupSvc,
 		TwoFA:          twoFASvc,
 		Recreate:       recreateSvc,
+		AI:             aiSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

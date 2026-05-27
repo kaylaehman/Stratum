@@ -13,6 +13,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/crypto"
@@ -98,6 +99,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Backups:        backup.New(store, filesSvc.Exec),
 		TwoFA:          twofa.New(store, cipher),
 		Recreate:       recreate.New(store, recreate.ClientProvider(noDocker)),
+		AI:             ai.New(store, cipher, "", ""),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

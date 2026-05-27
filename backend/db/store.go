@@ -251,6 +251,17 @@ type Snapshot struct {
 	CreatedAt     time.Time
 }
 
+// AIConfig is the single-row AI Assistant provider configuration (Feature 31).
+// APIKeyEncrypted is an AES-sealed blob; the plaintext key is never stored.
+type AIConfig struct {
+	Provider        string
+	OllamaBaseURL   string
+	OllamaModel     string
+	ClaudeModel     string
+	APIKeyEncrypted []byte
+	UpdatedAt       time.Time
+}
+
 // Script is a saved shell script for the script runner (Feature 27).
 type Script struct {
 	ID          string
@@ -478,6 +489,10 @@ type Store interface {
 	// PruneSnapshots keeps the newest `keep` snapshots for (nodeID, containerName)
 	// and deletes the rest.
 	PruneSnapshots(ctx context.Context, nodeID, containerName string, keep int) error
+
+	// AI Assistant config (Feature 31) — single row
+	GetAIConfig(ctx context.Context) (AIConfig, error)
+	UpsertAIConfig(ctx context.Context, c AIConfig) error
 
 	// Script runner (Feature 27)
 	CreateScript(ctx context.Context, s Script) error
