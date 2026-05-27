@@ -112,15 +112,35 @@ func TestPageCursorAdvances(t *testing.T) {
 		t.Fatal("expected cursor after page1")
 	}
 
-	// Page 2: use cursor
-	page2, cur2, err := activity.Page(context.Background(), store, appdb.ActivityQuery{}, cur1, 2)
+	// rowids 5,4,3,2,1 => IDs a,b,c,d,e. Page1 must be the two newest with no drop.
+	if page1[0].ID != "a" || page1[1].ID != "b" {
+		t.Fatalf("page1 = [%s,%s], want [a,b]", page1[0].ID, page1[1].ID)
+	}
+
+	// Page 2: use cursor. The boundary row (b) must NOT be dropped or repeated —
+	// page2 must start exactly at the next row (c). This is the off-by-one guard.
+	page2, _, err := activity.Page(context.Background(), store, appdb.ActivityQuery{}, cur1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page2) != 2 {
-		t.Fatalf("page2 len = %d", len(page2))
+	if len(page2) != 2 || page2[0].ID != "c" || page2[1].ID != "d" {
+		t.Fatalf("page2 = %v, want [c,d] (no boundary row dropped/duplicated)", ids(page2))
 	}
-	_ = cur2 // may or may not be empty depending on fake implementation
+	// No overlap between pages.
+	seen := map[string]bool{page1[0].ID: true, page1[1].ID: true}
+	for _, e := range page2 {
+		if seen[e.ID] {
+			t.Errorf("row %s appears in both pages", e.ID)
+		}
+	}
+}
+
+func ids(es []appdb.ActivityEntry) []string {
+	out := make([]string, len(es))
+	for i, e := range es {
+		out[i] = e.ID
+	}
+	return out
 }
 
 func TestPageBadCursorError(t *testing.T) {

@@ -21,15 +21,22 @@ func parseOptString(v string) *string {
 	return &s
 }
 
-// parseOptTime parses RFC3339 or date-only "2006-01-02"; returns nil on empty input.
-func parseOptTime(v string) (*time.Time, bool) {
+// parseOptTime parses RFC3339 or date-only "2006-01-02"; returns nil on empty
+// input. endOfDay matters for an inclusive upper bound: a date-only value is
+// midnight, so a `to` filter of "2026-05-27" must cover the whole day, not just
+// its first instant — pass endOfDay=true for the `to` bound.
+func parseOptTime(v string, endOfDay bool) (*time.Time, bool) {
 	if v == "" {
 		return nil, true
 	}
-	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
-		if t, err := time.Parse(layout, v); err == nil {
-			return &t, true
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return &t, true
+	}
+	if t, err := time.Parse("2006-01-02", v); err == nil {
+		if endOfDay {
+			t = t.Add(24*time.Hour - time.Nanosecond)
 		}
+		return &t, true
 	}
 	return nil, false
 }
@@ -66,11 +73,11 @@ func toEntryView(e db.ActivityEntry, username string) activityEntryView {
 func buildActivityQuery(r *http.Request) (db.ActivityQuery, string, int, bool) {
 	q := r.URL.Query()
 
-	from, fromOK := parseOptTime(q.Get("from"))
+	from, fromOK := parseOptTime(q.Get("from"), false)
 	if !fromOK {
 		return db.ActivityQuery{}, "", 0, false
 	}
-	to, toOK := parseOptTime(q.Get("to"))
+	to, toOK := parseOptTime(q.Get("to"), true)
 	if !toOK {
 		return db.ActivityQuery{}, "", 0, false
 	}

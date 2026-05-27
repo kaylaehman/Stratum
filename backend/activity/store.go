@@ -66,13 +66,16 @@ func (s *Store) Append(ctx context.Context, e Entry) error {
 		// so a single emitter that forgets to redact would be a PERMANENT,
 		// CSV-exportable leak. Re-walk the marshaled detail and redact the values
 		// of any sensitive-looking key. This is a backstop, not a substitute for
-		// redaction at the emitter.
+		// redaction at the emitter. Fail SAFE: if the detail can't be parsed or
+		// re-marshaled, write a sentinel rather than the unscrubbed bytes — a
+		// permanent leak is worse than a lost detail payload.
 		var generic any
-		if err := json.Unmarshal(b, &generic); err == nil {
-			scrubbed := scrubSecrets(generic)
-			if sb, err := json.Marshal(scrubbed); err == nil {
-				b = sb
-			}
+		if err := json.Unmarshal(b, &generic); err != nil {
+			b = []byte(`{"redacted":"detail_unparseable"}`)
+		} else if sb, err := json.Marshal(scrubSecrets(generic)); err != nil {
+			b = []byte(`{"redacted":"detail_unscrubbable"}`)
+		} else {
+			b = sb
 		}
 		ds := string(b)
 		detail = &ds
@@ -102,6 +105,7 @@ const redacted = "[REDACTED]"
 var sensitiveKeySubstrings = []string{
 	"password", "passwd", "secret", "token", "passphrase",
 	"private_key", "credential", "encryption_key", "jwt",
+	"bearer", "authorization", "apikey",
 }
 
 func isSensitiveKey(k string) bool {

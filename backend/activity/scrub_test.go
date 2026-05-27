@@ -18,6 +18,9 @@ func TestScrubSecrets(t *testing.T) {
 		"docker_tls_key":  "keymaterial",
 		"docker_tls_cert": "PUBLIC CERT",
 		"api_token":       "t0ken",
+		"bearer":          "Bearer xyz",
+		"authorization":   "Basic abc",
+		"apikey":          "ak_123",
 		"nested": map[string]any{
 			"jwt_secret": "leaked",
 			"path":       "/etc/conf",
@@ -31,7 +34,7 @@ func TestScrubSecrets(t *testing.T) {
 		t.Fatal("scrubSecrets did not return a map")
 	}
 
-	mustRedact := []string{"ssh_password", "ssh_private_key", "ssh_passphrase", "proxmox_secret", "docker_tls_key", "api_token"}
+	mustRedact := []string{"ssh_password", "ssh_private_key", "ssh_passphrase", "proxmox_secret", "docker_tls_key", "api_token", "bearer", "authorization", "apikey"}
 	for _, k := range mustRedact {
 		if out[k] != redacted {
 			t.Errorf("%s = %v, want redacted", k, out[k])
