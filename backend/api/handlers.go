@@ -2,6 +2,7 @@ package api
 
 import (
 	"log/slog"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -63,6 +64,12 @@ type Handlers struct {
 
 	// PreviewLimiter throttles the SSRF-adjacent probe-preview endpoint.
 	PreviewLimiter *rate.Limiter
+
+	// userMu serialises admin-count-sensitive user mutations (role change,
+	// delete) so two concurrent demotions can't both pass the last-admin guard
+	// and leave zero admins. Single-process SQLite deployment, so an in-process
+	// mutex is sufficient. Zero value is ready to use.
+	userMu sync.Mutex
 }
 
 func ptr(s string) *string { return &s }

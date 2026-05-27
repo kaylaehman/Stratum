@@ -122,6 +122,10 @@ func (h *Handlers) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_role")
 		return
 	}
+	// Serialise with DeleteUser so a concurrent demote+delete can't both pass
+	// the last-admin guard and zero out the admins.
+	h.userMu.Lock()
+	defer h.userMu.Unlock()
 	target, err := h.Store.GetUserByID(r.Context(), id)
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -164,6 +168,9 @@ func (h *Handlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cannot_delete_self")
 		return
 	}
+	// Serialise with UpdateUserRole (see userMu) for the last-admin guard.
+	h.userMu.Lock()
+	defer h.userMu.Unlock()
 	target, err := h.Store.GetUserByID(r.Context(), id)
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -181,7 +188,11 @@ func (h *Handlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "delete_failed")
 		return
 	}
-	_ = h.Store.RevokeAllUserSessions(r.Context(), id, time.Now())
+	// The account is gone; failing to revoke its sessions leaves refresh tokens
+	// live until expiry, so surface it (the delete itself already committed).
+	if err := h.Store.RevokeAllUserSessions(r.Context(), id, time.Now()); err != nil && h.Logger != nil {
+		h.Logger.Warn("revoke sessions after user delete failed", "user_id", id, "error", err)
+	}
 	auditUser(r, "user.delete", id, map[string]string{"username": target.Username, "by": actor.Username})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -276,6 +287,7 @@ func (h *Handlers) RevokeOwnSession(w http.ResponseWriter, r *http.Request) {
 		e.Action = "auth.session_revoke"
 		e.TargetType = ptr(activity.TargetUser)
 		e.TargetID = &u.ID
+		e.Detail = map[string]string{"session_id": id}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

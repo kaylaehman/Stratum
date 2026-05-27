@@ -114,6 +114,13 @@ func (h *Handlers) BulkContainers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	auditAction, do := dockerActionFor(body.Action)
+	if do == nil {
+		// Defensive: bulk.Valid accepted the action but dockerActionFor has no
+		// mapping for it — a code-level divergence, not client input. Fail loud
+		// rather than dereference a nil func.
+		writeError(w, http.StatusBadRequest, "invalid_bulk_request")
+		return
+	}
 	executed := h.runBulk(r, plan, do, auditAction)
 	results = append(results, executed...)
 

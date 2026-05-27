@@ -21,10 +21,11 @@ func (h *Handlers) requireRole(w http.ResponseWriter, r *http.Request, min strin
 }
 
 // requireAdmin gates a route to the admin role. It keeps the historical
-// "admin_only" error code that admin-only routes have always returned.
+// "admin_only" error code that admin-only routes have always returned, but
+// shares the fail-closed rank check with requireRole (single source of truth).
 func (h *Handlers) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	u, ok := middleware.UserFromContext(r.Context())
-	if !ok || u.Role != auth.RoleAdmin {
+	if !ok || !auth.AtLeast(u.Role, auth.RoleAdmin) {
 		writeError(w, http.StatusForbidden, "admin_only")
 		return false
 	}
