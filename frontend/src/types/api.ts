@@ -40,3 +40,93 @@ export interface RefreshResponse {
 export interface ApiError {
   error: string
 }
+
+// Node types
+
+export type NodeType = 'proxmox' | 'standalone' | 'ssh'
+export type NodeStatus = 'ok' | 'unreachable' | 'error' | 'unknown'
+export type ProxmoxAuthStatus = 'confirmed' | 'unauthed' | 'marker_only' | 'none'
+export type CredentialMethod = 'ssh_key' | 'ssh_password'
+
+export interface Capabilities {
+  proxmox: boolean
+  docker: boolean
+  agent: boolean
+  systemd: boolean
+  cron: boolean
+}
+
+export interface NodeView {
+  id: string
+  name: string
+  type: NodeType
+  host: string
+  port: number
+  auth_method: string
+  os_type: string
+  capabilities: Capabilities
+  proxmox_auth_status: ProxmoxAuthStatus
+  status: NodeStatus
+  last_error?: string
+  last_seen?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface NodeCredentials {
+  method: CredentialMethod
+  ssh_user: string
+  ssh_password?: string
+  ssh_private_key?: string
+  ssh_passphrase?: string
+  proxmox_token_id?: string
+  proxmox_secret?: string
+  docker_tls_ca?: string
+  docker_tls_cert?: string
+  docker_tls_key?: string
+}
+
+export interface CreateNodeRequest {
+  name: string
+  host: string
+  ssh_port: number
+  credentials: NodeCredentials
+  proxmox_endpoint?: string
+  proxmox_tls_insecure?: boolean
+  docker_endpoint?: string
+  pinned_host_key?: string
+  ack_insecure_docker?: boolean
+  accepted_host_key: string
+  type_override?: NodeType
+}
+
+export interface RenameNodeRequest {
+  name: string
+}
+
+export interface ProbePreviewRequest {
+  host: string
+  ssh_port: number
+  credentials: NodeCredentials
+  proxmox_endpoint?: string
+  proxmox_tls_insecure?: boolean
+  docker_endpoint?: string
+  ack_insecure_docker?: boolean
+}
+
+export interface PreviewResult {
+  type: NodeType
+  os_type: string
+  capabilities: Capabilities
+  proxmox_auth_status: ProxmoxAuthStatus
+  reachable_ssh: boolean
+  ssh_host_key_sha256: string
+  ssh_host_key_line: string
+  docker_version?: string
+  proxmox_version?: string
+  probe_errors?: Record<string, string>
+}
+
+export interface NodesListResponse {
+  nodes: NodeView[]
+}

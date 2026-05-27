@@ -8,6 +8,7 @@ import { useSetupStatus } from './hooks/useSetupStatus'
 import Login from './pages/Login'
 import Setup from './pages/Setup'
 import Dashboard from './pages/Dashboard'
+import Nodes from './pages/Nodes'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -34,6 +35,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Dashboard />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/nodes"
+          element={
+            <AuthGuard>
+              <Nodes />
             </AuthGuard>
           }
         />
