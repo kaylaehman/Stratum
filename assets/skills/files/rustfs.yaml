@@ -1,0 +1,107 @@
+id: rustfs
+name: RustFS
+version: "1.0"
+container_match:
+  image_patterns:
+    - "rustfs/rustfs"
+  port_hints: [9000, 9001]
+category: files
+description: High-performance S3-compatible object storage written in Rust
+docs_url: https://github.com/rustfs/rustfs
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /data mount
+    symptoms:
+      - "permission denied"
+      - "Cannot write to data directory"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of /data
+        type: check
+        command: "stat {data_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Chown /data to a UID writable by the container
+        type: fix
+        command: "chown -R 1000:1000 {data_path}"
+        requires_approval: true
+    resolution: |
+      RustFS needs write access to the data directory. Verify the container's
+      configured UID matches the directory owner.
+
+  - id: root-credentials-default
+    name: Server still running with default credentials
+    symptoms:
+      - "Default root credentials in use"
+      - "Console accepts default password"
+    trigger_conditions: []
+    steps:
+      - id: step-1
+        description: Inform about the security implication
+        type: inform
+        command: ""
+      - id: step-2
+        description: Confirm intent to rotate credentials
+        type: confirm
+        command: ""
+      - id: step-3
+        description: Stop the container so credentials can be set via env
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Restart with new RUSTFS_ROOT_USER and RUSTFS_ROOT_PASSWORD env values
+        type: inform
+        command: ""
+    resolution: |
+      RustFS is S3-compatible — running with default credentials exposes the
+      entire object store. Set RUSTFS_ROOT_USER and RUSTFS_ROOT_PASSWORD env
+      vars in compose, recreate the container, then update any S3 clients
+      with the new credentials.
+
+default_config:
+  compose_template: |
+    services:
+      rustfs:
+        image: rustfs/rustfs:latest
+        container_name: rustfs
+        restart: unless-stopped
+        environment:
+          RUSTFS_ROOT_USER: ${ROOT_USER:-rustfsadmin}
+          RUSTFS_ROOT_PASSWORD: ${ROOT_PASSWORD}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "9000:9000/tcp"
+          - "9001:9001/tcp"
+        command: ["server", "/data", "--console-address", ":9001"]
+  required_vars:
+    - name: ROOT_USER
+      description: S3 root username
+      default: "rustfsadmin"
+    - name: ROOT_PASSWORD
+      description: S3 root password (set this, do not rely on defaults)
+      default: ""
+    - name: DATA_PATH
+      description: Host path for /data
+      default: "./data"
+  known_mounts:
+    - container_path: /data
+      purpose: Object store backing data
+      recommended_permissions: "750"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  RustFS is a newer S3-compatible store. Port 9000 is the S3 API, 9001 is the
+  console UI. Always set root credentials via env — do not run with defaults.
+
+  For TLS, either terminate at a reverse proxy or supply --certs-dir
+  pointing at a mounted cert directory.

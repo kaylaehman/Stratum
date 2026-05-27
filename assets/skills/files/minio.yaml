@@ -1,0 +1,135 @@
+id: minio
+name: MinIO
+version: "1.0"
+container_match:
+  image_patterns:
+    - "minio/minio"
+    - "quay.io/minio/minio"
+  port_hints: [9000, 9001]
+category: files
+description: High-performance S3-compatible object storage
+docs_url: https://min.io/docs/minio/container/index.html
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /data mount
+    symptoms:
+      - "permission denied"
+      - "Cannot write to data directory"
+      - "Unable to initialize backend"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the data path
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 1000"
+        on_fail: step-2
+      - id: step-2
+        description: Chown data path to MinIO's UID
+        type: fix
+        command: "chown -R 1000:1000 {data_path}"
+        requires_approval: true
+    resolution: |
+      The minio/minio image runs as UID 1000. /data must be writable by that
+      user. Set the user via the `user:` directive in compose if you need a
+      different UID.
+
+  - id: default-credentials
+    name: MinIO running with default credentials (minioadmin/minioadmin)
+    symptoms:
+      - "WARNING: Default credentials in use"
+      - "minioadmin"
+    trigger_conditions: []
+    steps:
+      - id: step-1
+        description: Check current MINIO_ROOT env values
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MINIO_ROOT"
+        expected_output: "MINIO_ROOT_USER"
+      - id: step-2
+        description: Inform about credential rotation
+        type: inform
+        command: ""
+      - id: step-3
+        description: Confirm rotation before changing
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Stop the container so credentials can be updated
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+    resolution: |
+      Default `minioadmin/minioadmin` exposes the entire object store. Set
+      MINIO_ROOT_USER and MINIO_ROOT_PASSWORD in compose, recreate, then
+      update any S3 clients pointing at this server.
+
+  - id: distributed-mode-quorum
+    name: Distributed MinIO loses quorum
+    symptoms:
+      - "Insufficient online drives"
+      - "Quorum lost"
+      - "Read-only mode"
+    trigger_conditions:
+      - log_pattern: "quorum"
+    steps:
+      - id: step-1
+        description: Surface the most recent quorum-related logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'quorum|drive' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Inform about distributed-mode quorum requirements
+        type: inform
+        command: ""
+    resolution: |
+      In distributed mode MinIO needs at least (n/2 + 1) drives online to
+      serve reads/writes. If you've lost more than half the nodes, restore
+      them before further writes — MinIO will not erasure-recover beyond its
+      quorum.
+
+default_config:
+  compose_template: |
+    services:
+      minio:
+        image: minio/minio:latest
+        container_name: minio
+        restart: unless-stopped
+        environment:
+          MINIO_ROOT_USER: ${ROOT_USER}
+          MINIO_ROOT_PASSWORD: ${ROOT_PASSWORD}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "9000:9000/tcp"
+          - "9001:9001/tcp"
+        command: ["server", "/data", "--console-address", ":9001"]
+  required_vars:
+    - name: ROOT_USER
+      description: S3 root username (set this, do not use minioadmin)
+      default: ""
+    - name: ROOT_PASSWORD
+      description: S3 root password (set this, do not use defaults)
+      default: ""
+    - name: DATA_PATH
+      description: Host path for /data (object storage backing)
+      default: "./data"
+  known_mounts:
+    - container_path: /data
+      purpose: Object storage backend
+      recommended_permissions: "750"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Port 9000 is the S3 API; 9001 is the management console. The console can
+  also be reached at a random port if --console-address is not specified, so
+  always pin it.
+
+  For production, use distributed mode across 4+ nodes for erasure-coded
+  durability. Single-node MinIO is fine for homelab but offers no fault
+  tolerance beyond underlying storage RAID.

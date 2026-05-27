@@ -1,0 +1,201 @@
+id: nextcloud
+name: Nextcloud
+version: "1.0"
+container_match:
+  image_patterns:
+    - "nextcloud"
+    - "linuxserver/nextcloud"
+  port_hints: [80, 443, 8080]
+category: files
+description: Self-hosted productivity suite — file sync, calendar, contacts, collaborative editing
+docs_url: https://docs.nextcloud.com/server/latest/admin_manual/installation/docker.html
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /var/www/html or data directory
+    symptoms:
+      - "permission denied"
+      - "Cannot write to data directory"
+      - "Could not chown"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the data directory
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 33"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Chown data directory to www-data (UID 33 in official image)
+        type: fix
+        command: "chown -R 33:33 {data_path}"
+        requires_approval: true
+    resolution: |
+      The official `nextcloud` image runs as `www-data` (UID 33). The
+      LinuxServer variant runs as PUID/PGID instead. Match ownership to
+      whichever image is in use. Mismatch is the #1 setup failure.
+
+  - id: trusted-domains
+    name: Access denied — "You are accessing the server from an untrusted domain"
+    symptoms:
+      - "untrusted domain"
+      - "trusted_domains"
+    trigger_conditions:
+      - log_pattern: "trusted_domains"
+    steps:
+      - id: step-1
+        description: Show current trusted_domains
+        type: check
+        command: "docker exec -u www-data {container_name} php occ config:system:get trusted_domains 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Add the missing domain to trusted_domains
+        type: fix
+        command: "docker exec -u www-data {container_name} php occ config:system:set trusted_domains 1 --value={new_domain}"
+        requires_approval: true
+    resolution: |
+      Nextcloud refuses requests from any host not in `trusted_domains`. Use
+      `occ config:system:set trusted_domains <index> --value=<domain>` to add
+      each domain you intend to use (LAN IP, public hostname, reverse-proxy
+      hostname all need entries).
+
+  - id: db-connection-refused
+    name: Database connection refused on startup
+    symptoms:
+      - "Connection refused"
+      - "Cannot connect to MySQL/PostgreSQL"
+      - "DB connection error"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+    steps:
+      - id: step-1
+        description: Verify the DB container is running
+        type: check
+        command: "docker inspect {db_container} --format='{{.State.Status}}'"
+        expected_output: "running"
+        on_fail: step-2
+      - id: step-2
+        description: Test reachability from Nextcloud to the DB
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {db_container} {db_port}' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about Docker networking
+        type: inform
+        command: ""
+    resolution: |
+      Both containers must share a user-defined Docker network and reach each
+      other by container name (`db` or whatever the DB service is named in
+      compose), not localhost. Verify `MYSQL_HOST` / `POSTGRES_HOST` matches
+      the DB container name.
+
+  - id: reverse-proxy-loop
+    name: Redirect loop or "OCS-APIRequest" errors behind reverse proxy
+    symptoms:
+      - "redirect loop"
+      - "OCS-APIRequest"
+      - "Cannot complete login through reverse proxy"
+    trigger_conditions:
+      - log_pattern: "redirect"
+    steps:
+      - id: step-1
+        description: Check current overwrite settings
+        type: check
+        command: "docker exec -u www-data {container_name} php occ config:list system | grep -i 'overwrite'"
+        expected_output: ""
+      - id: step-2
+        description: Inform about reverse-proxy headers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set overwrite.cli.url and trusted_proxies for HTTPS reverse proxy
+        type: fix
+        command: "docker exec -u www-data {container_name} php occ config:system:set overwrite.cli.url --value=https://{public_hostname}"
+        requires_approval: true
+    resolution: |
+      Behind a reverse proxy that terminates TLS, Nextcloud needs
+      `overwrite.cli.url=https://...`, `overwriteprotocol=https`, and the
+      proxy's IP added to `trusted_proxies`. Without this, login redirects
+      can loop.
+
+default_config:
+  compose_template: |
+    services:
+      nextcloud:
+        image: nextcloud:latest
+        container_name: nextcloud
+        restart: unless-stopped
+        depends_on:
+          - db
+        environment:
+          MYSQL_HOST: db
+          MYSQL_DATABASE: nextcloud
+          MYSQL_USER: nextcloud
+          MYSQL_PASSWORD: ${DB_PASSWORD}
+          NEXTCLOUD_ADMIN_USER: ${ADMIN_USER}
+          NEXTCLOUD_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+          NEXTCLOUD_TRUSTED_DOMAINS: ${TRUSTED_DOMAINS}
+        volumes:
+          - ${DATA_PATH:-./data}:/var/www/html
+        ports:
+          - "8080:80"
+      db:
+        image: mariadb:10.11
+        restart: unless-stopped
+        command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+        environment:
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+          MYSQL_DATABASE: nextcloud
+          MYSQL_USER: nextcloud
+          MYSQL_PASSWORD: ${DB_PASSWORD}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+  required_vars:
+    - name: ADMIN_USER
+      description: Initial admin username
+      default: "admin"
+    - name: ADMIN_PASSWORD
+      description: Initial admin password
+      default: ""
+    - name: DB_PASSWORD
+      description: MariaDB password for the nextcloud user
+      default: ""
+    - name: DB_ROOT_PASSWORD
+      description: MariaDB root password
+      default: ""
+    - name: TRUSTED_DOMAINS
+      description: Space-separated list of hostnames Nextcloud will accept
+      default: "localhost"
+    - name: DATA_PATH
+      description: Host path for /var/www/html (Nextcloud data + apps)
+      default: "./data"
+    - name: DB_PATH
+      description: Host path for the MariaDB datadir
+      default: "./db"
+  known_mounts:
+    - container_path: /var/www/html
+      purpose: Nextcloud installation, apps, config, and user data
+      recommended_permissions: "750"
+      owner: "33:33"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Two image variants: the official `nextcloud` (runs as www-data UID 33) and
+  the LinuxServer `linuxserver/nextcloud` (runs as PUID/PGID). The compose
+  template above targets the official image. Set
+  linuxserver_conventions.enabled: true and adjust the known_mounts owner to
+  "{PUID}:{PGID}" if using the LinuxServer image.
+
+  Reverse-proxy: set overwrite.cli.url, overwriteprotocol=https, and
+  trusted_proxies when behind a proxy. Without these, login redirects loop.
+
+  Cron: for non-trivial deployments, run Nextcloud's cron from a sidecar
+  container (image: nextcloud:cron) hitting `php cron.php` every 5 minutes.

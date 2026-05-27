@@ -1,0 +1,107 @@
+id: sftpgo
+name: SFTPGo
+version: "1.0"
+container_match:
+  image_patterns:
+    - "drakkan/sftpgo"
+  port_hints: [2022, 8080, 8090]
+category: files
+description: SFTP/FTP/WebDAV/HTTP server with web admin UI and per-user virtual filesystem
+docs_url: https://github.com/drakkan/sftpgo
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /var/lib/sftpgo or user homes
+    symptoms:
+      - "permission denied"
+      - "Cannot create user home"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the data directory
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 1000"
+        on_fail: step-2
+      - id: step-2
+        description: Chown data path to 1000:1000 (sftpgo user inside container)
+        type: fix
+        command: "chown -R 1000:1000 {data_path}"
+        requires_approval: true
+    resolution: |
+      SFTPGo runs as UID 1000 by default. Data and user home directories must
+      be writable by that user.
+
+  - id: host-key-regenerated
+    name: SSH host key changed - clients refuse to connect
+    symptoms:
+      - "REMOTE HOST IDENTIFICATION HAS CHANGED"
+      - "WARNING: Possible DNS Spoofing Detected"
+      - "Host key verification failed"
+    trigger_conditions: []
+    steps:
+      - id: step-1
+        description: Verify host keys are mounted persistently
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}' | grep -i 'sftpgo\\|keys'"
+        expected_output: ""
+      - id: step-2
+        description: Inform users about host key change
+        type: inform
+        command: ""
+    resolution: |
+      If /var/lib/sftpgo isn't mounted to a persistent host directory, SFTPGo
+      regenerates its SSH host keys every time the container is recreated.
+      Clients see this as a potential MITM and refuse to connect. Mount
+      persistent storage and clients will need to update their known_hosts
+      once (via `ssh-keygen -R [host]:port`).
+
+default_config:
+  compose_template: |
+    services:
+      sftpgo:
+        image: drakkan/sftpgo:latest
+        container_name: sftpgo
+        restart: unless-stopped
+        volumes:
+          - ${DATA_PATH:-./data}:/var/lib/sftpgo
+          - ${USERS_PATH:-./users}:/srv/sftpgo
+          - ${CONFIG_PATH:-./config}:/etc/sftpgo
+        ports:
+          - "2022:2022/tcp"
+          - "8080:8080/tcp"
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for /var/lib/sftpgo (state, host keys, DB)
+      default: "./data"
+    - name: USERS_PATH
+      description: Host path for /srv/sftpgo (user homes)
+      default: "./users"
+    - name: CONFIG_PATH
+      description: Host path for /etc/sftpgo (sftpgo.json)
+      default: "./config"
+  known_mounts:
+    - container_path: /var/lib/sftpgo
+      purpose: SFTPGo state, SSH host keys, database
+      recommended_permissions: "750"
+      owner: "1000:1000"
+    - container_path: /srv/sftpgo
+      purpose: User home directories
+      recommended_permissions: "755"
+      owner: "1000:1000"
+    - container_path: /etc/sftpgo
+      purpose: sftpgo.json and any TLS certs
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Port 2022 is SFTP, 8080 is the admin web UI. Restrict the admin UI to LAN
+  or behind a reverse proxy with auth — do not expose it publicly.
+
+  Default admin credentials must be set via env (SFTPGO_DEFAULT_ADMIN_USERNAME
+  and SFTPGO_DEFAULT_ADMIN_PASSWORD) on first run. Otherwise SFTPGo creates a
+  default admin and prints it to logs.

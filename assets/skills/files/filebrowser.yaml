@@ -1,0 +1,113 @@
+id: filebrowser
+name: File Browser
+version: "1.0"
+container_match:
+  image_patterns:
+    - "filebrowser/filebrowser"
+  port_hints: [80]
+category: files
+description: Lightweight web file manager with multi-user support
+docs_url: https://filebrowser.org/installation
+
+common_issues:
+  - id: db-file-missing
+    name: filebrowser.db missing or not writable
+    symptoms:
+      - "Cannot open database"
+      - "filebrowser.db: no such file"
+      - "Permission denied on database file"
+    trigger_conditions:
+      - log_pattern: "database"
+    steps:
+      - id: step-1
+        description: Verify the database file path is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}' | grep -E '/database'"
+        expected_output: "/database"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about database file initialization
+        type: inform
+        command: ""
+    resolution: |
+      File Browser stores users and settings in a single SQLite file
+      (filebrowser.db). Mount a host directory at /database and let File
+      Browser create the file on first start. The directory must be writable
+      by the container.
+
+  - id: default-admin-not-changed
+    name: Default admin credentials still in use
+    symptoms:
+      - "Default password warning"
+      - "Login with admin/admin succeeds"
+    trigger_conditions: []
+    steps:
+      - id: step-1
+        description: Inform about default credentials
+        type: inform
+        command: ""
+      - id: step-2
+        description: Confirm intent to rotate password
+        type: confirm
+        command: ""
+      - id: step-3
+        description: Reset admin password via CLI
+        type: fix
+        command: "docker exec {container_name} /filebrowser users update admin --password={new_password}"
+        requires_approval: true
+    resolution: |
+      Default credentials (admin/admin) must be changed immediately. If File
+      Browser is exposed even on LAN, defaults are a credential-spray target.
+
+default_config:
+  compose_template: |
+    services:
+      filebrowser:
+        image: filebrowser/filebrowser:latest
+        container_name: filebrowser
+        restart: unless-stopped
+        user: "${PUID:-1000}:${PGID:-1000}"
+        volumes:
+          - ${BROWSE_PATH:-./files}:/srv
+          - ${DATABASE_PATH:-./database}:/database
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "8088:80"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: BROWSE_PATH
+      description: Host path File Browser will expose under /srv
+      default: "./files"
+    - name: DATABASE_PATH
+      description: Host path for filebrowser.db
+      default: "./database"
+    - name: CONFIG_PATH
+      description: Host path for /config (settings.json)
+      default: "./config"
+  known_mounts:
+    - container_path: /srv
+      purpose: Root of the browsable file tree
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /database
+      purpose: SQLite database (users, shares, settings)
+      recommended_permissions: "750"
+      owner: "{PUID}:{PGID}"
+    - container_path: /config
+      purpose: settings.json overrides
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Single-binary, no external DB — entire state lives in filebrowser.db. Back
+  up that file with the same regularity as the browsed files.
+
+  TOTP, OIDC, and proxy header auth are all supported via settings.json.

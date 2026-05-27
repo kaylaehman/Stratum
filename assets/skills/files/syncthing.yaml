@@ -1,0 +1,118 @@
+id: syncthing
+name: Syncthing
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/syncthing"
+    - "syncthing/syncthing"
+  port_hints: [8384, 22000, 21027]
+category: files
+description: Decentralized peer-to-peer file synchronization
+docs_url: https://docs.syncthing.net/
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot create directory"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config ownership corrected to {puid}:{pgid}.
+
+  - id: device-discovery-failing
+    name: Device discovery fails between peers
+    symptoms:
+      - "Cannot discover peers"
+      - "Device IDs do not connect"
+      - "Pending devices stuck"
+    trigger_conditions:
+      - log_pattern: "discovery"
+    steps:
+      - id: step-1
+        description: Verify Syncthing's discovery ports are exposed
+        type: check
+        command: "docker inspect {container_name} | grep -E '22000|21027'"
+        expected_output: "22000"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about port and firewall requirements
+        type: inform
+        command: ""
+    resolution: |
+      Syncthing needs port 22000/tcp+udp for peer sync and 21027/udp for local
+      discovery. Both must be exposed by Docker AND open on the host firewall.
+      For peers across networks, port 22000 also needs to be forwarded on the
+      router or routed via a relay.
+
+default_config:
+  compose_template: |
+    services:
+      syncthing:
+        image: linuxserver/syncthing:latest
+        container_name: syncthing
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "8384:8384/tcp"
+          - "22000:22000/tcp"
+          - "22000:22000/udp"
+          - "21027:21027/udp"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: DATA_PATH
+      description: Host path for /data (synced folders)
+      default: "./data"
+  known_mounts:
+    - container_path: /config
+      purpose: Syncthing config and device keys
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /data
+      purpose: Synced folders
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  GUI port 8384 should NOT be exposed to the public internet by default — it
+  uses an auto-generated TLS cert and the admin auth must be enabled before
+  exposure. Put it behind a reverse proxy with auth or restrict to LAN.
+
+  Each device has a long device ID (XXXXX-XXXXX-...). Pair devices by adding
+  each other's IDs in the GUI under Add Remote Device.

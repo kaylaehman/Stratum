@@ -1,0 +1,131 @@
+id: seafile
+name: Seafile
+version: "1.0"
+container_match:
+  image_patterns:
+    - "seafileltd/seafile-mc"
+  port_hints: [80, 443]
+category: files
+description: Open-source file sync and share with end-to-end encryption support
+docs_url: https://manual.seafile.com/docker/deploy_seafile_with_docker/
+
+common_issues:
+  - id: db-init-failed
+    name: First-run database initialization failed
+    symptoms:
+      - "MySQL connection failed"
+      - "Database init aborted"
+      - "Cannot connect to DB on first start"
+    trigger_conditions:
+      - log_pattern: "database init"
+    steps:
+      - id: step-1
+        description: Verify the MariaDB container is up and healthy
+        type: check
+        command: "docker inspect {db_container} --format='{{.State.Health.Status}}'"
+        expected_output: "healthy"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about init ordering and credential requirements
+        type: inform
+        command: ""
+    resolution: |
+      Seafile's first start sets up its schema in MariaDB. The DB must be
+      ready before Seafile starts (use depends_on with condition: healthy).
+      Verify DB_ROOT_PASSWD env matches MYSQL_ROOT_PASSWORD on the DB
+      container, and that Seafile and DB share a Docker network.
+
+  - id: permission-denied-shared
+    name: Permission denied on /shared mount
+    symptoms:
+      - "permission denied"
+      - "/shared not writable"
+    trigger_conditions:
+      - log_pattern: "permission denied.*shared"
+    steps:
+      - id: step-1
+        description: Check ownership of /shared
+        type: check
+        command: "stat {shared_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Chown /shared to UID/GID the seafile image uses
+        type: fix
+        command: "chown -R 8000:8000 {shared_path}"
+        requires_approval: true
+    resolution: |
+      The seafile-mc image runs as a non-root user with UID 8000. /shared
+      must be writable by that user. Mismatched ownership is the most common
+      "permission denied" failure on the data volume.
+
+default_config:
+  compose_template: |
+    services:
+      seafile:
+        image: seafileltd/seafile-mc:latest
+        container_name: seafile
+        restart: unless-stopped
+        depends_on:
+          - db
+          - memcached
+        environment:
+          DB_HOST: db
+          DB_ROOT_PASSWD: ${DB_ROOT_PASSWORD}
+          TIME_ZONE: ${TZ:-UTC}
+          SEAFILE_ADMIN_EMAIL: ${ADMIN_EMAIL}
+          SEAFILE_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+          SEAFILE_SERVER_HOSTNAME: ${HOSTNAME}
+        volumes:
+          - ${SHARED_PATH:-./shared}:/shared
+        ports:
+          - "80:80"
+      db:
+        image: mariadb:10.11
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+      memcached:
+        image: memcached:1.6
+        restart: unless-stopped
+        entrypoint: memcached -m 256
+  required_vars:
+    - name: ADMIN_EMAIL
+      description: Initial admin email
+      default: ""
+    - name: ADMIN_PASSWORD
+      description: Initial admin password
+      default: ""
+    - name: DB_ROOT_PASSWORD
+      description: MariaDB root password
+      default: ""
+    - name: HOSTNAME
+      description: Public hostname Seafile is reached at
+      default: "seafile.example.com"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: SHARED_PATH
+      description: Host path for /shared (Seafile data + logs + nginx config)
+      default: "./shared"
+    - name: DB_PATH
+      description: Host path for MariaDB datadir
+      default: "./db"
+  known_mounts:
+    - container_path: /shared
+      purpose: Seafile config, library data, logs, and nginx config
+      recommended_permissions: "755"
+      owner: "8000:8000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  seafile-mc is the multi-container variant (Seafile, MariaDB, memcached).
+  All three must be on the same Docker network. The DB hostname is `db` by
+  default in Seafile's expectations.
+
+  TLS: for production, run behind a reverse proxy (Traefik, Caddy,
+  Nginx-Proxy-Manager) rather than enabling Seafile's built-in HTTPS.

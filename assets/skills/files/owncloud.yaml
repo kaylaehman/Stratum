@@ -1,0 +1,133 @@
+id: owncloud
+name: ownCloud
+version: "1.0"
+container_match:
+  image_patterns:
+    - "owncloud/server"
+  port_hints: [8080]
+category: files
+description: Self-hosted file sync and share platform (predecessor to Nextcloud)
+docs_url: https://doc.owncloud.com/server/next/admin_manual/installation/docker/
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /mnt/data mount
+    symptoms:
+      - "permission denied"
+      - "Cannot chown"
+      - "data directory not writable"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the data path
+        type: check
+        command: "stat {data_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Chown to UID 33 (owncloud / www-data inside container)
+        type: fix
+        command: "chown -R 33:33 {data_path}"
+        requires_approval: true
+    resolution: |
+      The owncloud/server image runs as UID 33 (www-data). /mnt/data must be
+      writable by that user.
+
+  - id: redis-mariadb-unreachable
+    name: Cannot reach Redis or MariaDB
+    symptoms:
+      - "Connection refused"
+      - "Cannot connect to redis"
+      - "DB connection error"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Verify dependency containers are running
+        type: check
+        command: "docker ps --filter name=mariadb --filter name=redis --format '{{.Names}}: {{.Status}}'"
+        expected_output: ""
+      - id: step-2
+        description: Inform about Docker network requirements
+        type: inform
+        command: ""
+    resolution: |
+      ownCloud server requires MariaDB and Redis as separate containers on the
+      same Docker network. Verify OWNCLOUD_DB_HOST and OWNCLOUD_REDIS_HOST
+      point at the container names, not localhost.
+
+default_config:
+  compose_template: |
+    services:
+      owncloud:
+        image: owncloud/server:latest
+        container_name: owncloud
+        restart: unless-stopped
+        depends_on:
+          - mariadb
+          - redis
+        environment:
+          OWNCLOUD_DOMAIN: ${HOSTNAME:-localhost:8080}
+          OWNCLOUD_TRUSTED_DOMAINS: ${HOSTNAME:-localhost}
+          OWNCLOUD_DB_TYPE: mysql
+          OWNCLOUD_DB_NAME: owncloud
+          OWNCLOUD_DB_USERNAME: owncloud
+          OWNCLOUD_DB_PASSWORD: ${DB_PASSWORD}
+          OWNCLOUD_DB_HOST: mariadb
+          OWNCLOUD_ADMIN_USERNAME: ${ADMIN_USER}
+          OWNCLOUD_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+          OWNCLOUD_REDIS_ENABLED: "true"
+          OWNCLOUD_REDIS_HOST: redis
+        volumes:
+          - ${DATA_PATH:-./data}:/mnt/data
+        ports:
+          - "8080:8080"
+      mariadb:
+        image: mariadb:10.11
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+          MYSQL_USER: owncloud
+          MYSQL_PASSWORD: ${DB_PASSWORD}
+          MYSQL_DATABASE: owncloud
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+      redis:
+        image: redis:7
+        restart: unless-stopped
+  required_vars:
+    - name: HOSTNAME
+      description: Hostname ownCloud will accept
+      default: "localhost"
+    - name: ADMIN_USER
+      description: Initial admin username
+      default: "admin"
+    - name: ADMIN_PASSWORD
+      description: Initial admin password
+      default: ""
+    - name: DB_PASSWORD
+      description: MariaDB owncloud user password
+      default: ""
+    - name: DB_ROOT_PASSWORD
+      description: MariaDB root password
+      default: ""
+    - name: DATA_PATH
+      description: Host path for /mnt/data
+      default: "./data"
+    - name: DB_PATH
+      description: Host path for MariaDB datadir
+      default: "./db"
+  known_mounts:
+    - container_path: /mnt/data
+      purpose: ownCloud user data, config, and apps
+      recommended_permissions: "750"
+      owner: "33:33"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  ownCloud and Nextcloud share lineage but diverge significantly — do not
+  reuse data directories between them. For most homelabs, Nextcloud has more
+  active community development and feature velocity.
