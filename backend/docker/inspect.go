@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -44,7 +45,19 @@ type InspectInfo struct {
 	CapDrop     []string `json:"cap_drop"`     // .HostConfig.CapDrop
 	PidMode     string   `json:"pid_mode"`     // .HostConfig.PidMode
 	NetworkMode string   `json:"network_mode"` // .HostConfig.NetworkMode
+	SecurityOpt []string `json:"security_opt"` // .HostConfig.SecurityOpt (seccomp/apparmor=unconfined)
+	Devices     []string `json:"devices"`      // .HostConfig.Devices as "host:container"
+	UsernsMode  string   `json:"userns_mode"`  // .HostConfig.UsernsMode
+	Ports       []PortBinding `json:"ports"`   // published ports from NetworkSettings.Ports
 	RepoDigests []string `json:"repo_digests"` // always empty here; fill via ImageInspect(ImageID)
+}
+
+// PortBinding is one published container port -> host binding.
+type PortBinding struct {
+	ContainerPort int    `json:"container_port"`
+	Protocol      string `json:"protocol"` // tcp | udp
+	HostIP        string `json:"host_ip"`  // 0.0.0.0 | 127.0.0.1 | :: | specific
+	HostPort      int    `json:"host_port"`
 }
 
 // mapMounts converts []container.MountPoint to []Mount.
@@ -77,6 +90,9 @@ func mapInspect(r container.InspectResponse) InspectInfo {
 		capDrop     []string
 		pidMode     string
 		networkMode string
+		securityOpt []string
+		devices     []string
+		usernsMode  string
 		privileged  bool
 	)
 
@@ -94,12 +110,23 @@ func mapInspect(r container.InspectResponse) InspectInfo {
 		capDrop = []string(r.HostConfig.CapDrop)
 		pidMode = string(r.HostConfig.PidMode)
 		networkMode = string(r.HostConfig.NetworkMode)
+		securityOpt = r.HostConfig.SecurityOpt
+		usernsMode = string(r.HostConfig.UsernsMode)
+		for _, d := range r.HostConfig.Devices {
+			devices = append(devices, d.PathOnHost+":"+d.PathInContainer)
+		}
 	}
 	if capAdd == nil {
 		capAdd = []string{}
 	}
 	if capDrop == nil {
 		capDrop = []string{}
+	}
+	if securityOpt == nil {
+		securityOpt = []string{}
+	}
+	if devices == nil {
+		devices = []string{}
 	}
 
 	return InspectInfo{
@@ -116,8 +143,47 @@ func mapInspect(r container.InspectResponse) InspectInfo {
 		CapDrop:     capDrop,
 		PidMode:     pidMode,
 		NetworkMode: networkMode,
+		SecurityOpt: securityOpt,
+		Devices:     devices,
+		UsernsMode:  usernsMode,
+		Ports:       mapPorts(r),
 		RepoDigests: []string{},
 	}
+}
+
+// mapPorts extracts published port bindings from NetworkSettings.Ports, skipping
+// EXPOSE-only ports (nil/empty binding slice). The map key is "port/proto".
+func mapPorts(r container.InspectResponse) []PortBinding {
+	if r.NetworkSettings == nil {
+		return []PortBinding{}
+	}
+	out := []PortBinding{}
+	for portProto, bindings := range r.NetworkSettings.Ports {
+		if len(bindings) == 0 {
+			continue // EXPOSE-only, not published
+		}
+		cport, proto := splitPortProto(string(portProto))
+		for _, b := range bindings {
+			hp, _ := strconv.Atoi(b.HostPort)
+			out = append(out, PortBinding{
+				ContainerPort: cport,
+				Protocol:      proto,
+				HostIP:        b.HostIP,
+				HostPort:      hp,
+			})
+		}
+	}
+	return out
+}
+
+// splitPortProto parses "80/tcp" into (80, "tcp").
+func splitPortProto(s string) (int, string) {
+	port, proto, found := strings.Cut(s, "/")
+	if !found {
+		proto = "tcp"
+	}
+	p, _ := strconv.Atoi(port)
+	return p, proto
 }
 
 // Inspect returns a subset of container inspect data for the given container ID
