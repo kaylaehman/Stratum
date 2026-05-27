@@ -4,6 +4,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import type { LanguageSupport } from '@codemirror/language'
 import { readFile, writeFile, StaleWriteError } from '../../lib/api/fs'
 import { resolveLanguage } from '../../lib/codemirror'
+import { DiffView } from './DiffView'
 import type { FsEntry } from '../../types/api'
 
 interface FileEditorProps {
@@ -18,6 +19,8 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
     dirPath === '/' ? `/${entry.name}` : `${dirPath}/${entry.name}`
 
   const [content, setContent] = useState<string>('')
+  const [baseline, setBaseline] = useState<string>('') // on-disk content, for the save diff
+  const [reviewing, setReviewing] = useState(false)
   const [lastModified, setLastModified] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -35,6 +38,7 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
     void readFile(nodeId, filePath).then((r) => {
       if (cancelled) return
       setContent(r.content)
+      setBaseline(r.content)
       setLastModified(r.lastModified)
       setLoading(false)
     }).catch((e: unknown) => {
@@ -63,10 +67,13 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
     setStaleConflict(false)
     try {
       await writeFile(nodeId, filePath, content, lastModified)
+      setBaseline(content)
       setDirty(false)
+      setReviewing(false)
     } catch (e) {
       if (e instanceof StaleWriteError) {
         setStaleConflict(true)
+        setReviewing(false)
       } else {
         setSaveError(e instanceof Error ? e.message : 'Save failed')
       }
@@ -81,6 +88,7 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
     try {
       const r = await readFile(nodeId, filePath)
       setContent(r.content)
+      setBaseline(r.content)
       setLastModified(r.lastModified)
       setDirty(false)
     } catch (e) {
@@ -116,8 +124,8 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
         </span>
         <button
           type="button"
-          onClick={() => void handleSave()}
-          disabled={saving || loading || !dirty}
+          onClick={() => setReviewing(true)}
+          disabled={saving || loading || !dirty || reviewing}
           className="flex items-center gap-1 text-xs px-2 py-0.5"
           style={{
             background: 'var(--accent-glow)',
@@ -128,7 +136,7 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
           }}
         >
           {saving ? <Loader size={11} className="animate-spin" /> : <Save size={11} />}
-          Save
+          Review &amp; save
         </button>
         <button
           type="button"
@@ -187,8 +195,42 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
         </div>
       )}
 
+      {/* Review-before-save: diff of on-disk baseline vs edits */}
+      {reviewing && (
+        <div className="flex flex-col flex-1 min-h-0">
+          <div
+            className="flex items-center gap-2 px-3 py-2 shrink-0"
+            style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            <span className="text-xs uppercase tracking-wider flex-1" style={{ color: 'var(--text-muted)' }}>
+              Review changes
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving}
+              className="flex items-center gap-1 text-xs px-2 py-0.5"
+              style={{ background: 'var(--accent-glow)', border: '1px solid var(--accent-dim)', color: 'var(--accent)', borderRadius: '3px', cursor: saving ? 'default' : 'pointer' }}
+            >
+              {saving ? <Loader size={11} className="animate-spin" /> : <Save size={11} />}
+              Confirm save
+            </button>
+            <button
+              type="button"
+              onClick={() => setReviewing(false)}
+              disabled={saving}
+              className="text-xs px-2 py-0.5"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)', borderRadius: '3px', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+          </div>
+          <DiffView oldText={baseline} newText={content} />
+        </div>
+      )}
+
       {/* Body */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" style={{ display: reviewing ? 'none' : undefined }}>
         {loading && (
           <div className="flex items-center gap-2 px-4 py-6">
             <Loader size={13} className="animate-spin" style={{ color: 'var(--accent)' }} />
