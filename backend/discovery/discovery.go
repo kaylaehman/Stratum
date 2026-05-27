@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -46,20 +47,22 @@ type Result struct {
 	OSType            string // debian|ubuntu|rhel|arch|alpine|other
 	Caps              capabilities.Set
 	ProxmoxAuthStatus string // confirmed|unauthed|marker_only|none
-	ReachableSSH      bool
-	SSHHostKeySHA256  string
-	SSHHostKeyLine    string
-	DockerVersion     string
-	ProxmoxVersion    string
-	PerProbeError     map[string]string // {"ssh":"ssh_auth_failed", ...}
+	ReachableSSH       bool
+	SSHHostKeyMismatch bool // presented SSH key did not match the pinned key
+	SSHHostKeySHA256   string
+	SSHHostKeyLine     string
+	DockerVersion      string
+	ProxmoxVersion     string
+	PerProbeError      map[string]string // {"ssh":"ssh_auth_failed", ...}
 }
 
 type sshProbe struct {
-	reachable  bool
-	detection  ssh.Detection
-	hostKeySHA string
-	hostKeyLn  string
-	errCat     string
+	reachable   bool
+	detection   ssh.Detection
+	hostKeySHA  string
+	hostKeyLn   string
+	keyMismatch bool
+	errCat      string
 }
 
 type dockerProbe struct {
@@ -101,7 +104,7 @@ func probeSSH(ctx context.Context, t Target) sshProbe {
 	defer cancel()
 	det, hk, err := ssh.Detect(cctx, t.Host, t.SSHPort, t.SSHCreds, t.PinnedHostKey)
 	if err != nil {
-		return sshProbe{errCat: SanitizeProbeError(err)}
+		return sshProbe{keyMismatch: errors.Is(err, ssh.ErrHostKeyMismatch), errCat: SanitizeProbeError(err)}
 	}
 	return sshProbe{reachable: true, detection: det, hostKeySHA: hk.SHA256, hostKeyLn: hk.KnownHostsLine}
 }
@@ -143,6 +146,7 @@ func classify(sp sshProbe, dp dockerProbe, pp pveProbe) Result {
 
 	r.OSType = parseOSType(sp.detection.OSReleaseRaw)
 	r.ReachableSSH = sp.reachable
+	r.SSHHostKeyMismatch = sp.keyMismatch
 	r.SSHHostKeySHA256 = sp.hostKeySHA
 	r.SSHHostKeyLine = sp.hostKeyLn
 	r.DockerVersion = dp.version

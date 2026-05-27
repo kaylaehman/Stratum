@@ -142,7 +142,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (NodeView, error) 
 	// Verify against the accepted key (hard-fail on mismatch = MITM protection).
 	in.PinnedHostKey = in.AcceptedHostKey
 	res := discovery.Probe(ctx, in.ConnInput.target())
-	if res.PerProbeError["ssh"] == discovery.ErrCategorySSHHostKey {
+	if res.SSHHostKeyMismatch {
 		return NodeView{}, ErrHostKeyMismatch
 	}
 
@@ -207,7 +207,7 @@ func (s *Service) Reprobe(ctx context.Context, id string) (NodeView, error) {
 		PinnedHostKey:      n.SSHHostKey,
 	}
 	res := discovery.Probe(ctx, in.target())
-	if res.PerProbeError["ssh"] == discovery.ErrCategorySSHHostKey {
+	if res.SSHHostKeyMismatch {
 		// Persist the mismatch as an error state rather than silently trusting.
 		n.Status = "error"
 		n.LastError = discovery.ErrCategorySSHHostKey
@@ -215,7 +215,10 @@ func (s *Service) Reprobe(ctx context.Context, id string) (NodeView, error) {
 		return NodeView{}, ErrHostKeyMismatch
 	}
 
-	capsJSON, _ := json.Marshal(capsEnvelope{Set: res.Caps, ProxmoxAuthStatus: res.ProxmoxAuthStatus})
+	capsJSON, err := json.Marshal(capsEnvelope{Set: res.Caps, ProxmoxAuthStatus: res.ProxmoxAuthStatus})
+	if err != nil {
+		return NodeView{}, err
+	}
 	n.CapabilitiesJSON = string(capsJSON)
 	n.OSType = res.OSType
 	n.Status, n.LastError, n.LastSeen = deriveStatus(res)

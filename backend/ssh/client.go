@@ -3,6 +3,7 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -11,6 +12,12 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// ErrHostKeyMismatch is returned (wrapped) by Detect when the presented host key
+// does not match the pinned key. Callers detect it with errors.Is rather than
+// matching error text. Its message contains "host key mismatch" so error
+// sanitizers can also categorize it.
+var ErrHostKeyMismatch = errors.New("ssh: host key mismatch")
 
 // Credentials for an SSH dial. Exactly one of Password / PrivateKeyPEM is used,
 // per Method semantics handled by the caller.
@@ -60,7 +67,8 @@ func Detect(ctx context.Context, host string, port int, creds Credentials, pinne
 	}
 
 	var capturedHostKey HostKey
-	hostKeyCallback, err := buildHostKeyCallback(host, port, pinnedKnownHostsLine, &capturedHostKey)
+	var hostKeyMismatch bool
+	hostKeyCallback, err := buildHostKeyCallback(host, port, pinnedKnownHostsLine, &capturedHostKey, &hostKeyMismatch)
 	if err != nil {
 		return Detection{}, HostKey{}, fmt.Errorf("ssh: build host key callback: %w", err)
 	}
@@ -75,6 +83,11 @@ func Detect(ctx context.Context, host string, port int, creds Credentials, pinne
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	client, err := ssh.Dial("tcp", addr, cfg)
 	if err != nil {
+		// Detect the mismatch via the callback-set flag, not the error chain,
+		// so it is reliable regardless of how the ssh library wraps the error.
+		if hostKeyMismatch {
+			return Detection{}, HostKey{}, fmt.Errorf("%w (dial %s)", ErrHostKeyMismatch, addr)
+		}
 		return Detection{}, HostKey{}, fmt.Errorf("ssh: dial %s: %w", addr, err)
 	}
 	defer client.Close()
@@ -108,11 +121,11 @@ func parsePrivateKey(pemData, passphrase string) (ssh.Signer, error) {
 }
 
 // buildHostKeyCallback returns the appropriate HostKeyCallback for TOFU or pinned-key verification.
-func buildHostKeyCallback(host string, port int, pinnedLine string, captured *HostKey) (ssh.HostKeyCallback, error) {
+func buildHostKeyCallback(host string, port int, pinnedLine string, captured *HostKey, mismatch *bool) (ssh.HostKeyCallback, error) {
 	if pinnedLine == "" {
 		return toFUCallback(host, port, captured), nil
 	}
-	return pinnedCallback(host, port, pinnedLine)
+	return pinnedCallback(pinnedLine, mismatch)
 }
 
 // toFUCallback records the presented host key and always accepts it (TOFU).
@@ -126,18 +139,17 @@ func toFUCallback(host string, port int, captured *HostKey) ssh.HostKeyCallback 
 }
 
 // pinnedCallback verifies the presented key matches the pinned known_hosts line.
-func pinnedCallback(host string, port int, pinnedLine string) (ssh.HostKeyCallback, error) {
+// On mismatch it sets *mismatch and returns an error wrapping ErrHostKeyMismatch.
+func pinnedCallback(pinnedLine string, mismatch *bool) (ssh.HostKeyCallback, error) {
 	pinnedKey, err := parsePinnedKey(pinnedLine)
 	if err != nil {
 		return nil, fmt.Errorf("parse pinned known_hosts line: %w", err)
 	}
 
-	_ = host
-	_ = port
-
 	return func(_ string, _ net.Addr, presented ssh.PublicKey) error {
 		if !bytes.Equal(pinnedKey.Marshal(), presented.Marshal()) {
-			return fmt.Errorf("host key mismatch: presented key fingerprint %s does not match pinned key", ssh.FingerprintSHA256(presented))
+			*mismatch = true
+			return fmt.Errorf("%w: presented fingerprint %s", ErrHostKeyMismatch, ssh.FingerprintSHA256(presented))
 		}
 		return nil
 	}, nil

@@ -73,7 +73,8 @@ func (b connBody) toConnInput() nodes.ConnInput {
 // supplied without TLS material and without explicit acknowledgement. Plaintext
 // 2375 grants unauthenticated root-equivalent control of the host.
 func (b connBody) insecureDockerUnacked() bool {
-	if !strings.HasPrefix(b.DockerEndpoint, "tcp://") {
+	// Both tcp:// and http:// connect without TLS in the Docker SDK.
+	if !strings.HasPrefix(b.DockerEndpoint, "tcp://") && !strings.HasPrefix(b.DockerEndpoint, "http://") {
 		return false
 	}
 	hasTLS := b.Credentials.DockerTLSCA != "" || b.Credentials.DockerTLSCert != "" || b.Credentials.DockerTLSKey != ""

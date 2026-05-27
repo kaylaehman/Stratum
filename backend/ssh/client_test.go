@@ -3,6 +3,7 @@ package ssh
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net"
 	"testing"
@@ -201,7 +202,8 @@ func TestPinnedCallback_SameKeyPasses(t *testing.T) {
 	pub, _ := genEd25519(t)
 	line := makeKnownHostsLine("192.0.2.1", 22, pub)
 
-	cb, err := pinnedCallback("192.0.2.1", 22, line)
+	var mismatch bool
+	cb, err := pinnedCallback(line, &mismatch)
 	if err != nil {
 		t.Fatalf("pinnedCallback: %v", err)
 	}
@@ -209,6 +211,9 @@ func TestPinnedCallback_SameKeyPasses(t *testing.T) {
 	addr := fakeAddr{"192.0.2.1:22"}
 	if err := cb("192.0.2.1:22", addr, pub); err != nil {
 		t.Errorf("same key should pass, got error: %v", err)
+	}
+	if mismatch {
+		t.Error("mismatch flag should be false for matching key")
 	}
 }
 
@@ -219,7 +224,8 @@ func TestPinnedCallback_DifferentKeyFails(t *testing.T) {
 	// Pin key1, then present key2.
 	line := makeKnownHostsLine("192.0.2.1", 22, pub1)
 
-	cb, err := pinnedCallback("192.0.2.1", 22, line)
+	var mismatch bool
+	cb, err := pinnedCallback(line, &mismatch)
 	if err != nil {
 		t.Fatalf("pinnedCallback: %v", err)
 	}
@@ -229,14 +235,21 @@ func TestPinnedCallback_DifferentKeyFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for mismatched host key, got nil")
 	}
+	if !errors.Is(err, ErrHostKeyMismatch) {
+		t.Errorf("error should wrap ErrHostKeyMismatch, got: %v", err)
+	}
+	if !mismatch {
+		t.Error("mismatch flag should be set on a mismatched key")
+	}
 	if !containsSubstring(err.Error(), "host key mismatch") {
-		t.Errorf("error should contain 'host key mismatch', got: %v", err)
+		t.Errorf("error text should contain 'host key mismatch' (sanitizer compat), got: %v", err)
 	}
 }
 
 func TestBuildHostKeyCallback_TOFUWhenNoPinned(t *testing.T) {
 	var captured HostKey
-	cb, err := buildHostKeyCallback("10.0.0.1", 22, "", &captured)
+	var mismatch bool
+	cb, err := buildHostKeyCallback("10.0.0.1", 22, "", &captured, &mismatch)
 	if err != nil {
 		t.Fatalf("buildHostKeyCallback: %v", err)
 	}
@@ -254,7 +267,8 @@ func TestBuildHostKeyCallback_PinnedLineVerifies(t *testing.T) {
 	line := makeKnownHostsLine("10.0.0.1", 22, pub)
 
 	var captured HostKey
-	cb, err := buildHostKeyCallback("10.0.0.1", 22, line, &captured)
+	var mismatch bool
+	cb, err := buildHostKeyCallback("10.0.0.1", 22, line, &captured, &mismatch)
 	if err != nil {
 		t.Fatalf("buildHostKeyCallback: %v", err)
 	}
@@ -267,8 +281,8 @@ func TestBuildHostKeyCallback_PinnedLineVerifies(t *testing.T) {
 	// Different key fails.
 	pub2, _ := genEd25519(t)
 	err = cb("10.0.0.1:22", fakeAddr{"10.0.0.1:22"}, pub2)
-	if err == nil || !containsSubstring(err.Error(), "host key mismatch") {
-		t.Errorf("mismatched key should return 'host key mismatch' error, got: %v", err)
+	if err == nil || !errors.Is(err, ErrHostKeyMismatch) {
+		t.Errorf("mismatched key should wrap ErrHostKeyMismatch, got: %v", err)
 	}
 }
 
