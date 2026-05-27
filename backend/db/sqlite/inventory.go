@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -112,6 +113,30 @@ func (s *Store) ListContainersByNode(ctx context.Context, nodeID string) ([]appd
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetContainer(ctx context.Context, id string) (appdb.Container, error) {
+	var c appdb.Container
+	var imageID, composeProject, goneSince, lastSeen sql.NullString
+	var stale int
+	err := s.db.QueryRowContext(ctx, `SELECT `+containerColumns+` FROM containers WHERE id = ?`, id).
+		Scan(&c.ID, &c.NodeID, &c.DockerID, &c.Name, &c.Image, &imageID, &c.Status, &composeProject, &stale, &goneSince, &lastSeen)
+	if errors.Is(err, sql.ErrNoRows) {
+		return appdb.Container{}, appdb.ErrNotFound
+	}
+	if err != nil {
+		return appdb.Container{}, fmt.Errorf("sqlite: get container: %w", err)
+	}
+	c.ImageID = imageID.String
+	c.ComposeProject = composeProject.String
+	c.Stale = stale != 0
+	if c.GoneSince, err = scanNullTS(goneSince); err != nil {
+		return appdb.Container{}, err
+	}
+	if c.LastSeen, err = scanTS(lastSeen); err != nil {
+		return appdb.Container{}, err
+	}
+	return c, nil
 }
 
 func (s *Store) DeleteContainer(ctx context.Context, id string) error {

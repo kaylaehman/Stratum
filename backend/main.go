@@ -29,6 +29,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/inventory"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/server"
 )
 
@@ -71,6 +72,16 @@ func run(logger *slog.Logger) error {
 	h := hub.New()
 	conn := nodeconn.NewManager(store, cipher)
 	poller := inventory.NewPoller(store, conn, h, logger)
+	containerUsers := permissions.NewContainerCache(func(ctx context.Context, nodeID, containerID, p string) ([]byte, error) {
+		clients, err := conn.Get(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		if clients.Docker == nil {
+			return nil, fmt.Errorf("node %s has no docker client", nodeID)
+		}
+		return clients.Docker.CopyFromContainer(ctx, containerID, p)
+	}, 5*time.Minute)
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -80,6 +91,8 @@ func run(logger *slog.Logger) error {
 		Nodes:          nodes.NewService(store, cipher),
 		Poller:         poller,
 		Files:          fs.NewService(store, cipher, uploadMaxBytes()),
+		Conn:           conn,
+		ContainerUsers: containerUsers,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

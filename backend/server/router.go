@@ -52,6 +52,15 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/nodes/{id}/vms", d.Handlers.NodeVMs)
 			r.Get("/nodes/{id}/containers", d.Handlers.NodeContainers)
 
+			// UID/GID visualizer + container inspect (read-only).
+			r.Get("/nodes/{id}/users", d.Handlers.HostUsers)
+			r.Get("/containers/{id}", d.Handlers.InspectContainer)
+			r.Get("/containers/{id}/users", d.Handlers.ContainerUsersHandler)
+			r.Get("/containers/{id}/uid-analysis", d.Handlers.UIDAnalysis)
+			r.Get("/containers/{id}/uid-analysis.csv", d.Handlers.UIDAnalysisCSV)
+			r.Get("/containers/{id}/uid-analysis.json", d.Handlers.UIDAnalysisJSON)
+			r.Get("/containers/{id}/file-uid", d.Handlers.FileUID)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)

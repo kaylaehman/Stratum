@@ -141,6 +141,7 @@ type Store interface {
 	// Inventory: containers
 	UpsertContainer(ctx context.Context, c Container) error
 	ListContainersByNode(ctx context.Context, nodeID string) ([]Container, error)
+	GetContainer(ctx context.Context, id string) (Container, error)
 	DeleteContainer(ctx context.Context, id string) error
 
 	Close() error

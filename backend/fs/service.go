@@ -56,6 +56,35 @@ func NewService(store db.Store, cipher *crypto.Cipher, uploadMax int64) *Service
 // UploadMax returns the configured per-write/upload byte cap.
 func (s *Service) UploadMax() int64 { return s.uploadMax }
 
+// ResolveUsers returns the host's UID->name / GID->name maps (for SP4's
+// host-vs-container comparison).
+func (s *Service) ResolveUsers(ctx context.Context, nodeID string) (*permissions.Maps, error) {
+	return s.userdb.Resolve(ctx, nodeID)
+}
+
+// StatEntry returns a single file's Entry (owner/group resolved) for SP4's
+// per-file access analysis.
+func (s *Service) StatEntry(ctx context.Context, nodeID, p string) (Entry, error) {
+	clean, err := ValidatePath(p)
+	if err != nil {
+		return Entry{}, err
+	}
+	prov, closer, err := s.open(ctx, nodeID)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer closer.Close()
+	e, err := prov.Stat(ctx, clean)
+	if err != nil {
+		return Entry{}, err
+	}
+	if maps, err := s.userdb.Resolve(ctx, nodeID); err == nil {
+		e.Owner = maps.UIDToName[e.UID]
+		e.Group = maps.GIDToName[e.GID]
+	}
+	return e, nil
+}
+
 func (s *Service) openSFTP(ctx context.Context, nodeID string) (FileProvider, io.Closer, error) {
 	node, err := s.store.GetNode(ctx, nodeID)
 	if err != nil {

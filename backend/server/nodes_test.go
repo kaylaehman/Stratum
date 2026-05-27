@@ -20,9 +20,12 @@ import (
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
+	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/server"
 
+	"context"
 	"log/slog"
 	"os"
 )
@@ -55,6 +58,8 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Hub:            hub.New(),
 		Nodes:          nodes.NewService(store, cipher),
 		Files:          fs.NewService(store, cipher, 0),
+		Conn:           nodeconn.NewManager(store, cipher),
+		ContainerUsers: permissions.NewContainerCache(func(context.Context, string, string, string) ([]byte, error) { return nil, nil }, time.Minute),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),
