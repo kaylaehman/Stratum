@@ -128,6 +128,9 @@ func NewRouter(d *Deps) http.Handler {
 			// DNS detection + records (admin gate in handler; config audited below).
 			r.Get("/nodes/{id}/dns", d.Handlers.NodeDNS)
 
+			// Feature flags (read; toggle audited below).
+			r.Get("/features", d.Handlers.ListFeatures)
+
 			// Wake-on-LAN config read (set/wake are audited mutations below).
 			r.Get("/nodes/{id}/wol", d.Handlers.GetWOL)
 
@@ -231,6 +234,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/certs/rescan", d.Handlers.CertRescan)
 			audited.Put("/nodes/{id}/proxy/config", d.Handlers.SetNodeProxyConfig)
 			audited.Put("/nodes/{id}/dns/config", d.Handlers.SetNodeDNSConfig)
+			audited.Put("/features/{key}", d.Handlers.SetFeature)
 			audited.Post("/memory", d.Handlers.CreateMemory)
 			audited.Put("/memory/{id}", d.Handlers.UpdateMemory)
 			audited.Delete("/memory/{id}", d.Handlers.DeleteMemory)

@@ -79,8 +79,9 @@ const (
 	ActionMemoryUpdate = "memory.update"
 	ActionMemoryDelete = "memory.delete"
 
-	ActionProxyConfig = "proxy.config"
-	ActionDNSConfig   = "dns.config"
+	ActionProxyConfig   = "proxy.config"
+	ActionDNSConfig     = "dns.config"
+	ActionFeatureToggle = "feature.toggle"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -184,6 +185,7 @@ var actionCatalog = []ActionInfo{
 
 	{ActionProxyConfig, "Reverse-proxy endpoint configured", "proxy", TargetNode},
 	{ActionDNSConfig, "DNS endpoint configured", "dns", TargetNode},
+	{ActionFeatureToggle, "Feature toggled", "feature", TargetUser},
 }
 
 var actionByName = func() map[string]ActionInfo {

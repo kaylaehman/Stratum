@@ -554,6 +554,10 @@ type Store interface {
 	GetDNSConfig(ctx context.Context, nodeID string) (DNSConfig, error)
 	UpsertDNSConfig(ctx context.Context, c DNSConfig) error
 
+	// Feature flags (FEATURES.md) — only explicitly-set rows are stored
+	ListFeatureFlags(ctx context.Context) (map[string]bool, error)
+	SetFeatureFlag(ctx context.Context, key string, enabled bool) error
+
 	// Agent memory (Feature F9)
 	CreateAgentMemory(ctx context.Context, m AgentMemory) error
 	GetAgentMemory(ctx context.Context, id string) (AgentMemory, error)
