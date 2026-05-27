@@ -77,6 +77,36 @@ type Node struct {
 	UpdatedAt            time.Time
 }
 
+// VM is a Proxmox guest (QEMU VM or LXC container).
+type VM struct {
+	ID          string
+	NodeID      string
+	Kind        string // qemu | lxc
+	ProxmoxVMID int
+	ProxmoxNode string
+	Name        string
+	Status      string
+	OSType      string
+	Stale       bool
+	GoneSince   *time.Time
+	LastSeen    time.Time
+}
+
+// Container is a Docker container.
+type Container struct {
+	ID             string
+	NodeID         string
+	DockerID       string
+	Name           string
+	Image          string
+	ImageID        string
+	Status         string
+	ComposeProject string
+	Stale          bool
+	GoneSince      *time.Time
+	LastSeen       time.Time
+}
+
 // Store is the repository seam. Handlers depend on this interface, never on
 // *sql.DB, so a future Postgres implementation is additive. All methods return
 // Go standard types (never driver-specific nullable wrappers).
@@ -102,6 +132,16 @@ type Store interface {
 	ListNodes(ctx context.Context) ([]Node, error)
 	UpdateNode(ctx context.Context, n Node) error
 	DeleteNode(ctx context.Context, id string) error
+
+	// Inventory: VMs (proxmox guests)
+	UpsertVM(ctx context.Context, v VM) error
+	ListVMsByNode(ctx context.Context, nodeID string) ([]VM, error)
+	DeleteVM(ctx context.Context, id string) error
+
+	// Inventory: containers
+	UpsertContainer(ctx context.Context, c Container) error
+	ListContainersByNode(ctx context.Context, nodeID string) ([]Container, error)
+	DeleteContainer(ctx context.Context, id string) error
 
 	Close() error
 }
