@@ -213,6 +213,16 @@ type ImageUpdateRow struct {
 	CheckedAt     time.Time
 }
 
+// Script is a saved shell script for the script runner (Feature 27).
+type Script struct {
+	ID          string
+	Name        string
+	Description string
+	Content     string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 // SecretGroup is a named group of secrets (Feature 12).
 type SecretGroup struct {
 	ID          string
@@ -405,6 +415,13 @@ type Store interface {
 	GetImageScan(ctx context.Context, imageDigest string) (ImageScanRow, error)
 	ReplaceCVEResults(ctx context.Context, imageDigest string, rows []CVEResultRow) error
 	ListCVEResults(ctx context.Context, imageDigest string) ([]CVEResultRow, error)
+
+	// Script runner (Feature 27)
+	CreateScript(ctx context.Context, s Script) error
+	ListScripts(ctx context.Context) ([]Script, error)
+	GetScript(ctx context.Context, id string) (Script, error)
+	UpdateScript(ctx context.Context, s Script) error
+	DeleteScript(ctx context.Context, id string) error
 
 	// Secrets vault (Feature 12)
 	CreateSecretGroup(ctx context.Context, g SecretGroup) error

@@ -58,6 +58,11 @@ const (
 	ActionCronSet = "cron.set"
 
 	ActionCVEScan = "cve.scan"
+
+	ActionScriptCreate = "script.create"
+	ActionScriptUpdate = "script.update"
+	ActionScriptDelete = "script.delete"
+	ActionScriptRun    = "script.run"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -72,6 +77,7 @@ const (
 	TargetWebhook         = "webhook"
 	TargetTemplate        = "template"
 	TargetSSHKey          = "sshkey"
+	TargetScript          = "script"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -136,6 +142,11 @@ var actionCatalog = []ActionInfo{
 	{ActionCronSet, "Crontab updated", "cron", TargetNode},
 
 	{ActionCVEScan, "Image CVE scan", "cve", TargetContainer},
+
+	{ActionScriptCreate, "Script created", "script", TargetScript},
+	{ActionScriptUpdate, "Script updated", "script", TargetScript},
+	{ActionScriptDelete, "Script deleted", "script", TargetScript},
+	{ActionScriptRun, "Script run", "script", TargetScript},
 }
 
 var actionByName = func() map[string]ActionInfo {

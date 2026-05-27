@@ -129,6 +129,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Scheduled tasks: cron + systemd timers (admin-gated; cron edit below).
 			r.Get("/nodes/{id}/schedule", d.Handlers.NodeSchedule)
 
+			// Script library list (CRUD/run are audited below).
+			r.Get("/scripts", d.Handlers.ListScripts)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -180,6 +183,10 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/{id}/sshkeys/delete", d.Handlers.DeleteSSHKey)
 			audited.Put("/nodes/{id}/cron", d.Handlers.SetCron)
 			audited.Post("/containers/{id}/cve-scan", d.Handlers.CVEScanContainer)
+			audited.Post("/scripts", d.Handlers.CreateScript)
+			audited.Put("/scripts/{id}", d.Handlers.UpdateScript)
+			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)
+			audited.Post("/scripts/{id}/run", d.Handlers.RunScript)
 		})
 	})
 
