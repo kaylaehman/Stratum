@@ -165,6 +165,9 @@ func (h *Handlers) RevealSecret(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	key, value, err := h.Secrets.Reveal(r.Context(), id)
 	if errors.Is(err, db.ErrNotFound) {

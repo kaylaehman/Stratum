@@ -38,3 +38,28 @@ func (h *Handlers) requireOperator(w http.ResponseWriter, r *http.Request) bool 
 	_, ok := h.requireRole(w, r, auth.RoleOperator)
 	return ok
 }
+
+// requireStepUp enforces a recent TOTP confirmation before a high-risk action
+// (Feature F7). When the user has 2FA enabled and lacks a valid step-up grace
+// window, it writes 428 Precondition Required {error:"2fa_required"} and returns
+// false; the client then prompts for a code, POSTs /api/me/2fa/challenge, and
+// retries. Users WITHOUT 2FA enabled are not challenged (per spec, per-account
+// 2FA is optional; global enforcement is a follow-on).
+func (h *Handlers) requireStepUp(w http.ResponseWriter, r *http.Request) bool {
+	if h.TwoFA == nil {
+		return true
+	}
+	u, ok := middleware.UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	if !h.TwoFA.Enabled(r.Context(), u.ID) {
+		return true // nothing to challenge
+	}
+	if !h.TwoFA.HasStepUp(u.ID) {
+		writeError(w, http.StatusPreconditionRequired, "2fa_required")
+		return false
+	}
+	return true
+}

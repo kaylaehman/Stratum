@@ -70,6 +70,10 @@ func (h *Handlers) BulkContainers(w http.ResponseWriter, r *http.Request) {
 	} else if !h.requireOperator(w, r) {
 		return
 	}
+	// Step-up 2FA for a wide blast radius (F7: bulk affecting 3+ containers).
+	if len(body.ContainerIDs) >= 3 && !h.requireStepUp(w, r) {
+		return
+	}
 	if len(body.ContainerIDs) > bulkMaxContainers {
 		writeError(w, http.StatusBadRequest, "too_many_containers")
 		return

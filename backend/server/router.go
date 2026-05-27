@@ -223,6 +223,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/me/2fa/setup", d.Handlers.TwoFASetup)
 			audited.Post("/me/2fa/enable", d.Handlers.TwoFAEnable)
 			audited.Post("/me/2fa/disable", d.Handlers.TwoFADisable)
+			audited.Post("/me/2fa/challenge", d.Handlers.TwoFAChallenge)
 			audited.Post("/users", d.Handlers.CreateUser)
 			audited.Put("/users/{id}/role", d.Handlers.UpdateUserRole)
 			audited.Delete("/users/{id}", d.Handlers.DeleteUser)

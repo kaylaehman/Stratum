@@ -39,11 +39,51 @@ type Service struct {
 	// backend runs as a single process (SQLite single binary), so an in-process
 	// mutex is sufficient.
 	locks sync.Map // userID -> *sync.Mutex
+
+	// grace tracks a per-user step-up confirmation window (Feature F7): after a
+	// successful challenge, destructive actions are allowed without re-prompting
+	// for StepUpGrace. In-process (single binary); cleared on restart.
+	graceMu sync.Mutex
+	grace   map[string]time.Time
 }
+
+// StepUpGrace is how long a step-up TOTP confirmation is honored before a
+// destructive action must be re-challenged.
+const StepUpGrace = 5 * time.Minute
 
 // New wires the store + secret cipher.
 func New(store db.Store, cipher *crypto.Cipher) *Service {
-	return &Service{store: store, cipher: cipher, issuer: "Stratum"}
+	return &Service{store: store, cipher: cipher, issuer: "Stratum", grace: map[string]time.Time{}}
+}
+
+// ChallengeStepUp verifies a TOTP code (recovery codes are NOT accepted here, to
+// avoid burning a single-use code on a routine confirmation) and, on success,
+// opens the step-up grace window for the user. Returns ErrInvalidCode on a bad
+// code. Callers should only invoke this when Enabled(userID) is true.
+func (s *Service) ChallengeStepUp(ctx context.Context, userID, code string) error {
+	rec, err := s.store.GetUserTOTP(ctx, userID)
+	if err != nil {
+		return err
+	}
+	secret, err := s.openSecret(rec)
+	if err != nil {
+		return err
+	}
+	if !totp.Verify(secret, code, now()) {
+		return ErrInvalidCode
+	}
+	s.graceMu.Lock()
+	s.grace[userID] = now()
+	s.graceMu.Unlock()
+	return nil
+}
+
+// HasStepUp reports whether the user has a valid (unexpired) step-up grace.
+func (s *Service) HasStepUp(userID string) bool {
+	s.graceMu.Lock()
+	defer s.graceMu.Unlock()
+	t, ok := s.grace[userID]
+	return ok && now().Sub(t) < StepUpGrace
 }
 
 // lock serialises mutations for one user and returns the unlock func.

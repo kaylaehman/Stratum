@@ -37,6 +37,9 @@ func (h *Handlers) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	nodeID := chi.URLParam(r, "id")
 	var body deleteKeyBody
 	if err := decodeJSON(r, &body); err != nil || body.Fingerprint == "" || !sshkeys.ValidKeyPath(body.Path) {

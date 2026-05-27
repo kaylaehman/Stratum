@@ -116,6 +116,9 @@ func (h *Handlers) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var req updateRoleRequest
 	if err := decodeJSON(r, &req); err != nil || !auth.RoleValid(req.Role) {
@@ -161,6 +164,9 @@ func (h *Handlers) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	actor, ok := h.requireRole(w, r, auth.RoleAdmin)
 	if !ok {
+		return
+	}
+	if !h.requireStepUp(w, r) {
 		return
 	}
 	id := chi.URLParam(r, "id")

@@ -122,6 +122,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/me/2fa/setup":                    true,
 		"POST /api/me/2fa/enable":                   true,
 		"POST /api/me/2fa/disable":                  true,
+		"POST /api/me/2fa/challenge":                true,
 		"POST /api/users":                           true,
 		"PUT /api/users/{id}/role":                  true,
 		"DELETE /api/users/{id}":                    true,

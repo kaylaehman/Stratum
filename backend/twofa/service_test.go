@@ -3,6 +3,7 @@ package twofa
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
@@ -131,6 +132,48 @@ func TestReenrollRequiresCurrentCode(t *testing.T) {
 	}
 	if s.Enabled(ctx, "u1") {
 		t.Error("re-enrollment leaves 2FA disabled until re-confirmed")
+	}
+}
+
+// TestStepUpGraceFlow covers Feature F7: a valid TOTP opens the step-up window,
+// a wrong code does not, and the window expires after StepUpGrace.
+func TestStepUpGraceFlow(t *testing.T) {
+	ctx := context.Background()
+	s := newSvc(t)
+
+	res, err := s.Setup(ctx, "u1", "kayla", "")
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	code, _ := totp.Code(res.Secret, now())
+	if err := s.Enable(ctx, "u1", code); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	if s.HasStepUp("u1") {
+		t.Error("no grace before any challenge")
+	}
+	// Wrong code: rejected, no grace.
+	if err := s.ChallengeStepUp(ctx, "u1", "000000"); err != ErrInvalidCode {
+		t.Errorf("bad challenge = %v, want ErrInvalidCode", err)
+	}
+	if s.HasStepUp("u1") {
+		t.Error("wrong code must not open the window")
+	}
+	// Correct code: grace opens.
+	code, _ = totp.Code(res.Secret, now())
+	if err := s.ChallengeStepUp(ctx, "u1", code); err != nil {
+		t.Fatalf("ChallengeStepUp: %v", err)
+	}
+	if !s.HasStepUp("u1") {
+		t.Error("grace should be open after a valid challenge")
+	}
+	// Advance time past the grace window via the now seam.
+	orig := now
+	now = func() time.Time { return orig().Add(StepUpGrace + time.Minute) }
+	defer func() { now = orig }()
+	if s.HasStepUp("u1") {
+		t.Error("grace must expire after StepUpGrace")
 	}
 }
 

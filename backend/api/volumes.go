@@ -49,6 +49,9 @@ func (h *Handlers) RemoveVolume(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	nodeID := chi.URLParam(r, "id")
 	name := chi.URLParam(r, "name")
 	if name == "" {

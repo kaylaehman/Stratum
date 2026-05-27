@@ -98,9 +98,13 @@ func (h *Handlers) UpdateContainer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"new_container_id": newID})
 }
 
-// RollbackContainer restores a container from a snapshot (admin). Audited.
+// RollbackContainer restores a container from a snapshot (admin + step-up 2FA).
+// Audited.
 func (h *Handlers) RollbackContainer(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
+		return
+	}
+	if !h.requireStepUp(w, r) {
 		return
 	}
 	ctr, ok := h.resolveContainerRow(w, r)

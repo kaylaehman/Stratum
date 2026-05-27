@@ -80,6 +80,31 @@ func (h *Handlers) TwoFADisable(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// TwoFAChallenge verifies a TOTP code and opens the step-up grace window so the
+// caller can perform a high-risk action (Feature F7). Recovery codes are not
+// accepted here (they'd be burned on routine confirmations). Audited.
+func (h *Handlers) TwoFAChallenge(w http.ResponseWriter, r *http.Request) {
+	user, _ := middleware.UserFromContext(r.Context())
+	if !h.TwoFA.Enabled(r.Context(), user.ID) {
+		writeError(w, http.StatusBadRequest, "2fa_not_enabled")
+		return
+	}
+	var body totpCodeBody
+	if err := decodeJSON(r, &body); err != nil || body.Code == "" {
+		writeError(w, http.StatusBadRequest, "code_required")
+		return
+	}
+	if err := h.TwoFA.ChallengeStepUp(r.Context(), user.ID, body.Code); errors.Is(err, twofa.ErrInvalidCode) {
+		writeError(w, http.StatusBadRequest, "invalid_code")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusBadRequest, "challenge_failed")
+		return
+	}
+	auditTwoFA(r, "challenge")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func auditTwoFA(r *http.Request, state string) {
 	if e := activity.FromContext(r.Context()); e != nil {
 		e.Action = "auth.2fa_" + state

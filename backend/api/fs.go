@@ -205,6 +205,9 @@ func (h *Handlers) FSDelete(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	q := r.URL.Query()
 	if q.Get("confirm") != "yes" {
 		writeError(w, http.StatusBadRequest, "confirmation_required")
