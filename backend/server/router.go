@@ -46,6 +46,10 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/me/2fa", d.Handlers.TwoFAStatus)
 			r.Get("/ws", d.Handlers.WebSocket)
 
+			// User management (admin gate enforced in handlers) + own sessions.
+			r.Get("/users", d.Handlers.ListUsers)
+			r.Get("/sessions", d.Handlers.ListSessions)
+
 			// Read-only node + tree routes.
 			r.Get("/nodes", d.Handlers.ListNodes)
 			r.Get("/nodes/{id}", d.Handlers.GetNode)
@@ -195,6 +199,10 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/me/2fa/setup", d.Handlers.TwoFASetup)
 			audited.Post("/me/2fa/enable", d.Handlers.TwoFAEnable)
 			audited.Post("/me/2fa/disable", d.Handlers.TwoFADisable)
+			audited.Post("/users", d.Handlers.CreateUser)
+			audited.Put("/users/{id}/role", d.Handlers.UpdateUserRole)
+			audited.Delete("/users/{id}", d.Handlers.DeleteUser)
+			audited.Delete("/sessions/{id}", d.Handlers.RevokeOwnSession)
 		})
 	})
 

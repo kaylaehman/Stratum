@@ -369,11 +369,17 @@ type Store interface {
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	CountUsers(ctx context.Context) (int, error)
+	ListUsers(ctx context.Context) ([]User, error)
+	UpdateUserRole(ctx context.Context, id, role string) error
+	DeleteUser(ctx context.Context, id string) error
+	CountUsersByRole(ctx context.Context, role string) (int, error)
 
 	// Sessions
 	CreateSession(ctx context.Context, s Session) error
 	GetSession(ctx context.Context, id string) (Session, error)
 	RevokeSession(ctx context.Context, id string, at time.Time) error
+	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
+	RevokeAllUserSessions(ctx context.Context, userID string, at time.Time) error
 
 	// Activity (append-only; no update/delete by design)
 	AppendActivity(ctx context.Context, e ActivityEntry) error

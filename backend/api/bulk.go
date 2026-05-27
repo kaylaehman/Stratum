@@ -52,16 +52,22 @@ func dockerActionFor(action string) (string, func(*docker.Client, context.Contex
 }
 
 // BulkContainers performs a bulk lifecycle action across many containers in
-// parallel. Admin-gated. dry_run returns the plan without executing. Each
-// executed container is individually audited; the middleware's single entry is
-// suppressed in favor of the per-container entries.
+// parallel. Non-destructive actions (start/stop/restart) are operator-gated;
+// the destructive remove is admin-only. dry_run returns the plan without
+// executing. Each executed container is individually audited; the middleware's
+// single entry is suppressed in favor of the per-container entries.
 func (h *Handlers) BulkContainers(w http.ResponseWriter, r *http.Request) {
-	if !h.requireAdmin(w, r) {
-		return
-	}
 	var body bulkRequest
 	if err := decodeJSON(r, &body); err != nil || !bulk.Valid(body.Action) || len(body.ContainerIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "invalid_bulk_request")
+		return
+	}
+	// Authorize by action: remove is destructive (admin); the rest are operator.
+	if body.Action == bulk.ActionRemove {
+		if !h.requireAdmin(w, r) {
+			return
+		}
+	} else if !h.requireOperator(w, r) {
 		return
 	}
 	if len(body.ContainerIDs) > bulkMaxContainers {

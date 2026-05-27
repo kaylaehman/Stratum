@@ -15,21 +15,21 @@ import (
 // graceful-shutdown timeout).
 const lifecycleTimeout = 30 * time.Second
 
-// StartContainer starts a container. Admin-gated + audited.
+// StartContainer starts a container. Operator-gated + audited.
 func (h *Handlers) StartContainer(w http.ResponseWriter, r *http.Request) {
 	h.lifecycle(w, r, activity.ActionContainerStart, func(c *docker.Client, ctx context.Context, id string) error {
 		return c.StartContainer(ctx, id)
 	})
 }
 
-// StopContainer stops a container. Admin-gated + audited.
+// StopContainer stops a container. Operator-gated + audited.
 func (h *Handlers) StopContainer(w http.ResponseWriter, r *http.Request) {
 	h.lifecycle(w, r, activity.ActionContainerStop, func(c *docker.Client, ctx context.Context, id string) error {
 		return c.StopContainer(ctx, id)
 	})
 }
 
-// RestartContainer restarts a container. Admin-gated + audited.
+// RestartContainer restarts a container. Operator-gated + audited.
 func (h *Handlers) RestartContainer(w http.ResponseWriter, r *http.Request) {
 	h.lifecycle(w, r, activity.ActionContainerRestart, func(c *docker.Client, ctx context.Context, id string) error {
 		return c.RestartContainer(ctx, id)
@@ -40,7 +40,9 @@ func (h *Handlers) RestartContainer(w http.ResponseWriter, r *http.Request) {
 // runs the daemon action, and records the audit entry. The inventory poller
 // reconciles the new status on its next cycle.
 func (h *Handlers) lifecycle(w http.ResponseWriter, r *http.Request, action string, fn func(*docker.Client, context.Context, string) error) {
-	if !h.requireAdmin(w, r) {
+	// Non-destructive lifecycle (start/stop/restart) is allowed for operators;
+	// destructive ops (remove, recreate) remain admin-only.
+	if !h.requireOperator(w, r) {
 		return
 	}
 	ctr, clients, ok := h.resolveContainer(w, r)

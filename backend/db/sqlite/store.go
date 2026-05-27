@@ -136,6 +136,59 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+func (s *Store) CountUsersByRole(ctx context.Context, role string) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = ?`, role).Scan(&n); err != nil {
+		return 0, fmt.Errorf("sqlite: count users by role: %w", err)
+	}
+	return n, nil
+}
+
+func (s *Store) ListUsers(ctx context.Context) ([]appdb.User, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, username, email, password_hash, role, created_at FROM users ORDER BY created_at, username`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list users: %w", err)
+	}
+	defer rows.Close()
+	var out []appdb.User
+	for rows.Next() {
+		var u appdb.User
+		var email, createdAt sql.NullString
+		if err := rows.Scan(&u.ID, &u.Username, &email, &u.PasswordHash, &u.Role, &createdAt); err != nil {
+			return nil, fmt.Errorf("sqlite: scan user: %w", err)
+		}
+		u.Email = email.String
+		if u.CreatedAt, err = scanTS(createdAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateUserRole(ctx context.Context, id, role string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET role = ? WHERE id = ?`, role, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: update user role: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return appdb.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete user: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return appdb.ErrNotFound
+	}
+	return nil
+}
+
 // --- Sessions ---
 
 func (s *Store) CreateSession(ctx context.Context, sess appdb.Session) error {
@@ -187,6 +240,50 @@ func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time) erro
 		`UPDATE sessions SET revoked_at = ? WHERE id = ?`, tsText(at), id)
 	if err != nil {
 		return fmt.Errorf("sqlite: revoke session: %w", err)
+	}
+	return nil
+}
+
+// ListSessionsByUser returns a user's sessions (newest first), including
+// revoked/expired ones so the UI can show session history.
+func (s *Store) ListSessionsByUser(ctx context.Context, userID string) ([]appdb.Session, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, refresh_hash, user_agent, ip, created_at, expires_at, revoked_at
+		 FROM sessions WHERE user_id = ? ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list sessions: %w", err)
+	}
+	defer rows.Close()
+	var out []appdb.Session
+	for rows.Next() {
+		var sess appdb.Session
+		var ua, ip, createdAt, expiresAt, revokedAt sql.NullString
+		if err := rows.Scan(&sess.ID, &sess.UserID, &sess.RefreshHash, &ua, &ip, &createdAt, &expiresAt, &revokedAt); err != nil {
+			return nil, fmt.Errorf("sqlite: scan session: %w", err)
+		}
+		sess.UserAgent = ua.String
+		sess.IP = ip.String
+		if sess.CreatedAt, err = scanTS(createdAt); err != nil {
+			return nil, err
+		}
+		if sess.ExpiresAt, err = scanTS(expiresAt); err != nil {
+			return nil, err
+		}
+		if sess.RevokedAt, err = scanNullTS(revokedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
+// RevokeAllUserSessions revokes every not-yet-revoked session for a user (used
+// when an admin deletes the account; stops refresh-token rotation immediately).
+func (s *Store) RevokeAllUserSessions(ctx context.Context, userID string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, tsText(at), userID)
+	if err != nil {
+		return fmt.Errorf("sqlite: revoke user sessions: %w", err)
 	}
 	return nil
 }

@@ -15,17 +15,6 @@ import (
 	"github.com/kaylaehman/stratum/backend/middleware"
 )
 
-// requireAdmin gates fs write routes to the admin role (the SSH user is
-// high-privilege; until RBAC lands this is the boundary).
-func (h *Handlers) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	u, ok := middleware.UserFromContext(r.Context())
-	if !ok || u.Role != "admin" {
-		writeError(w, http.StatusForbidden, "admin_only")
-		return false
-	}
-	return true
-}
-
 // writeFSError maps service errors to HTTP statuses.
 func writeFSError(w http.ResponseWriter, err error) {
 	switch {

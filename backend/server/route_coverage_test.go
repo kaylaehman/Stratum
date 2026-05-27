@@ -106,6 +106,10 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/me/2fa/setup":                true,
 		"POST /api/me/2fa/enable":               true,
 		"POST /api/me/2fa/disable":              true,
+		"POST /api/users":                       true,
+		"PUT /api/users/{id}/role":              true,
+		"DELETE /api/users/{id}":                true,
+		"DELETE /api/sessions/{id}":             true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
