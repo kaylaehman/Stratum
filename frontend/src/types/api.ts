@@ -950,3 +950,22 @@ export interface RevealResponse {
   key: string
   value: string
 }
+
+// SSH Key Audit types (Feature 21)
+
+export interface SSHKey {
+  user: string
+  path: string
+  type: string
+  comment: string
+  fingerprint: string
+}
+
+export interface SSHKeysResponse {
+  keys: SSHKey[]
+}
+
+export interface DeleteSSHKeyRequest {
+  path: string
+  fingerprint: string
+}
