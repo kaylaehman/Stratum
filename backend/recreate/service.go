@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/google/uuid"
 
 	"github.com/kaylaehman/stratum/backend/db"
@@ -114,6 +115,63 @@ func (s *Service) Update(ctx context.Context, containerID string) (string, error
 // ErrSnapshotMismatch is returned when a snapshot does not belong to the
 // container the rollback was requested against.
 var ErrSnapshotMismatch = fmt.Errorf("recreate: snapshot does not belong to this container")
+
+// HealthcheckEdit is a requested healthcheck change (Feature 5). Disable wins:
+// when set, the container's healthcheck is turned off ({"NONE"}). Otherwise Test
+// (e.g. ["CMD-SHELL","curl -f localhost:8096 || exit 1"]) and the timing fields
+// define the new check. Zero timing fields fall back to Docker's defaults.
+type HealthcheckEdit struct {
+	Disable        bool
+	Test           []string
+	IntervalSec    int
+	TimeoutSec     int
+	StartPeriodSec int
+	Retries        int
+}
+
+// SetHealthcheck edits a container's healthcheck and recreates it (Docker can't
+// change a healthcheck on a live container). A pre-edit snapshot is taken first.
+// Returns the new docker container id.
+func (s *Service) SetHealthcheck(ctx context.Context, containerID string, e HealthcheckEdit) (string, error) {
+	ctr, client, err := s.resolve(ctx, containerID)
+	if err != nil {
+		return "", err
+	}
+	unlock := s.lock(ctr.NodeID, ctr.Name)
+	defer unlock()
+
+	spec, err := client.CaptureSpec(ctx, ctr.DockerID)
+	if err != nil {
+		return "", fmt.Errorf("capture spec: %w", err)
+	}
+	if spec.Config == nil {
+		return "", fmt.Errorf("container has no config to edit")
+	}
+	digest, _ := client.CurrentImageDigest(ctx, ctr.DockerID)
+	// storeSpec marshals the spec NOW, so the snapshot captures the pre-edit
+	// healthcheck even though we mutate spec.Config below.
+	if _, err := s.storeSpec(ctx, ctr, spec, digest, "pre-healthcheck"); err != nil {
+		return "", fmt.Errorf("snapshot: %w", err)
+	}
+
+	if e.Disable {
+		spec.Config.Healthcheck = &container.HealthConfig{Test: []string{"NONE"}}
+	} else {
+		spec.Config.Healthcheck = &container.HealthConfig{
+			Test:        e.Test,
+			Interval:    time.Duration(e.IntervalSec) * time.Second,
+			Timeout:     time.Duration(e.TimeoutSec) * time.Second,
+			StartPeriod: time.Duration(e.StartPeriodSec) * time.Second,
+			Retries:     e.Retries,
+		}
+	}
+
+	newID, err := client.ApplySpec(ctx, spec)
+	if err != nil {
+		return "", fmt.Errorf("recreate: %w", err)
+	}
+	return newID, nil
+}
 
 // Rollback restores a container from a snapshot: it pins the image to the
 // snapshot's digest (when known), pulls it, and recreates. wantNodeID/wantName

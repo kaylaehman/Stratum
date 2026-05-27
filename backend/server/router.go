@@ -200,6 +200,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/containers/{id}/update", d.Handlers.UpdateContainer)
 			audited.Post("/containers/{id}/snapshot", d.Handlers.SnapshotContainer)
 			audited.Post("/containers/{id}/rollback/{snap}", d.Handlers.RollbackContainer)
+			audited.Put("/containers/{id}/healthcheck", d.Handlers.SetHealthcheck)
 			audited.Post("/scripts", d.Handlers.CreateScript)
 			audited.Put("/scripts/{id}", d.Handlers.UpdateScript)
 			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)

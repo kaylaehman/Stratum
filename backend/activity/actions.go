@@ -30,13 +30,14 @@ const (
 
 	ActionVolumeRemove = "volume.remove"
 
-	ActionContainerStart    = "container.start"
-	ActionContainerStop     = "container.stop"
-	ActionContainerRestart  = "container.restart"
-	ActionContainerRemove   = "container.remove"
-	ActionContainerUpdate   = "container.update"
-	ActionContainerSnapshot = "container.snapshot"
-	ActionContainerRollback = "container.rollback"
+	ActionContainerStart       = "container.start"
+	ActionContainerStop        = "container.stop"
+	ActionContainerRestart     = "container.restart"
+	ActionContainerRemove      = "container.remove"
+	ActionContainerUpdate      = "container.update"
+	ActionContainerSnapshot    = "container.snapshot"
+	ActionContainerRollback    = "container.rollback"
+	ActionContainerHealthcheck = "container.healthcheck"
 
 	ActionWebhookCreate = "webhook.create"
 	ActionWebhookUpdate = "webhook.update"
@@ -130,6 +131,7 @@ var actionCatalog = []ActionInfo{
 	{ActionContainerUpdate, "Container updated (image)", "container", TargetContainer},
 	{ActionContainerSnapshot, "Snapshot saved", "container", TargetContainer},
 	{ActionContainerRollback, "Container rolled back", "container", TargetContainer},
+	{ActionContainerHealthcheck, "Healthcheck edited", "container", TargetContainer},
 
 	{ActionWebhookCreate, "Notification webhook created", "webhook", TargetWebhook},
 	{ActionWebhookUpdate, "Notification webhook updated", "webhook", TargetWebhook},

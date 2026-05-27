@@ -127,6 +127,60 @@ func (h *Handlers) RollbackContainer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"new_container_id": newID})
 }
 
+type healthcheckEditRequest struct {
+	Disable        bool     `json:"disable"`
+	Test           []string `json:"test"`
+	IntervalSec    int      `json:"interval_sec"`
+	TimeoutSec     int      `json:"timeout_sec"`
+	StartPeriodSec int      `json:"start_period_sec"`
+	Retries        int      `json:"retries"`
+}
+
+// SetHealthcheck edits a container's healthcheck and recreates it (admin). The
+// edit (or disable) is applied by recreating the container from a snapshot-backed
+// spec. Audited.
+func (h *Handlers) SetHealthcheck(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	ctr, ok := h.resolveContainerRow(w, r)
+	if !ok {
+		return
+	}
+	var body healthcheckEditRequest
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	if !body.Disable && len(body.Test) == 0 {
+		writeError(w, http.StatusBadRequest, "test_required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), recreateTimeout)
+	defer cancel()
+	newID, err := h.Recreate.SetHealthcheck(ctx, ctr.ID, recreate.HealthcheckEdit{
+		Disable:        body.Disable,
+		Test:           body.Test,
+		IntervalSec:    body.IntervalSec,
+		TimeoutSec:     body.TimeoutSec,
+		StartPeriodSec: body.StartPeriodSec,
+		Retries:        body.Retries,
+	})
+	if err != nil {
+		h.logRecreate(r, "healthcheck", ctr, err)
+		h.auditContainer(r, activity.ActionContainerHealthcheck, ctr, errResult(err))
+		writeError(w, http.StatusBadGateway, "healthcheck_failed")
+		return
+	}
+	h.afterRecreate(ctr.NodeID)
+	detail := map[string]string{"new_container": shortID(newID)}
+	if body.Disable {
+		detail["action"] = "disabled"
+	}
+	h.auditContainer(r, activity.ActionContainerHealthcheck, ctr, detail)
+	writeJSON(w, http.StatusOK, map[string]string{"new_container_id": newID})
+}
+
 // --- helpers ---
 
 // resolveContainerRow loads the container row (for nodeID/name/audit) and maps a
