@@ -80,6 +80,28 @@ func (h *Handlers) memoryContext(r *http.Request, scope, scopeID string) string 
 	return "Known facts the operator has recorded:\n" + strings.Join(facts, "\n")
 }
 
+// runbookContext lists the saved runbooks (name — description; triggers) so the
+// assistant can suggest following an established procedure. Steps are omitted to
+// bound prompt size; the assistant can ask the operator to open the runbook.
+func (h *Handlers) runbookContext(r *http.Request) string {
+	books, err := h.Store.ListRunbooks(r.Context())
+	if err != nil || len(books) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, b := range books {
+		line := "- " + b.Name
+		if b.Description != "" {
+			line += " — " + b.Description
+		}
+		if len(b.TriggerConditions) > 0 {
+			line += " (triggers: " + strings.Join(b.TriggerConditions, "; ") + ")"
+		}
+		lines = append(lines, line)
+	}
+	return "Saved runbooks the operator maintains (suggest one when its trigger matches):\n" + strings.Join(lines, "\n")
+}
+
 // aiAskTimeout bounds a single assistant call (a local model can be slow).
 const aiAskTimeout = 2 * time.Minute
 
@@ -105,6 +127,9 @@ func (h *Handlers) AIAsk(w http.ResponseWriter, r *http.Request) {
 	contextText := req.Context
 	if mem := h.memoryContext(r, req.Scope, req.ScopeID); mem != "" {
 		contextText = mem + "\n\n" + contextText
+	}
+	if rb := h.runbookContext(r); rb != "" {
+		contextText = rb + "\n\n" + contextText
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), aiAskTimeout)

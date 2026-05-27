@@ -122,6 +122,9 @@ func NewRouter(d *Deps) http.Handler {
 			// AI agent memory (read; create/update/delete audited below).
 			r.Get("/memory", d.Handlers.ListMemory)
 
+			// AI runbooks (read; create/update/delete audited below).
+			r.Get("/runbooks", d.Handlers.ListRunbooks)
+
 			// Reverse proxy detection + rules (admin gate in handler; config audited below).
 			r.Get("/nodes/{id}/proxy", d.Handlers.NodeProxy)
 
@@ -242,6 +245,9 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/memory", d.Handlers.CreateMemory)
 			audited.Put("/memory/{id}", d.Handlers.UpdateMemory)
 			audited.Delete("/memory/{id}", d.Handlers.DeleteMemory)
+			audited.Post("/runbooks", d.Handlers.CreateRunbook)
+			audited.Put("/runbooks/{id}", d.Handlers.UpdateRunbook)
+			audited.Delete("/runbooks/{id}", d.Handlers.DeleteRunbook)
 			audited.Post("/me/2fa/setup", d.Handlers.TwoFASetup)
 			audited.Post("/me/2fa/enable", d.Handlers.TwoFAEnable)
 			audited.Post("/me/2fa/disable", d.Handlers.TwoFADisable)

@@ -277,6 +277,19 @@ type ChatConfig struct {
 	UpdatedAt      time.Time
 }
 
+// Runbook is a saved diagnostic/remediation procedure the AI can reference
+// (Feature F9). TriggerConditions and Steps are free-text lists.
+type Runbook struct {
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	TriggerConditions []string  `json:"trigger_conditions"`
+	Steps             []string  `json:"steps"`
+	RequiresApproval  bool      `json:"requires_approval"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 // AgentMemory is a persistent per-scope note the AI assistant uses (Feature F9).
 // Scope is "global" | "node" | "container"; ScopeID is "" for global. Source is
 // "user" | "ai" | "observed"; AI-proposed memories stay Confirmed=false until a
@@ -570,6 +583,13 @@ type Store interface {
 	// Chat bot config (Feature F8) — single row
 	GetChatConfig(ctx context.Context) (ChatConfig, error)
 	UpsertChatConfig(ctx context.Context, c ChatConfig) error
+
+	// Runbooks (Feature F9)
+	CreateRunbook(ctx context.Context, rb Runbook) error
+	GetRunbook(ctx context.Context, id string) (Runbook, error)
+	ListRunbooks(ctx context.Context) ([]Runbook, error)
+	UpdateRunbook(ctx context.Context, rb Runbook) error
+	DeleteRunbook(ctx context.Context, id string) error
 
 	// Agent memory (Feature F9)
 	CreateAgentMemory(ctx context.Context, m AgentMemory) error

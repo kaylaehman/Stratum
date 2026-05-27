@@ -79,6 +79,10 @@ const (
 	ActionMemoryUpdate = "memory.update"
 	ActionMemoryDelete = "memory.delete"
 
+	ActionRunbookCreate = "runbook.create"
+	ActionRunbookUpdate = "runbook.update"
+	ActionRunbookDelete = "runbook.delete"
+
 	ActionProxyConfig   = "proxy.config"
 	ActionDNSConfig     = "dns.config"
 	ActionFeatureToggle = "feature.toggle"
@@ -183,6 +187,9 @@ var actionCatalog = []ActionInfo{
 	{ActionMemoryCreate, "AI memory added", "memory", TargetAI},
 	{ActionMemoryUpdate, "AI memory updated", "memory", TargetAI},
 	{ActionMemoryDelete, "AI memory deleted", "memory", TargetAI},
+	{ActionRunbookCreate, "Runbook created", "runbook", TargetAI},
+	{ActionRunbookUpdate, "Runbook updated", "runbook", TargetAI},
+	{ActionRunbookDelete, "Runbook deleted", "runbook", TargetAI},
 
 	{ActionProxyConfig, "Reverse-proxy endpoint configured", "proxy", TargetNode},
 	{ActionDNSConfig, "DNS endpoint configured", "dns", TargetNode},
