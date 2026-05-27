@@ -34,6 +34,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
 	"github.com/kaylaehman/stratum/backend/topology"
+	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
 	"github.com/kaylaehman/stratum/backend/volumes"
 	"github.com/kaylaehman/stratum/backend/webhooks"
@@ -94,6 +95,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Scheduler:      scheduler.New(filesSvc.Exec),
 		CVE:            cve.New(store, cve.ClientProvider(noDocker), cve.NewScanner()),
 		Backups:        backup.New(store, filesSvc.Exec),
+		TwoFA:          twofa.New(store, cipher),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

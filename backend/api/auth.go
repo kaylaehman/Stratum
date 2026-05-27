@@ -22,6 +22,7 @@ const (
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	TOTP     string `json:"totp"` // required when the account has 2FA enabled
 }
 
 type userView struct {
@@ -51,6 +52,20 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		h.logLogin(r, &user.ID, activity.ResultError)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials")
 		return
+	}
+
+	// Second factor: when the account has TOTP 2FA enabled, a valid code (or a
+	// recovery code) is required. Password alone is not enough.
+	if h.TwoFA != nil && h.TwoFA.Enabled(r.Context(), user.ID) {
+		if req.TOTP == "" {
+			writeError(w, http.StatusUnauthorized, "totp_required")
+			return
+		}
+		if err := h.TwoFA.VerifyLogin(r.Context(), user.ID, req.TOTP); err != nil {
+			h.logLogin(r, &user.ID, activity.ResultError)
+			writeError(w, http.StatusUnauthorized, "invalid_totp")
+			return
+		}
 	}
 
 	access, _, exp, err := h.JWT.Issue(user.ID)

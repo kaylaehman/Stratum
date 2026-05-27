@@ -43,6 +43,7 @@ func NewRouter(d *Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(mw.Auth(d.JWT, d.Store))
 			r.Get("/me", d.Handlers.Me)
+			r.Get("/me/2fa", d.Handlers.TwoFAStatus)
 			r.Get("/ws", d.Handlers.WebSocket)
 
 			// Read-only node + tree routes.
@@ -191,6 +192,9 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)
 			audited.Post("/scripts/{id}/run", d.Handlers.RunScript)
 			audited.Post("/nodes/{id}/backups", d.Handlers.StartBackup)
+			audited.Post("/me/2fa/setup", d.Handlers.TwoFASetup)
+			audited.Post("/me/2fa/enable", d.Handlers.TwoFAEnable)
+			audited.Post("/me/2fa/disable", d.Handlers.TwoFADisable)
 		})
 	})
 

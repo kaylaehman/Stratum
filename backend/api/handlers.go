@@ -24,6 +24,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/topology"
+	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
 	"github.com/kaylaehman/stratum/backend/volumes"
 	"github.com/kaylaehman/stratum/backend/webhooks"
@@ -52,6 +53,7 @@ type Handlers struct {
 	Scheduler      *scheduler.Service
 	CVE            *cve.Service
 	Backups        *backup.Service
+	TwoFA          *twofa.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

@@ -213,6 +213,15 @@ type ImageUpdateRow struct {
 	CheckedAt     time.Time
 }
 
+// UserTOTP is a user's TOTP 2FA enrollment (Feature 7). SecretEncrypted is
+// AES-sealed; RecoveryHashes are bcrypt hashes consumed on use.
+type UserTOTP struct {
+	UserID          string
+	SecretEncrypted []byte
+	Enabled         bool
+	RecoveryHashes  []string
+}
+
 // BackupRow is a backup job + its outcome (Feature 28).
 type BackupRow struct {
 	ID         string
@@ -429,6 +438,11 @@ type Store interface {
 	GetImageScan(ctx context.Context, imageDigest string) (ImageScanRow, error)
 	ReplaceCVEResults(ctx context.Context, imageDigest string, rows []CVEResultRow) error
 	ListCVEResults(ctx context.Context, imageDigest string) ([]CVEResultRow, error)
+
+	// TOTP 2FA (Feature 7)
+	UpsertUserTOTP(ctx context.Context, t UserTOTP) error
+	GetUserTOTP(ctx context.Context, userID string) (UserTOTP, error)
+	DeleteUserTOTP(ctx context.Context, userID string) error
 
 	// Backups (Feature 28)
 	CreateBackup(ctx context.Context, b BackupRow) error

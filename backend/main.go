@@ -42,6 +42,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
 	"github.com/kaylaehman/stratum/backend/topology"
+	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
 	"github.com/kaylaehman/stratum/backend/volumes"
 	"github.com/kaylaehman/stratum/backend/webhooks"
@@ -126,6 +127,7 @@ func run(logger *slog.Logger) error {
 	schedulerSvc := scheduler.New(filesSvc.Exec)
 	cveSvc := cve.New(store, cve.ClientProvider(dockerForNode), cve.NewScanner())
 	backupSvc := backup.New(store, filesSvc.Exec)
+	twoFASvc := twofa.New(store, cipher)
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -149,6 +151,7 @@ func run(logger *slog.Logger) error {
 		Scheduler:      schedulerSvc,
 		CVE:            cveSvc,
 		Backups:        backupSvc,
+		TwoFA:          twoFASvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
