@@ -1292,3 +1292,45 @@ export interface UpdateMemoryRequest {
   value?: string
   confirmed?: boolean
 }
+
+// Reverse Proxy Management types (Feature F1)
+
+export interface ProxyCapabilities {
+  list: boolean
+  create: boolean
+  update: boolean
+  delete: boolean
+}
+
+export interface ProxyRule {
+  id: string
+  adapter_type: string
+  source_host: string
+  source_path?: string
+  target_url: string
+  ssl_enabled: boolean
+  cert_id?: string
+  auth_enabled: boolean
+}
+
+export interface SupportedProxy {
+  name: string
+  capabilities: ProxyCapabilities
+}
+
+export interface ProxyStatus {
+  detected: string
+  capabilities: ProxyCapabilities
+  configured: boolean
+  endpoint?: string
+  has_token: boolean
+  rules: ProxyRule[]
+  rule_error?: string
+  supported: SupportedProxy[]
+}
+
+export interface SetProxyConfigRequest {
+  endpoint: string
+  token?: string
+}
+
