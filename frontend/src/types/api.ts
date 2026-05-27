@@ -1365,6 +1365,31 @@ export interface SetChatConfigRequest {
   token?: string
 }
 
+// AI Runbooks types (Feature F9)
+
+export interface Runbook {
+  id: string
+  name: string
+  description: string
+  trigger_conditions: string[]
+  steps: string[]
+  requires_approval: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface RunbooksListResponse {
+  runbooks: Runbook[]
+}
+
+export interface RunbookRequest {
+  name: string
+  description: string
+  trigger_conditions: string[]
+  steps: string[]
+  requires_approval: boolean
+}
+
 // DNS Record Management types (Feature F3)
 
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'PTR' | 'TXT' | 'SRV'

@@ -37,6 +37,7 @@ import { ApiError } from '../lib/api'
 import type { TwoFASetupResponse, UserRole } from '../types/api'
 import { AISettingsSection } from '../components/ai/AISettingsSection'
 import { MemoryPanel } from '../components/ai/MemoryPanel'
+import { RunbooksSection } from '../components/ai/RunbooksSection'
 import { useFeatures, useSetFeature, useFeatureEnabled } from '../lib/api/features'
 import { useChatConfig, useSetChatConfig } from '../lib/api/chat'
 
@@ -1632,6 +1633,8 @@ export default function Settings() {
         {isAdmin && <ChatIntegrationSection />}
 
         <MemoryPanel scope="global" />
+
+        <RunbooksSection />
       </div>
     </div>
   )
