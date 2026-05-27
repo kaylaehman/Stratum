@@ -176,7 +176,7 @@ default_config:
   compose_template: |
     services:
       jellyfin:
-        image: jellyfin/jellyfin:latest
+        image: lscr.io/linuxserver/jellyfin:latest
         container_name: jellyfin
         restart: unless-stopped
         network_mode: bridge

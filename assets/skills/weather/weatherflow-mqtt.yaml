@@ -1,13 +1,12 @@
-id: meteobridge
-name: Meteobridge Weather Station Integration
+id: weatherflow-mqtt
+name: WeatherFlow-to-MQTT Bridge
 version: "1.0"
 container_match:
   image_patterns:
     - "weatherflow/weatherflow-mqtt"
-    - "weather-station-mqtt"
-  port_hints: [1883, 8080]
+  port_hints: [1883]
 category: weather
-description: Docker-based weather station data integration and MQTT publishing for multi-source weather networks
+description: Bridges a WeatherFlow Tempest/Smart Home weather station to MQTT for home-automation integration
 docs_url: https://hub.docker.com/r/weatherflow/weatherflow-mqtt
 
 common_issues:
@@ -302,9 +301,14 @@ default_config:
       owner: "mosquitto:mosquitto"
 
 notes: |
-  Meteobridge is primarily a hardware-based weather station solution. This skill describes a Docker-based weather data integration container (using weatherflow-mqtt as a placeholder example) that collects weather data from various sources and publishes to MQTT for integration with other home automation systems.
+  weatherflow-mqtt bridges a WeatherFlow Tempest / Smart Home weather station to
+  MQTT, publishing sensor readings for consumption by Home Assistant and other
+  home-automation systems. (It is WeatherFlow-specific — not a generic multi-vendor
+  bridge; for other station brands use a vendor-specific image such as weewx.)
 
-  Weather station support: The container integrates with multiple weather station types including WeatherFlow, Ambient Weather, Davis Vantage Pro, and others. Specify the station type via WEATHER_STATION_TYPE environment variable.
+  Weather station support: Targets WeatherFlow hubs, which expose data over the
+  local UDP API or the WeatherFlow cloud REST API — configure via the station's
+  hub/token env vars per the image docs.
 
   Hardware integration: Many weather stations communicate via USB serial port (/dev/ttyUSB0). Ensure your docker-compose.yml includes the device mount. Some stations use network-based APIs instead of USB; see docs for your specific hardware model.
 

@@ -214,5 +214,12 @@ id, so the AI can:
 3. Verify the image name and default ports against the official docs — do not
    guess. Add the `docs_url`.
 4. Write at least 2 `common_issues` (4 for well-known containers).
-5. Lint: run `task skills:lint` (validates schema + safety rules).
-6. Add an entry to `INDEX.md` (or regenerate via `task skills:index`).
+5. Lint: run `task skills:lint` (validates schema + safety rules). **Planned —
+   not yet implemented; until it lands, hand-check against the Safety Rules
+   above (every `type: fix` must set `requires_approval: true`).**
+6. Add an entry to `INDEX.md` (regeneration via `task skills:index` is also
+   **planned/not yet implemented** — update `INDEX.md` by hand for now).
+
+> **Tooling status:** `task skills:lint`, `task skills:index`, and the
+> `skills-lock.json` referenced in `.gitignore` are forward-looking and will be
+> built alongside the F31 AI Assistant loader. They do not exist yet.

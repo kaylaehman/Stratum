@@ -11,7 +11,7 @@ for each entry.
 
 | Category | Skills |
 |---|---|
-| `ai` | 7 |
+| `ai` | 6 |
 | `analytics` | 4 |
 | `automation` | 5 |
 | `backup` | 3 |
@@ -41,7 +41,7 @@ for each entry.
 | `voip` | 2 |
 | `weather` | 2 |
 | `web` | 2 |
-| **Total** | **186** |
+| **Total** | **185** |
 
 ## Skills
 
@@ -52,7 +52,6 @@ for each entry.
 | `langfuse` | ai | `langfuse/langfuse` | 4 |  | Open-source observability platform for monitoring and debugging LLM applications |
 | `litellm` | ai | `ghcr.io/berriai/litellm` | 5 |  | LLM gateway that proxies requests to multiple providers (OpenAI, Anthropic, Azure, local models) |
 | `ollama` | ai | `ollama/ollama` | 4 |  | Run large language models locally without internet dependency; supports GPU acceleration |
-| `openclaw` | ai | `ghcr.io/openclaw/openclaw` | 3 |  | Multi-channel AI control plane for orchestrating Claude API calls and routing across different AI backends |
 | `openwebui` | ai | `ghcr.io/open-webui/open-webui` | 4 |  | Web-based chat interface for Ollama and OpenAI-compatible APIs with user authentication |
 | `matomo` | analytics | `matomo` | 4 |  | Open-source Google Analytics alternative — full data ownership and control |
 | `plausible` | analytics | `ghcr.io/plausible/analytics` | 3 |  | Privacy-focused web analytics platform — GDPR-compliant alternative to Google Analytics |
@@ -82,7 +81,7 @@ for each entry.
 | `teable` | data | `ghcr.io/teableio/teable` | 3 |  | No-code database platform with spreadsheet-like UI, requires PostgreSQL backend |
 | `adminer` | database | `adminer` | 3 |  | Lightweight single-file database administration tool supporting multiple database systems |
 | `couchdb` | database | `couchdb` | 3 |  | Document-oriented NoSQL database with HTTP API, peer-to-peer replication, and eventual consistency |
-| `mariadb` | database | `mariadb` | 4 | ✓ | Open-source relational database, MySQL-compatible fork, widely used in self-hosted stacks |
+| `mariadb` | database | `mariadb` | 4 |  | Open-source relational database, MySQL-compatible fork, widely used in self-hosted stacks |
 | `mongodb` | database | `mongo` | 3 |  | Document-oriented NoSQL database with rich querying and aggregation, widely used in JavaScript-heavy stacks |
 | `mysql` | database | `mysql` | 3 |  | Open-source relational database, predecessor to MariaDB, widely used in legacy and WordPress stacks |
 | `pgadmin` | database | `dpage/pgadmin4` | 4 |  | Web-based PostgreSQL administration and management interface |
@@ -229,7 +228,7 @@ for each entry.
 | `sabnzbd` | torrent | `linuxserver/sabnzbd` | 4 | ✓ | Usenet downloader and post-processor with automatic unpacking and repair |
 | `asterisk` | voip | `andrius/asterisk` | 3 |  | Open-source SIP PBX telephony server for voice communications |
 | `freepbx` | voip | `tiredofit/freepbx` | 3 |  | Web-based management GUI for Asterisk PBX systems |
-| `meteobridge` | weather | `weatherflow/weatherflow-mqtt` | 4 |  | Docker-based weather station data integration and MQTT publishing for multi-source weather networks |
+| `weatherflow-mqtt` | weather | `weatherflow/weatherflow-mqtt` | 4 |  | Bridges a WeatherFlow Tempest/Smart Home weather station to MQTT for home-automation integration |
 | `weewx` | weather | `mitct02/weewx` | 4 |  | Personal weather station software for collecting, processing, and displaying weather data |
 | `ghost` | web | `ghost` | 4 |  | Lightweight, open-source publishing platform for blogs and newsletters |
 | `wordpress` | web | `wordpress` | 4 |  | Open-source content management system for blogs and websites |

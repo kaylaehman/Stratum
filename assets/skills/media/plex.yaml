@@ -175,7 +175,7 @@ default_config:
   compose_template: |
     services:
       plex:
-        image: plexinc/pms-docker:latest
+        image: lscr.io/linuxserver/plex:latest
         container_name: plex
         restart: unless-stopped
         network_mode: host

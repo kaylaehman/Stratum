@@ -192,10 +192,9 @@ default_config:
       owner: "{PUID}:{PGID}"
 
 linuxserver_conventions:
-  enabled: true
-  puid_env: PUID
-  pgid_env: PGID
-  config_mount: /config
+  # The compose template uses the official `mariadb` image, which runs as the
+  # mysql user and is configured via MYSQL_*/MARIADB_* env — NOT PUID/PGID.
+  enabled: false
 
 notes: |
   Two image variants:

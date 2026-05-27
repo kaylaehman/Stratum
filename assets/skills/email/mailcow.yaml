@@ -2,8 +2,11 @@ id: mailcow
 name: Mailcow Dockerized
 version: "1.0"
 container_match:
+  # mailcow is a multi-container stack (no single "mailcow-dockerized" image).
+  # Match the component images it actually runs so the skill can trigger.
   image_patterns:
-    - "mailcow/mailcow-dockerized"
+    - "mailcow/"
+    - "mailcowdockerized"
   port_hints: [25, 143, 465, 587, 993, 80, 443]
 category: email
 description: Full-featured open-source mail server suite with web UI, spam/virus scanning, and RBAC
