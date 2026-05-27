@@ -91,6 +91,10 @@ tmp/
 /CLAUDE.md
 /FEATURES.md
 /DESIGN.md
-/assets/
+# Ignore loose files in /assets/ (brand assets stay local-only) but
+# track the bundled skill library which ships with Stratum.
+/assets/*
+!/assets/skills/
+!/assets/skills/**
 skills-lock.json
 
