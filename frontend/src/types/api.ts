@@ -597,6 +597,40 @@ export interface VolumesResponse {
   volumes: VolumeView[]
 }
 
+// Network Topology types (Feature 29)
+
+export interface TopologyEndpoint {
+  container_id: string
+  name: string
+  ipv4_address: string
+}
+
+export interface TopologyNetwork {
+  id: string
+  name: string
+  driver: string
+  scope: string
+  internal: boolean
+  subnet: string
+  gateway: string
+  endpoints: TopologyEndpoint[]
+}
+
+export interface TopologyContainer {
+  docker_id: string
+  name: string
+  status: string
+  networks: string[]
+  isolated: boolean
+  host_network: boolean
+}
+
+export interface TopologyResponse {
+  node_id: string
+  networks: TopologyNetwork[]
+  containers: TopologyContainer[]
+}
+
 // Resource Timeline types (Feature 9)
 
 export interface MetricSample {
