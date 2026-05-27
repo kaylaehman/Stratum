@@ -22,6 +22,7 @@ import Notifications from './pages/Notifications'
 import Updates from './pages/Updates'
 import Templates from './pages/Templates'
 import Secrets from './pages/Secrets'
+import CVE from './pages/CVE'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -160,6 +161,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Secrets />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/cve"
+          element={
+            <AuthGuard>
+              <CVE />
             </AuthGuard>
           }
         />

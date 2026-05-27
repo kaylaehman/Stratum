@@ -996,3 +996,34 @@ export interface SetCronRequest {
   user: string
   content: string
 }
+
+// CVE Scan types (Feature 20)
+
+export interface ImageScan {
+  image_digest: string
+  image: string
+  scanned_at: string
+  critical: number
+  high: number
+  medium: number
+  low: number
+  unknown: number
+}
+
+export interface CVEScansResponse {
+  available: boolean
+  scans: ImageScan[]
+}
+
+export interface CVEVuln {
+  cve_id: string
+  severity: string
+  package: string
+  installed_version: string
+  fixed_version: string
+  title: string
+}
+
+export interface CVEDetailResponse {
+  vulns: CVEVuln[]
+}
