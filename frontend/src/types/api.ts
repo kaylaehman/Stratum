@@ -130,3 +130,77 @@ export interface PreviewResult {
 export interface NodesListResponse {
   nodes: NodeView[]
 }
+
+// Tree types
+
+export type ContainerStatus = 'running' | 'exited' | 'paused' | 'restarting' | 'dead' | 'created'
+export type VMKind = 'qemu' | 'lxc'
+
+export interface VM {
+  id: string
+  node_id: string
+  kind: VMKind
+  proxmox_vmid: number
+  proxmox_node: string
+  name: string
+  status: string
+  os_type?: string
+  stale: boolean
+  last_seen: string
+}
+
+export interface Container {
+  id: string
+  node_id: string
+  docker_id: string
+  name: string
+  image: string
+  image_id?: string
+  status: ContainerStatus
+  compose_project?: string
+  stale: boolean
+  last_seen: string
+}
+
+export interface TreeNode {
+  id: string
+  name: string
+  type: NodeType
+  host: string
+  status: NodeStatus
+  capabilities: Capabilities
+  proxmox_auth_status: ProxmoxAuthStatus
+  seq: number
+  vms: VM[]
+  containers: Container[]
+}
+
+export interface TreeResponse {
+  nodes: TreeNode[]
+}
+
+export type DeltaOp = 'added' | 'updated' | 'removed'
+export type DeltaKind = 'vm' | 'container'
+
+export interface Delta {
+  op: DeltaOp
+  kind: DeltaKind
+  node_id: string
+  seq: number
+  vm?: VM
+  container?: Container
+}
+
+export interface CycleMessage {
+  node_id: string
+  seq: number
+  deltas: Delta[]
+}
+
+// Tree selection discriminated union
+
+export type TreeSelection =
+  | { kind: 'node'; nodeId: string }
+  | { kind: 'vm'; nodeId: string; vmId: string; vmKind: VMKind }
+  | { kind: 'container'; nodeId: string; containerId: string }
+  | { kind: 'fs-root'; nodeId: string; containerId?: string }

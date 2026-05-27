@@ -5,10 +5,21 @@ interface Subscription {
   cb: Callback
 }
 
+type OpenCallback = () => void
+
 class WebSocketManager {
   private socket: WebSocket | null = null
   private subscriptions: Subscription[] = []
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private openCallbacks: OpenCallback[] = []
+
+  /** Register a callback to fire every time the socket (re)opens. */
+  onOpen(cb: OpenCallback): () => void {
+    this.openCallbacks.push(cb)
+    return () => {
+      this.openCallbacks = this.openCallbacks.filter((c) => c !== cb)
+    }
+  }
 
   // token reserved for future use (e.g. query-param auth or subprotocol header)
   connect(token?: string): void {
@@ -25,6 +36,9 @@ class WebSocketManager {
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer)
           this.reconnectTimer = null
+        }
+        for (const cb of this.openCallbacks) {
+          cb()
         }
       }
 
@@ -62,14 +76,18 @@ class WebSocketManager {
       parsed = raw
     }
     for (const sub of this.subscriptions) {
-      // Simple topic match: if parsed is an object with a 'topic' field
-      if (
-        typeof parsed === 'object' &&
-        parsed !== null &&
-        'topic' in parsed &&
-        (parsed as Record<string, unknown>)['topic'] === sub.topic
-      ) {
-        sub.cb(parsed)
+      if (typeof parsed === 'object' && parsed !== null) {
+        const obj = parsed as Record<string, unknown>
+        // Explicit topic field (generic messages)
+        if ('topic' in obj && obj['topic'] === sub.topic) {
+          sub.cb(parsed)
+          continue
+        }
+        // CycleMessage: topic is "tree:<node_id>", matched by node_id field
+        if ('node_id' in obj && sub.topic === `tree:${obj['node_id']}`) {
+          sub.cb(parsed)
+          continue
+        }
       }
       // Raw string subscriptions (e.g. 'pong')
       if (typeof parsed === 'string' && sub.topic === parsed) {

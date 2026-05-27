@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Setup from './pages/Setup'
 import Dashboard from './pages/Dashboard'
 import Nodes from './pages/Nodes'
+import Resources from './pages/Resources'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -43,6 +44,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Nodes />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/resources"
+          element={
+            <AuthGuard>
+              <Resources />
             </AuthGuard>
           }
         />
