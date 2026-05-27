@@ -1,0 +1,351 @@
+id: outline
+name: Outline
+version: "1.0"
+container_match:
+  image_patterns:
+    - "outlinewiki/outline"
+  port_hints: [3000]
+category: development
+description: Team knowledge base and wiki platform with real-time collaboration
+docs_url: https://hub.docker.com/r/outlinewiki/outline
+
+common_issues:
+  - id: missing-secret-key
+    name: SECRET_KEY not set or invalid length
+    symptoms:
+      - "SECRET_KEY is not set"
+      - "Application fails to start"
+      - "Session validation errors"
+      - "Cannot encrypt sensitive data"
+    trigger_conditions:
+      - log_pattern: "SECRET_KEY"
+      - log_pattern: "encryption.*failed"
+    steps:
+      - id: step-1
+        description: Check if SECRET_KEY environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep SECRET_KEY"
+        expected_output: "SECRET_KEY="
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variable configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Explain SECRET_KEY requirement (32-byte hex string)
+        type: inform
+        command: ""
+      - id: step-4
+        description: Generate a new 32-byte hex SECRET_KEY
+        type: fix
+        command: "openssl rand -hex 32"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Set SECRET_KEY in environment and restart container
+        type: fix
+        command: "docker exec {container_name} bash -c 'export SECRET_KEY={secret_key_value}' && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify application startup after SECRET_KEY is set
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'listening\\|started\\|ready' | tail -2"
+    resolution: |
+      Outline requires a SECRET_KEY environment variable to encrypt sessions and sensitive data. The key must be a 32-byte hexadecimal string. A new key has been generated and the container restarted. All sessions will be invalidated and users will need to log in again.
+
+  - id: database-connection-failed
+    name: Cannot connect to PostgreSQL database
+    symptoms:
+      - "unable to connect to database"
+      - "connection refused"
+      - "FATAL: password authentication failed"
+      - "ERROR: database.*does not exist"
+    trigger_conditions:
+      - log_pattern: "unable to connect.*database"
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display status of database and Outline containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Outline database environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i 'database\\|postgres'"
+        expected_output: "DATABASE_URL"
+        on_fail: step-4
+      - id: step-4
+        description: Display current database connection configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test connectivity from Outline container to PostgreSQL
+        type: check
+        command: "docker exec {container_name} nc -zv {db_host} {db_port}"
+        expected_output: "succeeded"
+        on_fail: step-6
+      - id: step-6
+        description: Check PostgreSQL logs for errors
+        type: check
+        command: "docker logs postgres 2>&1 | grep -i 'error\\|fatal' | tail -3"
+      - id: step-7
+        description: Restart Outline container to retry database connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor database connection status in logs
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'database.*connected\\|migration.*success' | tail -1"
+    resolution: |
+      Outline requires a PostgreSQL database to store documents, users, and workspace data. The connection issue has been diagnosed. Verify that DATABASE_URL is set correctly in the environment (format: postgres://user:password@host:port/database). If PostgreSQL is not running, start it first. The container has been restarted to attempt reconnection.
+
+  - id: redis-connection-failed
+    name: Cannot connect to Redis cache
+    symptoms:
+      - "Redis connection refused"
+      - "ERR_CONNECTION_REFUSED"
+      - "Cannot connect to cache"
+      - "Application performance degraded"
+    trigger_conditions:
+      - log_pattern: "redis.*refused"
+      - log_pattern: "cache.*error"
+    steps:
+      - id: step-1
+        description: Verify Redis container is running
+        type: check
+        command: "docker ps | grep redis"
+        expected_output: "redis"
+        on_fail: step-2
+      - id: step-2
+        description: Display status of Redis container
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Outline Redis environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i 'redis'"
+        expected_output: "REDIS_URL"
+        on_fail: step-4
+      - id: step-4
+        description: Display current Redis connection configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test connectivity from Outline container to Redis
+        type: check
+        command: "docker exec {container_name} nc -zv {redis_host} {redis_port}"
+        expected_output: "succeeded"
+        on_fail: step-6
+      - id: step-6
+        description: Check Redis logs for errors or memory issues
+        type: check
+        command: "docker logs redis 2>&1 | tail -5"
+      - id: step-7
+        description: Restart Redis container to clear any connection pool issues
+        type: fix
+        command: "docker restart redis"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Restart Outline container to re-establish Redis connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Monitor Redis connection status in logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'redis.*connected\\|cache.*ok' | tail -1"
+    resolution: |
+      Outline uses Redis for caching, sessions, and real-time collaboration features. Without Redis, application performance is severely degraded. Verify that REDIS_URL is set correctly in the environment (format: redis://host:port). If Redis is not running, it has been started. Both Redis and Outline have been restarted to re-establish the connection.
+
+  - id: oidc-auth-misconfigured
+    name: OIDC authentication not working
+    symptoms:
+      - "OIDC provider configuration missing"
+      - "Login with SSO fails"
+      - "Cannot authenticate users"
+      - "OIDC callback error"
+    trigger_conditions:
+      - log_pattern: "OIDC.*error"
+      - log_pattern: "authentication.*failed"
+    steps:
+      - id: step-1
+        description: Check if OIDC environment variables are set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i 'oidc\\|auth'"
+        expected_output: "OIDC"
+        on_fail: step-2
+      - id: step-2
+        description: Display authentication configuration status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Explain required OIDC variables
+        type: inform
+        command: ""
+      - id: step-4
+        description: Display list of OIDC environment variables in compose configuration
+        type: check
+        command: "cat {compose_path} | grep -A 10 'OIDC_'"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Recommend checking upstream OIDC documentation
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Outline to reload OIDC configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify OIDC initialization in logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'oidc\\|auth' | tail -3"
+    resolution: |
+      Outline supports OIDC for single sign-on integration with identity providers (Authentik, Keycloak, Auth0, etc.). Verify that OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_AUTH_URI, OIDC_TOKEN_URI, and OIDC_USERINFO_URI are correctly set. The OIDC provider must be configured with the Outline callback URL (typically https://your-domain/auth/oidc.callback). The container has been restarted to reload the configuration.
+
+default_config:
+  compose_template: |
+    services:
+      outline:
+        image: outlinewiki/outline:latest
+        container_name: outline
+        restart: unless-stopped
+        environment:
+          SECRET_KEY: ${SECRET_KEY}
+          UTILS_SECRET: ${UTILS_SECRET}
+          DATABASE_URL: postgres://${DB_USER:-outline}:${DB_PASSWORD:-outline}@postgres:5432/${DB_NAME:-outline}
+          REDIS_URL: redis://redis:6379
+          URL: ${BASE_URL:-http://localhost:3000}
+          PORT: 3000
+          OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+          OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+          OIDC_AUTH_URI: ${OIDC_AUTH_URI:-}
+          OIDC_TOKEN_URI: ${OIDC_TOKEN_URI:-}
+          OIDC_USERINFO_URI: ${OIDC_USERINFO_URI:-}
+          OIDC_DISPLAY_NAME: ${OIDC_DISPLAY_NAME:-SSO}
+          SMTP_HOST: ${SMTP_HOST:-}
+          SMTP_PORT: ${SMTP_PORT:-587}
+          SMTP_USERNAME: ${SMTP_USERNAME:-}
+          SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+          SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+        volumes:
+          - ${DATA_PATH:-./outline_data}:/var/lib/outline/data
+        ports:
+          - "3000:3000/tcp"
+        depends_on:
+          - postgres
+          - redis
+      postgres:
+        image: postgres:15
+        container_name: outline-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${DB_NAME:-outline}
+          POSTGRES_USER: ${DB_USER:-outline}
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-outline}
+        volumes:
+          - ${DB_PATH:-./postgres_data}:/var/lib/postgresql/data
+      redis:
+        image: redis:7-alpine
+        container_name: outline-redis
+        restart: unless-stopped
+        volumes:
+          - ${REDIS_PATH:-./redis_data}:/data
+  required_vars:
+    - name: SECRET_KEY
+      description: 32-byte hex string for session encryption (generate with openssl rand -hex 32)
+      default: ""
+    - name: UTILS_SECRET
+      description: Secret key for utility operations (generate with openssl rand -hex 32)
+      default: ""
+    - name: BASE_URL
+      description: Public base URL of Outline instance
+      default: "http://localhost:3000"
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "outline"
+    - name: DB_USER
+      description: PostgreSQL database user
+      default: "outline"
+    - name: DB_PASSWORD
+      description: PostgreSQL database password
+      default: "outline"
+    - name: DATA_PATH
+      description: Host path for Outline data and uploads
+      default: "./outline_data"
+    - name: DB_PATH
+      description: Host path for PostgreSQL database
+      default: "./postgres_data"
+    - name: REDIS_PATH
+      description: Host path for Redis cache
+      default: "./redis_data"
+    - name: OIDC_CLIENT_ID
+      description: OIDC provider client ID (optional, for SSO)
+      default: ""
+    - name: OIDC_CLIENT_SECRET
+      description: OIDC provider client secret (optional, for SSO)
+      default: ""
+    - name: OIDC_AUTH_URI
+      description: OIDC provider authorization endpoint (optional)
+      default: ""
+    - name: OIDC_TOKEN_URI
+      description: OIDC provider token endpoint (optional)
+      default: ""
+    - name: OIDC_USERINFO_URI
+      description: OIDC provider user info endpoint (optional)
+      default: ""
+  known_mounts:
+    - container_path: /var/lib/outline/data
+      purpose: Document uploads, attachments, and data files
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database files
+      recommended_permissions: "700"
+      owner: "999:999"
+    - container_path: /data
+      purpose: Redis cache and persistence
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Outline is an open-source wiki and knowledge base platform designed for teams. It combines real-time collaboration with a clean, intuitive interface.
+
+  Deployment: Outline requires three services: the application itself, PostgreSQL (database), and Redis (caching and real-time features). All three must be running for full functionality.
+
+  SECRET_KEY and UTILS_SECRET: Both must be set to random 32-byte hexadecimal strings. Generate them once during initial setup and keep them stable:
+  ```
+  openssl rand -hex 32
+  ```
+
+  Database initialization: PostgreSQL is created by Outline automatically on first run. No manual schema setup required.
+
+  Authentication: Outline supports local user authentication and optional OIDC/SSO integration. OIDC configuration is optional but recommended for team deployments. Required OIDC variables:
+  - OIDC_CLIENT_ID, OIDC_CLIENT_SECRET (from your OIDC provider)
+  - OIDC_AUTH_URI, OIDC_TOKEN_URI, OIDC_USERINFO_URI (OIDC provider endpoints)
+  - URL must be set to the public base URL for OIDC callback to work
+
+  Email (optional): Configure SMTP for email invitations and notifications:
+  - SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL
+
+  First run: Access at http://localhost:3000 and create an initial admin account. Subsequent user creation can be done via invitations or OIDC SSO.
+
+  Backups: Regularly backup the PostgreSQL volume. Outline data is primarily stored in the database; the /data volume contains uploads which are less critical.
+
+  Real-time collaboration: Redis must be running for real-time document edits and cursor presence. Without Redis, collaboration features degrade gracefully.

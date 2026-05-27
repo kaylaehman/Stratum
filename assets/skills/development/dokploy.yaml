@@ -1,0 +1,197 @@
+id: dokploy
+name: Dokploy
+version: "1.0"
+container_match:
+  image_patterns:
+    - "dokploy/dokploy"
+  port_hints: [3000]
+category: development
+description: Self-hosted PaaS platform for managing Docker hosts, applications, and deployments
+docs_url: https://hub.docker.com/r/dokploy/dokploy
+
+common_issues:
+  - id: docker-socket-permission-denied
+    name: Docker socket permission denied
+    symptoms:
+      - "permission denied while trying to connect to Docker daemon"
+      - "Cannot connect to Docker socket"
+      - "docker.sock: permission denied"
+      - "Failed to list containers"
+    trigger_conditions:
+      - log_pattern: "permission denied.*docker"
+      - log_pattern: "cannot connect to docker"
+    steps:
+      - id: step-1
+        description: Check Docker socket ownership on host
+        type: check
+        command: "stat /var/run/docker.sock"
+        expected_output: "Access: .*rw.*"
+        on_fail: step-2
+      - id: step-2
+        description: Display current Docker socket permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Add Dokploy user to docker group
+        type: fix
+        command: "usermod -aG docker dokploy"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify Dokploy can now access Docker socket
+        type: check
+        command: "docker ps | head -1"
+        expected_output: "CONTAINER ID"
+    resolution: |
+      The Dokploy container did not have permission to access the Docker socket. Adding the Dokploy user to the docker group allows it to communicate with the Docker daemon. The container should now be able to list and manage Docker resources.
+
+  - id: traefik-integration-failure
+    name: Reverse proxy / Traefik integration not working
+    symptoms:
+      - "Applications not accessible through Traefik proxy"
+      - "Traefik routing rules not being applied"
+      - "502 Bad Gateway when accessing app through proxy"
+      - "Dokploy not detecting Traefik network"
+    trigger_conditions:
+      - log_pattern: "traefik.*not found"
+      - log_pattern: "network.*not found"
+    steps:
+      - id: step-1
+        description: Check if Traefik container is running
+        type: check
+        command: "docker ps --filter name=traefik --format '{{.Names}}'"
+        expected_output: "traefik"
+        on_fail: step-2
+      - id: step-2
+        description: Display currently running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify Dokploy and Traefik are on the same network
+        type: check
+        command: "docker network ls --filter driver=bridge --format '{{.Name}}'"
+        expected_output: "traefik"
+        on_fail: step-4
+      - id: step-4
+        description: Create or connect to Traefik network
+        type: fix
+        command: "docker network create traefik --driver bridge && docker network connect traefik dokploy"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify network connectivity
+        type: check
+        command: "docker network inspect traefik --format '{{len .Containers}} containers'"
+    resolution: |
+      Dokploy requires network connectivity to Traefik for reverse proxy integration. The containers have been placed on the same Docker network, allowing Dokploy to communicate with Traefik and apply routing rules. Deployed applications should now be accessible through the proxy.
+
+  - id: web-ui-not-responding
+    name: Web UI not accessible on port 3000
+    symptoms:
+      - "Cannot connect to Dokploy web interface"
+      - "Port 3000 refuses connection"
+      - "Dokploy is running but unreachable"
+      - "Connection timeout when accessing http://localhost:3000"
+    trigger_conditions:
+      - log_pattern: "listen.*3000"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Verify Dokploy is listening on port 3000
+        type: check
+        command: "docker exec dokploy ss -tlnp | grep 3000"
+        expected_output: "LISTEN.*3000"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 3000 is bound by another process
+        type: check
+        command: "ss -tlnp | grep 3000"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display port 3000 status on host
+        type: inform
+        command: ""
+      - id: step-4
+        description: Ensure port 3000 is published in docker-compose
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Dokploy container
+        type: fix
+        command: "docker restart dokploy"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify web UI is responding on port 3000
+        type: check
+        command: "curl -s http://localhost:3000 | head -1"
+    resolution: |
+      The Dokploy container has been restarted. The web interface should now be accessible on port 3000. If the issue persists, verify that the port is not blocked by a firewall and that port 3000 is properly published in your docker-compose configuration.
+
+default_config:
+  compose_template: |
+    services:
+      dokploy:
+        image: dokploy/dokploy:latest
+        container_name: dokploy
+        restart: unless-stopped
+        environment:
+          NODE_ENV: ${NODE_ENV:-production}
+          DATABASE_URL: ${DATABASE_URL:-sqlite:///data/dokploy.db}
+          JWT_SECRET: ${JWT_SECRET:-change-me-generate-random-string}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+          - /var/run/docker.sock:/var/run/docker.sock
+        ports:
+          - "3000:3000"
+        networks:
+          - default
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+  required_vars:
+    - name: NODE_ENV
+      description: Node.js environment (production or development)
+      default: "production"
+    - name: DATABASE_URL
+      description: Database connection URL (SQLite or PostgreSQL)
+      default: "sqlite:///data/dokploy.db"
+    - name: JWT_SECRET
+      description: Secret key for JWT token signing
+      default: "change-me-generate-random-string"
+    - name: DATA_PATH
+      description: Host path for persistent data
+      default: "./data"
+  known_mounts:
+    - container_path: /data
+      purpose: Application configuration and database
+      recommended_permissions: "755"
+      owner: "dokploy:dokploy"
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket for container management
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Dokploy is a self-hosted PaaS alternative to Heroku, Vercel, and Railway. It manages Docker deployments, scaling, and reverse proxy integration.
+
+  Docker socket mount: Dokploy requires access to /var/run/docker.sock on the host to manage containers. This is essential for deployment and container lifecycle operations.
+
+  Traefik integration: Dokploy works seamlessly with Traefik for automatic reverse proxy configuration. Ensure both containers are on the same Docker network for label-based routing to work.
+
+  Database: By default uses SQLite for simplicity. For multi-user deployments or better performance, configure DATABASE_URL to point to a PostgreSQL instance.
+
+  JWT secret: Must be a cryptographically random string. Generate with: `openssl rand -base64 32`
+
+  Health check: Dokploy includes a /health endpoint for monitoring. Configure this in your reverse proxy or Docker health checks.
+
+  Common gotchas:
+  - Docker socket inaccessible: Container user must be in docker group or have socket permissions.
+  - Traefik integration fails: Verify containers are on same network and Dokploy labels match Traefik configuration.
+  - Port 3000 conflict: Check no other service is bound to port 3000; adjust ports mapping if needed.

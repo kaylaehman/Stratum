@@ -1,0 +1,230 @@
+id: pgadmin
+name: pgAdmin PostgreSQL Admin
+version: "1.0"
+container_match:
+  image_patterns:
+    - "dpage/pgadmin4"
+  port_hints: [80]
+category: database
+description: Web-based PostgreSQL administration and management interface
+docs_url: https://hub.docker.com/r/dpage/pgadmin4
+
+common_issues:
+  - id: login-failed-default-creds
+    name: Cannot log in with default credentials
+    symptoms:
+      - "Invalid username or password"
+      - "Authentication failed"
+      - "Login page rejects credentials"
+      - "403 Forbidden on login attempt"
+    trigger_conditions:
+      - log_pattern: "authentication.*failed"
+      - log_pattern: "invalid.*credential"
+    steps:
+      - id: step-1
+        description: Verify PGADMIN_DEFAULT_EMAIL environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep PGADMIN_DEFAULT_EMAIL"
+        expected_output: "PGADMIN_DEFAULT_EMAIL"
+        on_fail: step-2
+      - id: step-2
+        description: Display configured email and password environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if pgAdmin database initialization completed
+        type: check
+        command: "docker logs {container_name} | grep -i 'pgadmin.*initialized\\|server.*running' | tail -3"
+        expected_output: ""
+      - id: step-4
+        description: Verify /var/lib/pgadmin volume has correct permissions
+        type: check
+        command: "ls -ld {pgadmin_data_path}"
+        expected_output: "drwx"
+        on_fail: step-5
+      - id: step-5
+        description: Fix permissions on pgAdmin data directory
+        type: fix
+        command: "chmod -R 700 {pgadmin_data_path} && chown -R 5050:5050 {pgadmin_data_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart pgAdmin to reinitialize with corrected permissions
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Check if login is now successful
+        type: check
+        command: "docker logs {container_name} | tail -5"
+    resolution: |
+      pgAdmin login was failing due to incorrect data directory permissions or missing environment variables. The /var/lib/pgadmin directory ownership and permissions have been corrected to allow the pgAdmin process (UID 5050) to read and write configuration and session data. pgAdmin has been restarted to reinitialize. Try logging in again with the credentials specified in PGADMIN_DEFAULT_EMAIL and PGADMIN_DEFAULT_PASSWORD.
+
+  - id: cannot-connect-postgres
+    name: Cannot connect to PostgreSQL server from pgAdmin
+    symptoms:
+      - "Server connection refused"
+      - "Connection timeout"
+      - "Host unreachable"
+      - "Cannot connect to server - authentication failed"
+      - "Server object not found"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "host.*unreachable"
+    steps:
+      - id: step-1
+        description: Check if pgAdmin has network connectivity to PostgreSQL
+        type: check
+        command: "docker exec {container_name} ping -c 2 {pg_host}"
+        expected_output: "0% packet loss"
+        on_fail: step-2
+      - id: step-2
+        description: Display PostgreSQL server address configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify PostgreSQL is actually running and listening
+        type: check
+        command: "docker exec {pg_container} ss -tlnp | grep 5432"
+        expected_output: "LISTEN.*5432"
+        on_fail: step-4
+      - id: step-4
+        description: Check PostgreSQL logs for authentication or startup errors
+        type: check
+        command: "docker logs {pg_container} | grep -i 'error\\|failed' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Verify pgAdmin can reach PostgreSQL port directly
+        type: check
+        command: "docker exec {container_name} nc -zv {pg_host} 5432"
+        expected_output: "open"
+        on_fail: step-6
+      - id: step-6
+        description: Display network configuration and firewall rules
+        type: inform
+        command: ""
+      - id: step-7
+        description: Check authentication credentials configured in pgAdmin
+        type: inform
+        command: ""
+    resolution: |
+      pgAdmin could not connect to the PostgreSQL server. This is typically due to: (1) network connectivity issues between containers, (2) PostgreSQL not listening on the configured host/port, (3) incorrect credentials in pgAdmin server configuration, or (4) PostgreSQL not started yet. Verify that the PostgreSQL container is running, listening on port 5432, and that pgAdmin is configured with the correct hostname (use Docker service name if on the same network), port, username, and password. If using Docker Compose, ensure both services are on the same network.
+
+  - id: session-lost-no-persistent-storage
+    name: Session lost after container restart
+    symptoms:
+      - "Need to re-add PostgreSQL servers after restart"
+      - "Previously added servers disappear"
+      - "Saved queries are gone"
+      - "No persistent configuration across reboots"
+    trigger_conditions:
+      - log_pattern: "session.*lost"
+    steps:
+      - id: step-1
+        description: Check if /var/lib/pgadmin volume is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}}{{end}}' | grep '/var/lib/pgadmin'"
+        expected_output: "/var/lib/pgadmin"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts for pgAdmin
+        type: inform
+        command: ""
+      - id: step-3
+        description: Display recommended compose configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Inform user of persistent storage requirement
+        type: confirm
+        command: ""
+    resolution: |
+      pgAdmin sessions and server configurations are lost after container restart because the /var/lib/pgadmin directory is not mounted to persistent storage on the host. All pgAdmin data is stored in this directory, including saved servers, connections, and user preferences. To preserve data across container restarts, mount a host directory or Docker volume to /var/lib/pgadmin in the compose configuration. Then restart the container and re-add your PostgreSQL servers.
+
+  - id: high-memory-usage
+    name: pgAdmin consuming excessive memory
+    symptoms:
+      - "Container memory usage above 512MB"
+      - "Host memory pressure when pgAdmin is running"
+      - "OOM kill on memory-constrained systems"
+      - "Slow web interface response"
+    trigger_conditions:
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage of pgAdmin
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Check for stuck or idle connections in pgAdmin logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'connection' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Display available memory-limiting options
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart pgAdmin to clear any memory leaks
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Monitor memory usage after restart
+        type: check
+        command: "sleep 5 && docker stats {container_name} --no-stream"
+    resolution: |
+      pgAdmin memory usage has been high, possibly due to accumulated connections or session data. The container has been restarted to clear any in-memory caches and leaked connections. For production deployments on memory-constrained systems, consider limiting pgAdmin's memory with Docker memory constraints (--memory flag or compose memory_limit) or reducing the maximum allowed connections. Monitor memory after the restart to establish a baseline.
+
+default_config:
+  compose_template: |
+    services:
+      pgadmin:
+        image: dpage/pgadmin4:latest
+        container_name: pgadmin
+        restart: unless-stopped
+        environment:
+          PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+          PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+          SCRIPT_NAME: /pgadmin
+        volumes:
+          - ${PGADMIN_DATA_PATH:-./pgadmin_data}:/var/lib/pgadmin
+        ports:
+          - "80:80"
+        networks:
+          - app_network
+  required_vars:
+    - name: PGADMIN_EMAIL
+      description: Default login email address for pgAdmin
+      default: "admin@example.com"
+    - name: PGADMIN_PASSWORD
+      description: Default login password for pgAdmin
+      default: "admin"
+    - name: PGADMIN_DATA_PATH
+      description: Host path for persistent pgAdmin configuration and server definitions
+      default: "./pgadmin_data"
+  known_mounts:
+    - container_path: /var/lib/pgadmin
+      purpose: Persistent storage for pgAdmin configuration, saved servers, queries, and sessions
+      recommended_permissions: "700"
+      owner: "5050:5050"
+
+notes: |
+  pgAdmin is a feature-rich PostgreSQL administration and development platform. The official dpage/pgadmin4 image is recommended.
+
+  Authentication: Set PGADMIN_DEFAULT_EMAIL and PGADMIN_DEFAULT_PASSWORD to initial login credentials. These are only used on first startup; update them later in the web interface under User Management.
+
+  Persistent storage: The /var/lib/pgadmin volume MUST be mounted to a host path or Docker volume. Without it, all server configurations and saved queries are lost on restart.
+
+  PostgreSQL connections: When adding PostgreSQL servers from within pgAdmin, use the Docker service name as the hostname if the PostgreSQL container is on the same network (e.g., postgres:5432 instead of localhost).
+
+  Security: In production, set strong passwords for PGADMIN_DEFAULT_PASSWORD and consider restricting access via reverse proxy or firewall rules. The default port 80 is exposed; consider using a reverse proxy with HTTPS.
+
+  Common gotchas:
+  - Sessions lost on restart: Ensure /var/lib/pgadmin is mounted to persistent storage.
+  - Cannot connect to PostgreSQL: Verify hostname, port, and credentials; ensure PostgreSQL is running and accessible from the pgAdmin container's network.
+  - Login fails: Check PGADMIN_DEFAULT_EMAIL and PGADMIN_DEFAULT_PASSWORD are set correctly and /var/lib/pgadmin directory is writable by the pgAdmin process (UID 5050).
+  - Memory usage: pgAdmin can consume significant memory with many active connections; consider memory limits in production.

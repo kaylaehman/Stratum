@@ -1,0 +1,318 @@
+id: woodpecker-ci
+name: Woodpecker CI
+version: "1.0"
+container_match:
+  image_patterns:
+    - "woodpeckerci/woodpecker-server"
+  port_hints: [8000]
+category: development
+description: Lightweight CI/CD server for automated testing and deployment pipelines
+docs_url: https://hub.docker.com/r/woodpeckerci/woodpecker-server
+
+common_issues:
+  - id: agent-registration-failure
+    name: Agents unable to register or connect to server
+    symptoms:
+      - "Agent connection refused"
+      - "GRPC connection failed"
+      - "Agent cannot reach server on port 9000"
+      - "Agent shows as offline in UI"
+      - "Registration token invalid or expired"
+    trigger_conditions:
+      - log_pattern: "agent.*failed to connect"
+      - log_pattern: "grpc.*unavailable"
+    steps:
+      - id: step-1
+        description: Check if Woodpecker server is listening on port 9000 (gRPC)
+        type: check
+        command: "docker exec woodpecker-server ss -tlnp | grep 9000"
+        expected_output: "LISTEN.*9000"
+        on_fail: step-2
+      - id: step-2
+        description: Display open ports on Woodpecker server
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify agent has correct WOODPECKER_SERVER URL
+        type: check
+        command: "docker inspect woodpecker-agent | grep -i woodpecker_server"
+        expected_output: "WOODPECKER_SERVER"
+        on_fail: step-4
+      - id: step-4
+        description: Display Woodpecker agent environment variables
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check agent registration token is valid
+        type: check
+        command: "curl -s -H 'Authorization: Bearer {agent_token}' http://localhost:8000/api/agents | grep -i active"
+        expected_output: ""
+      - id: step-6
+        description: Restart agent to force re-registration
+        type: fix
+        command: "docker restart woodpecker-agent"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor agent connection status
+        type: check
+        command: "docker logs woodpecker-agent | tail -10"
+    resolution: |
+      Woodpecker agents communicate with the server on port 9000 (gRPC). The agent has been restarted to force a reconnection attempt. Verify that WOODPECKER_SERVER is set correctly on the agent (should point to server hostname or IP accessible from agent network) and that the registration token has not expired. Check server logs for any authentication errors.
+
+  - id: oauth-provider-connection-failed
+    name: OAuth provider authentication not working
+    symptoms:
+      - "Login fails with OAuth provider error"
+      - "Cannot authenticate with GitHub/GitLab/Gitea"
+      - "OIDC provider connection refused"
+      - "OAuth callback URL mismatch"
+      - "Authorization code invalid"
+    trigger_conditions:
+      - log_pattern: "oauth.*failed"
+      - log_pattern: "provider.*not found"
+    steps:
+      - id: step-1
+        description: Verify WOODPECKER_OPEN environment variable is set
+        type: check
+        command: "docker exec woodpecker-server env | grep WOODPECKER_OPEN"
+        expected_output: "WOODPECKER_OPEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check OAuth provider environment variables
+        type: check
+        command: "docker exec woodpecker-server env | grep -i github"
+        expected_output: ""
+      - id: step-3
+        description: Display OAuth configuration in server logs
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify OAuth callback URL matches provider registration
+        type: check
+        command: "curl -s http://localhost:8000/.well-known/oauth-authorization-server 2>/dev/null | grep redirect_uri"
+        expected_output: ""
+      - id: step-5
+        description: Verify provider credentials are correct
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Woodpecker server to reload OAuth configuration
+        type: fix
+        command: "docker restart woodpecker-server"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor server startup and OAuth initialization
+        type: check
+        command: "docker logs woodpecker-server | grep -i oauth | tail -5"
+    resolution: |
+      OAuth configuration requires matching the callback URL registered with your provider. Ensure WOODPECKER_HOST is set to your Woodpecker's public URL and that the provider (GitHub, GitLab, Gitea) has the correct callback URL configured. The server has been restarted to reload the OAuth configuration.
+
+  - id: web-ui-not-accessible
+    name: Web UI not responding on port 8000
+    symptoms:
+      - "Cannot access Woodpecker dashboard"
+      - "Port 8000 connection refused"
+      - "Woodpecker container running but UI unreachable"
+      - "HTTP 502 Bad Gateway"
+      - "Connection timeout on http://localhost:8000"
+    trigger_conditions:
+      - log_pattern: "listen.*8000"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Verify Woodpecker server is listening on port 8000
+        type: check
+        command: "docker exec woodpecker-server ss -tlnp | grep 8000"
+        expected_output: "LISTEN.*8000"
+        on_fail: step-2
+      - id: step-2
+        description: Check Woodpecker server container status
+        type: check
+        command: "docker ps --filter name=woodpecker-server --format 'Status: {{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-3
+      - id: step-3
+        description: Display Woodpecker server container status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check server startup logs for errors
+        type: check
+        command: "docker logs woodpecker-server | grep -i error | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Restart Woodpecker server
+        type: fix
+        command: "docker restart woodpecker-server"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify web UI is responding
+        type: check
+        command: "curl -s -o /dev/null -w '%{http_code}' http://localhost:8000"
+        expected_output: "200"
+    resolution: |
+      The Woodpecker server container has been restarted. The web UI should now be accessible on port 8000. If the issue persists, check Docker logs for startup errors related to configuration or database connectivity. Verify that WOODPECKER_HOST is set to the correct public URL.
+
+  - id: pipeline-execution-hangs
+    name: Pipeline jobs stuck or timing out
+    symptoms:
+      - "Build jobs stuck in pending state"
+      - "Pipeline never completes"
+      - "Jobs timeout after configured duration"
+      - "No agent assigned to jobs"
+      - "Logs show 'waiting for agent'"
+    trigger_conditions:
+      - log_pattern: "pending.*timeout"
+      - log_pattern: "no agent available"
+    steps:
+      - id: step-1
+        description: Check if any agents are connected and healthy
+        type: check
+        command: "curl -s http://localhost:8000/api/agents | grep -i active"
+        expected_output: "active"
+        on_fail: step-2
+      - id: step-2
+        description: Display agent list from server
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify agent capacity is not exhausted
+        type: check
+        command: "curl -s http://localhost:8000/api/agents | grep capacity"
+        expected_output: ""
+      - id: step-4
+        description: Check if pipeline has agent label matching available agents
+        type: check
+        command: "curl -s http://localhost:8000/api/repos | grep -i labels"
+        expected_output: ""
+      - id: step-5
+        description: Review recent pipeline logs for error messages
+        type: check
+        command: "docker logs woodpecker-server | grep -i 'pipeline\\|job' | tail -10"
+      - id: step-6
+        description: Restart Woodpecker agent to recover from hung state
+        type: fix
+        command: "docker restart woodpecker-agent"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor agent re-registration
+        type: check
+        command: "docker logs woodpecker-agent | tail -15"
+    resolution: |
+      Pipeline jobs require at least one healthy agent to execute. The agent has been restarted to recover from any hung state. Verify that pipeline configuration includes correct agent labels and that agents have sufficient capacity. If jobs continue to hang, check agent logs for resource exhaustion (disk space, memory) or network connectivity issues with the server.
+
+default_config:
+  compose_template: |
+    services:
+      woodpecker-server:
+        image: woodpeckerci/woodpecker-server:latest
+        container_name: woodpecker-server
+        restart: unless-stopped
+        environment:
+          WOODPECKER_HOST: ${WOODPECKER_HOST:-http://localhost:8000}
+          WOODPECKER_OPEN: ${WOODPECKER_OPEN:-true}
+          WOODPECKER_ADMIN: ${WOODPECKER_ADMIN:-admin}
+          WOODPECKER_GITHUB: ${WOODPECKER_GITHUB:-false}
+          WOODPECKER_GITHUB_CLIENT: ${WOODPECKER_GITHUB_CLIENT:-}
+          WOODPECKER_GITHUB_SECRET: ${WOODPECKER_GITHUB_SECRET:-}
+          WOODPECKER_DATABASE_DRIVER: ${WOODPECKER_DATABASE_DRIVER:-sqlite}
+          WOODPECKER_DATABASE_DATASOURCE: ${WOODPECKER_DATABASE_DATASOURCE:-/data/woodpecker.db}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "8000:8000"
+          - "9000:9000"
+        healthcheck:
+          test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8000/healthz"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+
+      woodpecker-agent:
+        image: woodpeckerci/woodpecker-agent:latest
+        container_name: woodpecker-agent
+        restart: unless-stopped
+        depends_on:
+          woodpecker-server:
+            condition: service_healthy
+        environment:
+          WOODPECKER_SERVER: ${WOODPECKER_SERVER:-woodpecker-server:9000}
+          WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:-}
+          WOODPECKER_MAX_PROCS: ${WOODPECKER_MAX_PROCS:-4}
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+        networks:
+          - default
+
+  required_vars:
+    - name: WOODPECKER_HOST
+      description: Public URL of Woodpecker server (for OAuth callback)
+      default: "http://localhost:8000"
+    - name: WOODPECKER_OPEN
+      description: Allow anonymous pipeline viewing
+      default: "true"
+    - name: WOODPECKER_ADMIN
+      description: Initial admin user (GitHub username or email)
+      default: "admin"
+    - name: WOODPECKER_GITHUB
+      description: Enable GitHub OAuth provider
+      default: "false"
+    - name: WOODPECKER_GITHUB_CLIENT
+      description: GitHub OAuth application client ID
+      default: ""
+    - name: WOODPECKER_GITHUB_SECRET
+      description: GitHub OAuth application client secret
+      default: ""
+    - name: WOODPECKER_DATABASE_DRIVER
+      description: Database driver (sqlite or postgres)
+      default: "sqlite"
+    - name: WOODPECKER_DATABASE_DATASOURCE
+      description: Database connection string
+      default: "/data/woodpecker.db"
+    - name: WOODPECKER_SERVER
+      description: Server address for agents to connect (host:port)
+      default: "woodpecker-server:9000"
+    - name: WOODPECKER_AGENT_SECRET
+      description: Secret key for agent authentication
+      default: ""
+    - name: WOODPECKER_MAX_PROCS
+      description: Maximum parallel jobs per agent
+      default: "4"
+    - name: DATA_PATH
+      description: Host path for persistent data
+      default: "./data"
+  known_mounts:
+    - container_path: /data
+      purpose: Database and configuration files
+      recommended_permissions: "755"
+      owner: "woodpecker:woodpecker"
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket for job execution
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Woodpecker is a Drone CI fork that powers CI/CD pipelines in a lightweight, self-hosted manner. Server runs on port 8000 (HTTP) and 9000 (gRPC agent communication).
+
+  Agent registration: Agents connect to the server via gRPC on port 9000. WOODPECKER_SERVER must be set to the internal hostname or IP of the server. WOODPECKER_AGENT_SECRET is used for agent authentication.
+
+  OAuth providers: Supported providers include GitHub, GitLab, Gitea, and generic OIDC. WOODPECKER_HOST must be the public URL accessible from the OAuth provider's redirect callback.
+
+  Database: SQLite is suitable for single-server deployments. For multi-server or high-volume deployments, use PostgreSQL.
+
+  Agent capacity: Configure WOODPECKER_MAX_PROCS to limit parallel job execution per agent. Adjust based on host CPU and memory.
+
+  Docker socket: Agent requires access to /var/run/docker.sock to execute pipeline jobs in containers.
+
+  Common gotchas:
+  - Agent cannot connect: Verify WOODPECKER_SERVER is reachable from agent network.
+  - OAuth fails: Check WOODPECKER_HOST matches the registered redirect URI in the OAuth provider.
+  - Jobs timeout: Check agent capacity and system resource availability.
+  - Port 9000 already in use: Adjust port mapping if gRPC port conflicts with other services.

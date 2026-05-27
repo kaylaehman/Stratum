@@ -1,0 +1,296 @@
+id: sonarqube
+name: SonarQube
+version: "1.0"
+container_match:
+  image_patterns:
+    - "sonarqube"
+    - "sonarqube:latest"
+  port_hints: [9000]
+category: development
+description: Code quality and security analysis platform for source code inspection
+docs_url: https://hub.docker.com/_/sonarqube
+
+common_issues:
+  - id: host-sysctl-limit-insufficient
+    name: Host sysctl vm.max_map_count below required threshold
+    symptoms:
+      - "max virtual memory areas vm.max_map_count is too low"
+      - "java.io.IOException: Cannot run program"
+      - "ElasticSearch bootstrap failure"
+      - "SonarQube fails to start"
+    trigger_conditions:
+      - log_pattern: "vm.max_map_count"
+      - log_pattern: "elasticsearch.*bootstrap"
+    steps:
+      - id: step-1
+        description: Check current vm.max_map_count on host
+        type: check
+        command: "sysctl vm.max_map_count"
+        expected_output: "vm.max_map_count = 262144"
+        on_fail: step-2
+      - id: step-2
+        description: Inform user that host sysctl needs modification
+        type: inform
+        command: ""
+      - id: step-3
+        description: Confirm user understands the required host-level change
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Increase vm.max_map_count to 262144 on the host
+        type: fix
+        command: "sysctl -w vm.max_map_count=262144 && echo 'vm.max_map_count=262144' | tee -a /etc/sysctl.conf"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify the sysctl change persists after reboot
+        type: check
+        command: "grep vm.max_map_count /etc/sysctl.conf"
+        expected_output: "262144"
+      - id: step-6
+        description: Restart SonarQube container to allow ElasticSearch to start
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor SonarQube startup logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'started\\|ready' | tail -2"
+    resolution: |
+      SonarQube uses embedded ElasticSearch, which requires the host kernel parameter vm.max_map_count to be set to at least 262144. This value has been increased permanently in /etc/sysctl.conf and applied immediately. SonarQube has been restarted and should now start successfully. The change persists across host reboots.
+
+  - id: database-connection-failed
+    name: Cannot connect to PostgreSQL database
+    symptoms:
+      - "unable to connect to database"
+      - "connection refused"
+      - "FATAL: password authentication failed"
+      - "jdbc connection error"
+    trigger_conditions:
+      - log_pattern: "unable to connect.*database"
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display status of database containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check SonarQube database environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i 'sonar_jdbc'"
+        expected_output: "sonar_jdbc"
+        on_fail: step-4
+      - id: step-4
+        description: Display current database connection configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test connectivity from SonarQube container to PostgreSQL
+        type: check
+        command: "docker exec {container_name} nc -zv {db_host} {db_port}"
+        expected_output: "succeeded"
+        on_fail: step-6
+      - id: step-6
+        description: Check PostgreSQL logs for errors
+        type: check
+        command: "docker logs postgres 2>&1 | grep -i 'error\\|fatal' | tail -3"
+      - id: step-7
+        description: Restart SonarQube to retry database connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor database connection status
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'database.*connected' | tail -1"
+    resolution: |
+      SonarQube requires a PostgreSQL database to store code analysis results. The connection issue has been diagnosed. If PostgreSQL is not running, start it first. Verify that SONAR_JDBC_URL, SONAR_JDBC_USERNAME, and SONAR_JDBC_PASSWORD are set correctly in the SonarQube environment. The container has been restarted to attempt reconnection.
+
+  - id: admin-password-reset
+    name: Cannot login with admin credentials
+    symptoms:
+      - "Invalid username or password"
+      - "Admin login fails"
+      - "Default credentials not working"
+      - "Locked out of SonarQube"
+    trigger_conditions:
+      - log_pattern: "authentication.*failed"
+    steps:
+      - id: step-1
+        description: Check if SonarQube is fully started
+        type: check
+        command: "docker logs {container_name} | grep -i 'sonarqube.*started\\|ready' | tail -1"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Wait for SonarQube startup to complete
+        type: inform
+        command: ""
+      - id: step-3
+        description: Access SonarQube admin reset API endpoint
+        type: check
+        command: "curl -s http://localhost:9000/api/system/db_migration_status"
+        expected_output: ""
+      - id: step-4
+        description: Reset admin password via API
+        type: fix
+        command: "curl -X POST -u admin:admin 'http://localhost:9000/api/users/change_password?login=admin&password=NewAdminPassword123'"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify password was changed
+        type: check
+        command: "curl -u admin:NewAdminPassword123 http://localhost:9000/api/user"
+    resolution: |
+      SonarQube admin account password has been reset. Log in with username 'admin' and the new password. We strongly recommend changing this to a secure password immediately after login. Default admin credentials are 'admin:admin' for fresh installations. Consider disabling local admin login once SSO is configured.
+
+  - id: disk-space-full
+    name: SonarQube data directory running out of disk space
+    symptoms:
+      - "out of disk space"
+      - "Cannot write to database"
+      - "Analysis failed: disk full"
+      - "Storage quota exceeded"
+    trigger_conditions:
+      - log_pattern: "disk.*full"
+      - log_pattern: "ENOSPC"
+    steps:
+      - id: step-1
+        description: Check disk usage of SonarQube data directory
+        type: check
+        command: "du -sh {data_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display disk space usage details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check available space on the filesystem
+        type: check
+        command: "df -h {data_path}"
+        expected_output: ""
+      - id: step-4
+        description: Display recommendations for freeing disk space
+        type: inform
+        command: ""
+      - id: step-5
+        description: Archive old analysis results to free space
+        type: fix
+        command: "docker exec {container_name} curl -X POST -u admin:admin 'http://localhost:9000/api/projects/bulk_delete?analyzedBefore=2023-01-01'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor disk usage after cleanup
+        type: check
+        command: "du -sh {data_path}"
+    resolution: |
+      SonarQube stores all code analysis history in its database. When disk space runs low, old analysis data can be purged via the Projects > Bulk Delete feature or API. Configure backup strategies to archive historical data externally. Consider increasing the volume/mount size if frequent analysis generates large amounts of data.
+
+default_config:
+  compose_template: |
+    services:
+      sonarqube:
+        image: sonarqube:latest
+        container_name: sonarqube
+        restart: unless-stopped
+        environment:
+          SONAR_JDBC_URL: jdbc:postgresql://${DB_HOST:-postgres}:5432/${DB_NAME:-sonarqube}
+          SONAR_JDBC_USERNAME: ${DB_USER:-sonar}
+          SONAR_JDBC_PASSWORD: ${DB_PASSWORD:-sonar}
+          SONAR_CE_JAVAOPTS: -Xmx1024m
+          SONAR_WEB_JAVAOPTS: -Xmx1024m
+        volumes:
+          - ${DATA_PATH:-./sonarqube_data}:/opt/sonarqube/data
+          - ${LOGS_PATH:-./sonarqube_logs}:/opt/sonarqube/logs
+          - ${EXTENSIONS_PATH:-./sonarqube_extensions}:/opt/sonarqube/extensions
+        ports:
+          - "9000:9000/tcp"
+        depends_on:
+          - postgres
+      postgres:
+        image: postgres:15
+        container_name: sonarqube-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${DB_NAME:-sonarqube}
+          POSTGRES_USER: ${DB_USER:-sonar}
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-sonar}
+        volumes:
+          - ${DB_PATH:-./postgres_data}:/var/lib/postgresql/data
+  required_vars:
+    - name: DB_HOST
+      description: PostgreSQL hostname (default is postgres container)
+      default: "postgres"
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "sonarqube"
+    - name: DB_USER
+      description: PostgreSQL database user
+      default: "sonar"
+    - name: DB_PASSWORD
+      description: PostgreSQL password
+      default: "sonar"
+    - name: DATA_PATH
+      description: Host path for SonarQube data (analysis results)
+      default: "./sonarqube_data"
+    - name: LOGS_PATH
+      description: Host path for SonarQube application logs
+      default: "./sonarqube_logs"
+    - name: EXTENSIONS_PATH
+      description: Host path for SonarQube plugins
+      default: "./sonarqube_extensions"
+    - name: DB_PATH
+      description: Host path for PostgreSQL database
+      default: "./postgres_data"
+  known_mounts:
+    - container_path: /opt/sonarqube/data
+      purpose: Code analysis results, indices, and database
+      recommended_permissions: "755"
+      owner: "999:999"
+    - container_path: /opt/sonarqube/logs
+      purpose: Application and analysis logs
+      recommended_permissions: "755"
+      owner: "999:999"
+    - container_path: /opt/sonarqube/extensions
+      purpose: Installed plugins and language analyzers
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  SonarQube analyzes source code to detect bugs, code smells, and security vulnerabilities. It requires a PostgreSQL database backend for production use (H2 not recommended for multi-user).
+
+  Host kernel requirements: The embedded ElasticSearch search engine requires vm.max_map_count >= 262144 on the Linux host. This must be set before SonarQube starts:
+  ```
+  sysctl -w vm.max_map_count=262144
+  echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+  ```
+
+  Initial login: Default admin credentials are username 'admin', password 'admin'. Change this immediately after setup.
+
+  Memory tuning: By default, SonarQube and PostgreSQL containers have limited JVM heap. For large codebases, increase SONAR_CE_JAVAOPTS and SONAR_WEB_JAVAOPTS:
+  - Small analysis (< 100k LOC): -Xmx512m
+  - Medium (100k - 1M LOC): -Xmx1024m
+  - Large (> 1M LOC): -Xmx2048m or higher
+
+  Plugins: Install additional language analyzers (Java, Python, Go, etc.) via Administration > Marketplace. Changes take effect after container restart.
+
+  Analysis permissions: To analyze code in SonarQube, use the project token via sonar-scanner CLI:
+  ```
+  sonar-scanner -Dsonar.projectKey=my-project -Dsonar.sources=. -Dsonar.host.url=http://localhost:9000 -Dsonar.login=<project-token>
+  ```
+
+  Database backup: Regularly backup the PostgreSQL volume to protect analysis history. SonarQube data is mostly in PostgreSQL; the /data volume contains search indices which can be regenerated.
+
+  Security: Do not expose port 9000 directly to the internet without authentication (API tokens are per-project/user). Use a reverse proxy with authentication or run on a private network.

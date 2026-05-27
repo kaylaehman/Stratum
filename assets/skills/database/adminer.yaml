@@ -1,0 +1,180 @@
+id: adminer
+name: Adminer Database Admin
+version: "1.0"
+container_match:
+  image_patterns:
+    - "adminer"
+  port_hints: [8080]
+category: database
+description: Lightweight single-file database administration tool supporting multiple database systems
+docs_url: https://hub.docker.com/_/adminer
+
+common_issues:
+  - id: cannot-connect-database
+    name: Cannot connect to database server from Adminer
+    symptoms:
+      - "Server connection refused"
+      - "Connection timeout"
+      - "Invalid credentials"
+      - "SQLSTATE connection error"
+      - "Access denied for user"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "access.*denied"
+      - log_pattern: "SQLSTATE"
+    steps:
+      - id: step-1
+        description: Verify database server is running and accessible
+        type: check
+        command: "docker exec {container_name} ping -c 2 {db_host}"
+        expected_output: "0% packet loss"
+        on_fail: step-2
+      - id: step-2
+        description: Display database configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test direct port connectivity to database
+        type: check
+        command: "docker exec {container_name} nc -zv {db_host} {db_port}"
+        expected_output: "open"
+        on_fail: step-4
+      - id: step-4
+        description: Verify database credentials are correct
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check Adminer logs for connection errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|connection' | tail -5"
+        expected_output: ""
+    resolution: |
+      Adminer could not connect to the database server. Verify that the database container/server is running and accessible at the configured host and port. Check that the username and password are correct for your database system (MySQL, PostgreSQL, MariaDB, etc.). If using Docker Compose, ensure both the database and Adminer containers are on the same network and use the database service name as the hostname (e.g., mysql:3306 instead of localhost). Check firewall rules and port bindings if the database is on a remote host.
+
+  - id: login-page-not-loading
+    name: Login page blank, 500 error, or persistent redirects
+    symptoms:
+      - "Blank white page"
+      - "500 Internal Server Error"
+      - "Redirect loop"
+      - "Cannot access Adminer web interface"
+      - "Page timeout"
+    trigger_conditions:
+      - log_pattern: "error"
+      - log_pattern: "fatal"
+      - log_pattern: "exception"
+    steps:
+      - id: step-1
+        description: Check if Adminer container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "adminer"
+        on_fail: step-2
+      - id: step-2
+        description: Display container status and startup logs
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify port 8080 is accessible and listening
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8080"
+        expected_output: "LISTEN.*8080"
+        on_fail: step-4
+      - id: step-4
+        description: Check Adminer logs for PHP errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-5
+        description: Restart Adminer to clear any corrupted state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Adminer is responding after restart
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:8080/ | head -c 100"
+        expected_output: "html"
+    resolution: |
+      Adminer failed to load the login page due to a PHP error or service crash. The container has been restarted to clear the corrupted state. If the issue persists, verify that the Adminer image is compatible with your Docker configuration and that port 8080 is not in use by another service. Check container logs for specific PHP errors. In rare cases, the Adminer image may be corrupted; try pulling a fresh image with docker pull adminer.
+
+  - id: session-not-persisting
+    name: Session lost after refresh or container restart
+    symptoms:
+      - "Logged out after page refresh"
+      - "Have to re-enter credentials frequently"
+      - "Session cookie not persisting"
+      - "All login state lost on container restart"
+    trigger_conditions:
+      - log_pattern: "session"
+    steps:
+      - id: step-1
+        description: Check if /var/www/html/tmp volume is mounted for session storage
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}}{{end}}' | grep '/var/www/html'"
+        expected_output: "/var/www/html"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts for Adminer
+        type: inform
+        command: ""
+      - id: step-3
+        description: Display recommended compose configuration with session persistence
+        type: inform
+        command: ""
+      - id: step-4
+        description: Confirm need for persistent storage configuration
+        type: confirm
+        command: ""
+    resolution: |
+      Adminer session state is not persisting because the container's temporary directory is not mounted to persistent storage. Session files are stored in /var/www/html/tmp and are lost when the container restarts. To persist sessions across restarts, mount a host directory or Docker volume to /var/www/html in the compose configuration. After updating the compose file and restarting the container, you will remain logged in across refreshes and restarts.
+
+default_config:
+  compose_template: |
+    services:
+      adminer:
+        image: adminer:latest
+        container_name: adminer
+        restart: unless-stopped
+        environment:
+          ADMINER_DEFAULT_SERVER: ${ADMINER_DEFAULT_SERVER:-}
+        volumes:
+          - ${ADMINER_DATA_PATH:-./adminer_data}:/var/www/html
+        ports:
+          - "8080:8080"
+        networks:
+          - app_network
+  required_vars:
+    - name: ADMINER_DEFAULT_SERVER
+      description: Optional default database server hostname for login form (e.g., mysql, postgres)
+      default: ""
+    - name: ADMINER_DATA_PATH
+      description: Host path for /var/www/html (session persistence and custom plugins)
+      default: "./adminer_data"
+  known_mounts:
+    - container_path: /var/www/html
+      purpose: Adminer application files, session storage, and custom plugin directory
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Adminer is a single-file PHP database management tool. The official adminer image from Docker Hub contains just index.php, making it extremely lightweight.
+
+  Supported databases: MySQL, PostgreSQL, SQLite, MS SQL Server, Oracle, and others depending on PHP extensions available in the image.
+
+  Session persistence: Sessions are stored in /var/www/html directory. Without a volume mount, sessions are lost on container restart. Always mount a host directory or volume to persist login state.
+
+  Default server: The ADMINER_DEFAULT_SERVER environment variable is optional and can be set to pre-fill the server field on the login form (e.g., mysql or postgres service name).
+
+  Security: Adminer exposes a database admin interface to the network. In production, restrict access via reverse proxy with authentication, firewall rules, or bind to 127.0.0.1 only. Never expose directly to the internet without HTTPS and authentication.
+
+  Custom plugins: Place custom Adminer plugins in the mounted /var/www/html directory under an `plugins/` subdirectory for automatic loading.
+
+  Database connectivity: Use the Docker service name when connecting to databases on the same compose network (e.g., mysql:3306 instead of localhost). For external databases, use the full hostname and ensure network/firewall access is configured.
+
+  Common gotchas:
+  - Sessions lost on restart: Ensure /var/www/html is mounted to persistent storage.
+  - Cannot connect to database: Verify database service is running, use correct service name on compose network, and check credentials.
+  - Login page blank: Check PHP errors in logs; restart container to clear corrupted state.
+  - Custom plugins not loading: Place plugins in /var/www/html/plugins/ directory; plugin directory must exist and be writable.

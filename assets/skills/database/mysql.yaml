@@ -1,0 +1,194 @@
+id: mysql
+name: MySQL
+version: "1.0"
+container_match:
+  image_patterns:
+    - "mysql"
+  port_hints: [3306]
+category: database
+description: Open-source relational database, predecessor to MariaDB, widely used in legacy and WordPress stacks
+docs_url: https://dev.mysql.com/doc/
+
+common_issues:
+  - id: root-password-error
+    name: Root password not set, initialization fails, or restart loop occurs
+    symptoms:
+      - "MYSQL_ROOT_PASSWORD"
+      - "restart loop"
+      - "exited with code 1"
+      - "variable is empty"
+    trigger_conditions:
+      - log_pattern: "MYSQL_ROOT_PASSWORD"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if MYSQL_ROOT_PASSWORD environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i MYSQL_ROOT_PASSWORD"
+        expected_output: "MYSQL_ROOT_PASSWORD"
+        on_fail: step-2
+      - id: step-2
+        description: MYSQL_ROOT_PASSWORD is required and must not be empty
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set root password in compose file or use MYSQL_RANDOM_ROOT_PASSWORD
+        type: fix
+        command: "docker compose up -d --force-recreate"
+        requires_approval: true
+    resolution: |
+      MySQL requires either MYSQL_ROOT_PASSWORD (explicit password) or
+      MYSQL_RANDOM_ROOT_PASSWORD=true (random password logged to stdout).
+      An empty value causes initialization to fail. Set a strong password or
+      enable random generation, then recreate the container.
+
+  - id: permission-denied-data
+    name: Permission denied on /var/lib/mysql mount
+    symptoms:
+      - "permission denied"
+      - "cannot access directory"
+      - "mkdir: cannot create"
+      - "mysql user cannot write"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of the host /var/lib/mysql path
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 999"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership for review
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown data path to UID 999 (mysql user)
+        type: fix
+        command: "chown -R 999:999 {data_path}"
+        requires_approval: true
+    resolution: |
+      The official `mysql` image runs as UID 999 (user `mysql`). If the host
+      path was created as root or another user, the container cannot initialize
+      the cluster. The fix changes ownership to match the container's user.
+
+  - id: initdb-failed
+    name: Initialization failed, cluster corrupt, or cannot create tables
+    symptoms:
+      - "Cannot initialize"
+      - "exited with code 1"
+      - "mysqld: ready for connections"
+      - "Table corruption"
+    trigger_conditions:
+      - exit_code: 1
+      - log_pattern: "Cannot initialize"
+    steps:
+      - id: step-1
+        description: Check if /var/lib/mysql directory is empty or corrupt
+        type: check
+        command: "docker exec {container_name} ls -la /var/lib/mysql 2>&1 | wc -l"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display data directory contents for review
+        type: inform
+        command: ""
+      - id: step-3
+        description: Confirm deletion of corrupted data directory
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Stop container and remove the data volume
+        type: fix
+        command: "docker compose down && docker volume rm {volume_name} || true"
+        requires_approval: true
+      - id: step-5
+        description: Recreate container with fresh cluster
+        type: fix
+        command: "docker compose up -d"
+        requires_approval: true
+    resolution: |
+      MySQL's initialization (mysql_initialize or mysql_install_db) failed,
+      usually due to corrupted files or permission issues in an existing data
+      directory. The fix removes the volume and lets the container reinitialize.
+      Ensure you have backups before proceeding.
+
+default_config:
+  compose_template: |
+    services:
+      mysql:
+        image: mysql:latest
+        container_name: mysql
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+          MYSQL_DATABASE: ${MYSQL_DATABASE:-app}
+          MYSQL_USER: ${MYSQL_USER:-appuser}
+          MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${MYSQL_DATA_PATH:-./data}:/var/lib/mysql
+        ports:
+          - "${MYSQL_HOST_PORT:-3306}:3306"
+  required_vars:
+    - name: MYSQL_ROOT_PASSWORD
+      description: Root password for MySQL (required, non-empty; or use MYSQL_RANDOM_ROOT_PASSWORD)
+      default: ""
+    - name: MYSQL_USER
+      description: Username for application database user
+      default: "appuser"
+    - name: MYSQL_PASSWORD
+      description: Password for application database user
+      default: ""
+    - name: MYSQL_DATABASE
+      description: Initial database to create
+      default: "app"
+    - name: MYSQL_DATA_PATH
+      description: Host path for /var/lib/mysql (persistent data)
+      default: "./data"
+    - name: MYSQL_HOST_PORT
+      description: Host port to expose MySQL on
+      default: "3306"
+    - name: TZ
+      description: Timezone for log timestamps
+      default: "UTC"
+  known_mounts:
+    - container_path: /var/lib/mysql
+      purpose: MySQL data directory, databases, tablespace
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Official `mysql` image characteristics:
+    - Runs as UID 999 (user `mysql`).
+    - /var/lib/mysql must be writable by this user.
+    - Initialization happens on first start if the data directory is empty.
+
+  Root password options:
+    - MYSQL_ROOT_PASSWORD: explicit password (recommended for known, strong passwords).
+    - MYSQL_RANDOM_ROOT_PASSWORD=true: generates a random password, logs it to
+      stdout (use `docker logs` to retrieve it). Useful for development or if
+      you plan to reset the password immediately after startup.
+
+  Relationship to MariaDB:
+    - MySQL and MariaDB are diverging; MariaDB is the community-driven fork and
+      is generally preferred for new projects.
+    - MySQL 8.0+ uses a different authentication plugin (caching_sha2_password)
+      than MariaDB and earlier MySQL versions (mysql_native_password), which
+      can cause compatibility issues with legacy tools.
+    - If connecting from a legacy client or library, you may need to set
+      `--default-authentication-plugin=mysql_native_password` in my.cnf.
+
+  Data directory reuse:
+    - MySQL 8.0 data is not forward-compatible with 5.7 without migration.
+    - If moving a data directory between MySQL major versions, use mysqldump or
+      MySQL Shell for migration.
+
+  Port conflicts:
+    - 3306 is the default MySQL/MariaDB port.
+    - If running multiple database containers, use different host ports
+      (e.g., 3307:3306, 3308:3306).

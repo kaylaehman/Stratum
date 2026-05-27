@@ -1,0 +1,232 @@
+id: postgresql
+name: PostgreSQL
+version: "1.0"
+container_match:
+  image_patterns:
+    - "postgres"
+    - "postgresql"
+  port_hints: [5432]
+category: database
+description: Advanced open-source relational database with JSONB, full-text search, and superior query optimizer
+docs_url: https://www.postgresql.org/docs/
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /var/lib/postgresql/data mount
+    symptoms:
+      - "permission denied"
+      - "cannot access directory"
+      - "mkdir: cannot create"
+      - "postgres user cannot write"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of the host data path
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 999"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership for review
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown data path to UID 999 (postgres user)
+        type: fix
+        command: "chown -R 999:999 {data_path}"
+        requires_approval: true
+    resolution: |
+      The official `postgres` image runs as UID 999 (user `postgres`). If the
+      host path was created as root or another user, the container cannot
+      initialize the cluster. The fix changes ownership to 999:999.
+
+  - id: initdb-failed
+    name: Database cluster initialization failed or exited immediately
+    symptoms:
+      - "initdb failed"
+      - "exited with code 1"
+      - "pg_ctl"
+      - "FATAL"
+    trigger_conditions:
+      - exit_code: 1
+      - log_pattern: "initdb"
+    steps:
+      - id: step-1
+        description: Check if /var/lib/postgresql/data is empty
+        type: check
+        command: "docker exec {container_name} ls -la /var/lib/postgresql/data 2>&1 | wc -l"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display data directory contents
+        type: inform
+        command: ""
+      - id: step-3
+        description: If directory is corrupted, remove it and let PostgreSQL reinitialize
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Stop container and remove the data volume
+        type: fix
+        command: "docker compose down && docker volume rm {volume_name} || true"
+        requires_approval: true
+      - id: step-5
+        description: Recreate container with fresh cluster
+        type: fix
+        command: "docker compose up -d"
+        requires_approval: true
+    resolution: |
+      PostgreSQL's initdb process failed, usually due to corrupted files in an
+      existing data directory. The fix removes the volume and lets the container
+      reinitialize. Ensure you have backups before doing this.
+
+  - id: locale-not-available
+    name: Locale initialization failed or COLLATE error
+    symptoms:
+      - "invalid locale"
+      - "COLLATE"
+      - "initdb: could not find locale"
+      - "LC_COLLATE"
+    trigger_conditions:
+      - log_pattern: "locale"
+      - log_pattern: "COLLATE"
+    steps:
+      - id: step-1
+        description: Check the LANG and LC_* environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i LC_ || echo 'No LC_ vars set'"
+        expected_output: ""
+      - id: step-2
+        description: Inform about locale requirements
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set LANG environment variable to a valid UTF-8 locale
+        type: fix
+        command: "echo 'Set LANG=C.UTF-8 or LANG=en_US.UTF-8 in docker-compose.yml and recreate'"
+        requires_approval: true
+    resolution: |
+      PostgreSQL requires a valid locale to initialize. Set LANG=C.UTF-8 (most
+      reliable) or another supported UTF-8 locale in the environment. C.UTF-8
+      is available in all modern Linux distributions and does not require
+      locale-gen.
+
+  - id: connection-refused-5432
+    name: Cannot connect to PostgreSQL, port 5432 not accepting connections
+    symptoms:
+      - "connection refused"
+      - "port 5432"
+      - "server is accepting connections"
+      - "FATAL"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+      - log_pattern: "port 5432"
+    steps:
+      - id: step-1
+        description: Check if PostgreSQL is accepting connections on the expected port
+        type: check
+        command: "docker exec {container_name} pg_isready -U postgres"
+        expected_output: "accepting connections"
+        on_fail: step-2
+      - id: step-2
+        description: Inspect container logs to find startup errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Verify the container is actually running
+        type: check
+        command: "docker inspect {container_name} --format='{{.State.Status}}'"
+        expected_output: "running"
+        on_fail: step-4
+      - id: step-4
+        description: Container is not running; restart it
+        type: fix
+        command: "docker compose up -d"
+        requires_approval: true
+    resolution: |
+      PostgreSQL can take 10-30 seconds to start and accept connections after
+      the container begins. Verify the container is running and logs show no
+      initialization errors. If the container exited, check step-2 logs for
+      the root cause (often permission or locale issues).
+
+default_config:
+  compose_template: |
+    services:
+      postgresql:
+        image: postgres:latest
+        container_name: postgresql
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-postgres}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+          POSTGRES_DB: ${POSTGRES_DB:-app}
+          LANG: C.UTF-8
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./data}:/var/lib/postgresql/data
+        ports:
+          - "${POSTGRES_HOST_PORT:-5432}:5432"
+  required_vars:
+    - name: POSTGRES_USER
+      description: Primary superuser name
+      default: "postgres"
+    - name: POSTGRES_PASSWORD
+      description: Password for the superuser (required, non-empty)
+      default: ""
+    - name: POSTGRES_DB
+      description: Initial database to create
+      default: "app"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for /var/lib/postgresql/data (persistent state)
+      default: "./data"
+    - name: POSTGRES_HOST_PORT
+      description: Host port to expose PostgreSQL on
+      default: "5432"
+    - name: TZ
+      description: Timezone for timestamps and logging
+      default: "UTC"
+  known_mounts:
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL cluster, databases, tablespace
+      recommended_permissions: "700"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Official `postgres` image characteristics:
+    - Runs as UID 999 (user `postgres`).
+    - /var/lib/postgresql/data must be writable by this user.
+    - Initialization (initdb) happens on first start if the data directory
+      is empty.
+    - Startup takes 10-30 seconds; use `pg_isready` to poll.
+
+  Environment variables:
+    - POSTGRES_USER: superuser name (default: postgres).
+    - POSTGRES_PASSWORD: required and must not be empty on first run.
+    - POSTGRES_DB: name of the initial database created (default: postgres).
+    - POSTGRES_INITDB_ARGS: additional flags passed to initdb
+      (e.g., "--encoding=UTF8 --locale=C.UTF-8").
+
+  Locale handling:
+    - The image defaults to LANG=C.UTF-8, which is reliable and requires no
+      locale-gen on the host.
+    - Do not use LANG=en_US.UTF-8 or other locales unless you are certain they
+      are available in the image and have explicitly set them.
+
+  Data directory reuse:
+    - PostgreSQL 15+ data is not forward-compatible with earlier versions.
+    - If moving a data directory between PostgreSQL major versions, use
+      pg_upgrade or a dump/restore cycle.
+
+  Connection issues:
+    - Ensure the container is fully started before connecting (initdb may take
+      30 seconds on slower storage).
+    - If using a named Docker network, use the service name (e.g., `postgresql`)
+      instead of localhost.
+    - Port 5432 is PostgreSQL's default; conflicts with other databases may
+      require a different host port.

@@ -1,0 +1,264 @@
+id: valkey
+name: Valkey In-Memory Data Store
+version: "1.0"
+container_match:
+  image_patterns:
+    - "valkey/valkey"
+    - "valkey/valkey:latest"
+    - "valkey/valkey:alpine"
+  port_hints: [6379]
+category: database
+description: Redis fork by Linux Foundation; drop-in Redis replacement with active community maintenance and feature development
+docs_url: https://hub.docker.com/r/valkey/valkey
+
+common_issues:
+  - id: connection-refused
+    name: Connection refused on port 6379
+    symptoms:
+      - "Connection refused"
+      - "Cannot connect to Valkey server"
+      - "valkey-cli: Could not connect"
+      - "ECONNREFUSED 6379"
+    trigger_conditions:
+      - log_pattern: "bind.*error"
+      - log_pattern: "address.*in use"
+    steps:
+      - id: step-1
+        description: Check if Valkey process is listening on port 6379
+        type: check
+        command: "docker exec {container_name} valkey-cli ping"
+        expected_output: "PONG"
+        on_fail: step-2
+      - id: step-2
+        description: Verify port 6379 is exposed in container
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '6379'"
+        expected_output: "6379"
+        on_fail: step-3
+      - id: step-3
+        description: Display Valkey service status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Valkey container to restore connectivity
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify connectivity after restart
+        type: check
+        command: "docker exec {container_name} valkey-cli ping"
+        expected_output: "PONG"
+    resolution: |
+      Valkey was not listening on port 6379 or the container was not properly configured. The container has been restarted to restore normal operation. If the issue persists, verify that port 6379 is correctly mapped in your Docker Compose configuration and that no other service is occupying the port on the host.
+
+  - id: memory-limit-exceeded
+    name: Valkey memory limit exceeded or slow performance
+    symptoms:
+      - "OOM command not allowed when used memory > maxmemory"
+      - "Eviction failure"
+      - "Out of memory"
+      - "Sudden performance degradation"
+      - "Valkey keys being randomly deleted"
+    trigger_conditions:
+      - log_pattern: "maxmemory.*reached"
+      - log_pattern: "oom"
+    steps:
+      - id: step-1
+        description: Check current memory usage and maxmemory setting
+        type: check
+        command: "docker exec {container_name} valkey-cli info memory | grep -E 'used_memory|maxmemory'"
+        expected_output: ""
+      - id: step-2
+        description: Display memory statistics
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check current eviction policy
+        type: check
+        command: "docker exec {container_name} valkey-cli CONFIG GET maxmemory-policy"
+        expected_output: ""
+      - id: step-4
+        description: Explain memory management options
+        type: inform
+        command: ""
+      - id: step-5
+        description: Apply recommended memory limit and eviction policy
+        type: fix
+        command: "docker exec {container_name} valkey-cli CONFIG SET maxmemory {memory_limit} && docker exec {container_name} valkey-cli CONFIG SET maxmemory-policy allkeys-lru"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Persist configuration changes
+        type: fix
+        command: "docker exec {container_name} valkey-cli BGSAVE"
+        requires_approval: true
+    resolution: |
+      Valkey memory limit has been adjusted and eviction policy set to allkeys-lru (Least Recently Used). This allows Valkey to automatically remove least-recently-used keys when memory is exceeded, preventing out-of-memory errors. Consider reviewing your application's caching strategy and data retention needs. Monitor memory usage over time to determine if a larger limit is required.
+
+  - id: aof-corruption
+    name: AOF (Append-Only File) corruption or rewrite failure
+    symptoms:
+      - "Bad file format reading the append only file"
+      - "Failed to rewrite AOF"
+      - "Unfinished MULTI/EXEC in AOF"
+      - "Valkey refusing to start with AOF enabled"
+      - "Disk full during AOF rewrite"
+    trigger_conditions:
+      - log_pattern: "aof.*corrupt"
+      - log_pattern: "bad file format"
+      - log_pattern: "appendonly"
+    steps:
+      - id: step-1
+        description: Check if AOF is enabled and its status
+        type: check
+        command: "docker exec {container_name} valkey-cli CONFIG GET appendonly"
+        expected_output: ""
+      - id: step-2
+        description: Verify AOF file size on disk
+        type: check
+        command: "docker exec {container_name} ls -lh /data/appendonly.aof 2>/dev/null || echo 'No AOF file found'"
+        expected_output: ""
+      - id: step-3
+        description: Display current AOF status and statistics
+        type: inform
+        command: ""
+      - id: step-4
+        description: Attempt to repair corrupt AOF file
+        type: fix
+        command: "docker exec {container_name} valkey-check-aof --fix /data/appendonly.aof"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Valkey with repaired AOF file
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Valkey started successfully with AOF
+        type: check
+        command: "sleep 5 && docker exec {container_name} valkey-cli ping"
+        expected_output: "PONG"
+    resolution: |
+      The AOF (Append-Only File) has been repaired and Valkey restarted. The AOF provides durability by logging all write commands. If corruption occurs frequently, consider switching to RDB (snapshot) persistence, which is more robust to disk corruption. Ensure adequate disk space is available for AOF rewrites, as they require temporary disk space equal to the current AOF size.
+
+  - id: auth-failure
+    name: Authentication failure or requirepass not working
+    symptoms:
+      - "WRONGPASS invalid username-password pair"
+      - "Client authentication required"
+      - "Cannot authenticate to Valkey"
+      - "ERR invalid password"
+    trigger_conditions:
+      - log_pattern: "WRONGPASS"
+      - log_pattern: "AUTH.*failed"
+      - log_pattern: "invalid.*password"
+    steps:
+      - id: step-1
+        description: Check if authentication is enabled
+        type: check
+        command: "docker exec {container_name} valkey-cli CONFIG GET requirepass"
+        expected_output: ""
+      - id: step-2
+        description: Display current auth configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Attempt to authenticate with provided password
+        type: check
+        command: "docker exec {container_name} valkey-cli -a '{valkey_password}' ping"
+        expected_output: "PONG"
+        on_fail: step-4
+      - id: step-4
+        description: Reset requirepass configuration
+        type: fix
+        command: "docker exec {container_name} valkey-cli CONFIG SET requirepass '{valkey_password}'"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify authentication works after reconfiguration
+        type: check
+        command: "docker exec {container_name} valkey-cli -a '{valkey_password}' ping"
+        expected_output: "PONG"
+    resolution: |
+      Valkey authentication has been reconfigured with the provided password. All clients connecting to Valkey now require the password to authenticate. Update your application's Valkey connection strings to include the password in the URL (valkey://:password@host:6379) or as a separate auth parameter. Valkey maintains Redis protocol compatibility.
+
+default_config:
+  compose_template: |
+    services:
+      valkey:
+        image: valkey/valkey:7-alpine
+        container_name: valkey
+        restart: unless-stopped
+        command: valkey-server --appendonly yes --appendfsync everysec --maxmemory ${VALKEY_MAXMEMORY:-256mb} --maxmemory-policy allkeys-lru
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "${VALKEY_PORT:-6379}:6379"
+        healthcheck:
+          test: ["CMD", "valkey-cli", "ping"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+  required_vars:
+    - name: VALKEY_MAXMEMORY
+      description: Maximum memory Valkey can use (e.g., 256mb, 1gb)
+      default: "256mb"
+    - name: VALKEY_PORT
+      description: Port to expose Valkey on host
+      default: "6379"
+    - name: DATA_PATH
+      description: Host path for Valkey persistence data
+      default: "./data"
+    - name: TZ
+      description: Timezone for container
+      default: "UTC"
+  known_mounts:
+    - container_path: /data
+      purpose: Valkey data persistence (RDB snapshots and AOF log)
+      recommended_permissions: "755"
+      owner: "999:999"
+
+notes: |
+  Valkey is a Redis fork maintained by the Linux Foundation as an open-source alternative to Redis. It is a drop-in replacement for Redis—existing Redis clients and applications work with Valkey without modification. Valkey maintains full Redis protocol compatibility while offering active community development and governance.
+
+  Key differences from Redis:
+  - Community-driven maintenance and roadmap
+  - Active feature development and performance improvements
+  - Licensed under BSD (same as Redis)
+  - Full protocol compatibility with Redis clients
+
+  Persistence modes (same as Redis):
+  - RDB (snapshot): Periodic point-in-time snapshots; fast recovery, smaller files, risk of data loss between snapshots
+  - AOF (append-only file): Logs every command; more durable, larger files, slower writes
+  - Both: Combines RDB and AOF for durability and recovery speed
+
+  The default compose template uses AOF with fsync on every second (appendfsync everysec) for a good balance between performance and durability.
+
+  Memory management:
+  - Set maxmemory to prevent unbounded growth
+  - Configure maxmemory-policy to control eviction when memory is exceeded (allkeys-lru is common)
+  - Monitor memory usage with `valkey-cli info memory`
+
+  Password protection:
+  - Set requirepass to require authentication
+  - Always use strong passwords in production
+  - Connect with: valkey-cli -a <password> or valkey://:password@host:port
+
+  Compatibility:
+  - Existing Redis clients work with Valkey without code changes
+  - ORMs and libraries supporting Redis (redis-py, ioredis, etc.) work with Valkey
+  - Use `valkey-cli` instead of `redis-cli` (or install redis-cli with --with-valkey compatibility)
+
+  Clustering and replication:
+  - For high availability, use Valkey Sentinel or Valkey Cluster (beyond basic setup)
+  - Replication can be configured with --replicaof (source/replica model)
+
+  Performance tuning:
+  - Use pipelining for bulk operations
+  - Configure timeout settings appropriately
+  - Monitor slow queries with SLOWLOG

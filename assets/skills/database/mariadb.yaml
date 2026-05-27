@@ -1,0 +1,220 @@
+id: mariadb
+name: MariaDB
+version: "1.0"
+container_match:
+  image_patterns:
+    - "mariadb"
+    - "linuxserver/mariadb"
+  port_hints: [3306]
+category: database
+description: Open-source relational database, MySQL-compatible fork, widely used in self-hosted stacks
+docs_url: https://mariadb.com/docs/
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount (LinuxServer variant)
+    symptoms:
+      - "permission denied"
+      - "cannot create directory"
+      - "EACCES"
+      - "directory does not exist"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of the host /config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current /config ownership for review
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown /config to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      LinuxServer's mariadb image runs as PUID/PGID (default 1000:1000). If the
+      host path was created by root or a different user, the container cannot
+      write. The fix recursively changes ownership to match the container's user.
+
+  - id: root-password-not-set
+    name: Root password not set or container keeps restarting
+    symptoms:
+      - "MYSQL_ROOT_PASSWORD"
+      - "restart loop"
+      - "exited with code 1"
+      - "variable is empty"
+    trigger_conditions:
+      - log_pattern: "MYSQL_ROOT_PASSWORD"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Verify MYSQL_ROOT_PASSWORD environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i MYSQL_ROOT_PASSWORD"
+        expected_output: "MYSQL_ROOT_PASSWORD"
+        on_fail: step-2
+      - id: step-2
+        description: MYSQL_ROOT_PASSWORD is required and must not be empty
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set a strong root password and recreate the container
+        type: fix
+        command: "docker compose up -d --force-recreate"
+        requires_approval: true
+    resolution: |
+      MariaDB requires MYSQL_ROOT_PASSWORD to be set at first run. An empty
+      value causes initialization to fail. Set a strong password in your
+      docker-compose.yml or .env file, then recreate the container.
+
+  - id: database-dir-ownership
+    name: Database directory has wrong ownership, preventing schema initialization
+    symptoms:
+      - "Cannot initialize database"
+      - "/var/lib/mysql permission denied"
+      - "crash loop"
+    trigger_conditions:
+      - log_pattern: "Cannot initialize"
+      - log_pattern: "/var/lib/mysql"
+    steps:
+      - id: step-1
+        description: Check current ownership of /var/lib/mysql inside the container
+        type: check
+        command: "docker exec {container_name} stat /var/lib/mysql 2>&1 | head -5"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Reset the database directory and let MariaDB reinitialize
+        type: confirm
+        command: ""
+      - id: step-3
+        description: Stop container and remove the database volume
+        type: fix
+        command: "docker compose down && docker volume rm {volume_name} || true"
+        requires_approval: true
+      - id: step-4
+        description: Recreate container with fresh database
+        type: fix
+        command: "docker compose up -d"
+        requires_approval: true
+    resolution: |
+      If the host path for /var/lib/mysql has incorrect ownership or corrupted
+      files, MariaDB's initialization script will fail. The fix removes the
+      volume and lets the container reinitialize on next startup. Ensure
+      backups exist before doing this.
+
+  - id: port-conflict-3306
+    name: Port 3306 already in use, container cannot bind
+    symptoms:
+      - "Address already in use"
+      - "error binding port"
+      - "port 3306"
+    trigger_conditions:
+      - log_pattern: "Address already in use"
+      - log_pattern: "binding port"
+    steps:
+      - id: step-1
+        description: Check what is listening on port 3306
+        type: check
+        command: "ss -tlnp | grep 3306"
+        expected_output: ""
+      - id: step-2
+        description: Show network bindings for diagnosis
+        type: inform
+        command: ""
+      - id: step-3
+        description: Choose a different host port or stop the conflicting service
+        type: fix
+        command: "echo 'Update the host port in docker-compose.yml to an available port (e.g., 3307:3306)'"
+        requires_approval: true
+    resolution: |
+      Port 3306 is already bound by another service (another database, proxy, etc).
+      Either stop that service, use a different host port mapping (e.g., 3307:3306),
+      or remove the port binding if only local access is needed.
+
+default_config:
+  compose_template: |
+    services:
+      mariadb:
+        image: mariadb:latest
+        container_name: mariadb
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+          MYSQL_DATABASE: ${MYSQL_DATABASE:-app}
+          MYSQL_USER: ${MYSQL_USER:-appuser}
+          MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${MYSQL_DATA_PATH:-./data}:/var/lib/mysql
+          - ${MYSQL_CONFIG_PATH:-./config}:/config
+        ports:
+          - "${MYSQL_HOST_PORT:-3306}:3306"
+  required_vars:
+    - name: MYSQL_ROOT_PASSWORD
+      description: Root password for MariaDB (required, non-empty)
+      default: ""
+    - name: MYSQL_USER
+      description: Username for application database user
+      default: "appuser"
+    - name: MYSQL_PASSWORD
+      description: Password for application database user
+      default: ""
+    - name: MYSQL_DATABASE
+      description: Initial database to create
+      default: "app"
+    - name: MYSQL_DATA_PATH
+      description: Host path for /var/lib/mysql (persistent data)
+      default: "./data"
+    - name: MYSQL_CONFIG_PATH
+      description: Host path for /config (configuration, only for LinuxServer image)
+      default: "./config"
+    - name: MYSQL_HOST_PORT
+      description: Host port to expose MariaDB on
+      default: "3306"
+    - name: TZ
+      description: Timezone for log timestamps
+      default: "UTC"
+  known_mounts:
+    - container_path: /var/lib/mysql
+      purpose: MariaDB data directory, databases, tablespace
+      recommended_permissions: "755"
+      owner: "mysql:mysql"
+    - container_path: /config
+      purpose: Configuration files (LinuxServer variant only)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Two image variants:
+    - Official `mariadb`: runs as `mysql` UID (varies by version, typically 999).
+    - LinuxServer `linuxserver/mariadb`: runs as PUID/PGID (default 1000:1000).
+
+  First-run initialization:
+    - MYSQL_ROOT_PASSWORD must be set before the container starts for the first time.
+    - MYSQL_DATABASE and MYSQL_USER are created automatically during init.
+    - To reinitialize, remove the host `/var/lib/mysql` path and restart.
+
+  LinuxServer-specific (/config):
+    - Stores MariaDB configuration (my.cnf, custom settings, logs).
+    - Host path must be owned by PUID:PGID or the container cannot write.
+    - Not required for the official `mariadb` image.
+
+  Common gotchas:
+    - Reusing an existing `/var/lib/mysql` from another host: ensure the
+      contained binary version matches (MariaDB 10.5 data is not compatible
+      with 10.11 without migration).
+    - Port binding: 3306 is MariaDB's default; conflicts with other databases.
+      Use a different host port if running multiple database containers.

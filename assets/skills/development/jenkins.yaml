@@ -1,0 +1,220 @@
+id: jenkins
+name: Jenkins Automation Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "jenkins/jenkins"
+    - "jenkins:latest"
+  port_hints: [8080, 50000]
+category: development
+description: Open-source automation server for building, testing, and deploying applications
+docs_url: https://hub.docker.com/r/jenkins/jenkins
+
+common_issues:
+  - id: permission-denied-jenkins-home
+    name: Permission denied on /var/jenkins_home mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to /var/jenkins_home"
+      - "Failed to write workspace"
+      - "ERROR: Unable to create workspace"
+    trigger_conditions:
+      - log_pattern: "permission denied.*jenkins_home"
+      - log_pattern: "EACCES.*jenkins"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host jenkins_home path
+        type: check
+        command: "stat {jenkins_home_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the jenkins_home path to jenkins user (UID 1000)
+        type: fix
+        command: "chown -R 1000:1000 {jenkins_home_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {jenkins_home_path} | grep Uid"
+        expected_output: "Uid: 1000"
+    resolution: |
+      The /var/jenkins_home directory ownership was mismatched with Jenkins' running UID/GID. Jenkins runs as UID 1000 (jenkins user) inside the container. The fix changed host ownership to match. Jenkins should now be able to write workspaces and job data.
+
+  - id: initial-admin-password-missing
+    name: Initial admin password not found
+    symptoms:
+      - "Cannot access Jenkins at http://localhost:8080"
+      - "Locked behind initial setup wizard"
+      - "Forgot initial admin password"
+      - "Setup page shows password input"
+    trigger_conditions:
+      - log_pattern: "Jenkins initial setup is required"
+      - log_pattern: "Please use the following password"
+    steps:
+      - id: step-1
+        description: Check for initial password in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'initial admin password' | head -1"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Check for initial password in secrets file
+        type: check
+        command: "docker exec {container_name} cat /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display alternative password lookup method
+        type: inform
+        command: ""
+      - id: step-4
+        description: If password file was found, display it
+        type: check
+        command: "cat {jenkins_home_path}/secrets/initialAdminPassword"
+        expected_output: ""
+    resolution: |
+      Jenkins' initial admin password is stored in /var/jenkins_home/secrets/initialAdminPassword (on the host filesystem). Use this password to complete the initial setup wizard. You can also retrieve it from container logs with 'docker logs {container_name}'. After first login, change the password to a secure value in Jenkins > Manage Jenkins > Security > Users.
+
+  - id: high-heap-memory-crash
+    name: Jenkins crashes due to out-of-memory
+    symptoms:
+      - "Container exits with code 1 or 137"
+      - "OutOfMemoryError in logs"
+      - "Jenkins becomes unresponsive"
+      - "Heap space exhausted"
+    trigger_conditions:
+      - log_pattern: "OutOfMemoryError"
+      - exit_code: 137
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check current heap memory allocation
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i java"
+        expected_output: ""
+      - id: step-2
+        description: Display current Java memory settings
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check container memory limits
+        type: check
+        command: "docker inspect {container_name} --format='Memory: {{.HostConfig.Memory}} | MemorySwap: {{.HostConfig.MemorySwap}}'"
+        expected_output: ""
+      - id: step-4
+        description: Display memory increase recommendation
+        type: inform
+        command: ""
+      - id: step-5
+        description: Increase Java heap memory in docker-compose or container environment
+        type: fix
+        command: "export JAVA_OPTS='-Xmx2g -Xms512m'; docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor memory usage after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      Jenkins ran out of Java heap memory. The heap size has been increased to 2GB (adjust based on your host available RAM). For optimal performance, allocate at least 1-2GB of heap and ensure the Docker container has sufficient memory limits (recommend 4GB+). Add to docker-compose: environment variable JAVA_OPTS='-Xmx2g -Xms512m' and memory limit in deploy section.
+
+  - id: agents-cannot-connect
+    name: Jenkins agents cannot connect to controller
+    symptoms:
+      - "Agent nodes show offline"
+      - "Connection refused on port 50000"
+      - "Agent cannot reach Jenkins controller"
+      - "JNLP connection timeout"
+    trigger_conditions:
+      - log_pattern: "agent.*offline"
+      - log_pattern: "connection.*refused.*50000"
+    steps:
+      - id: step-1
+        description: Verify controller is listening on port 50000 for agent connections
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 50000"
+        expected_output: "LISTEN.*50000"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 50000 is published in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '50000'"
+        expected_output: "50000"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping status and agent connection requirements
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check agent logs for connection errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'agent\\|connection' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Restart Jenkins to force agent discovery
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait and verify agent connection status
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'agent.*connected' | tail -5"
+    resolution: |
+      Jenkins agents connect to the controller via JNLP on port 50000. The container has been restarted. Ensure port 50000 is exposed and reachable by agents (either on the same Docker network, or with port forwarding for remote agents). In Jenkins UI, go to Manage Jenkins > Manage Nodes and Clouds > New Node to register agents. Verify the Jenkins URL configured in agent settings matches your actual host/IP.
+
+default_config:
+  compose_template: |
+    services:
+      jenkins:
+        image: jenkins/jenkins:lts
+        container_name: jenkins
+        restart: unless-stopped
+        environment:
+          JENKINS_OPTS: "-Xmx1g -Xms512m"
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${JENKINS_HOME:-./jenkins_home}:/var/jenkins_home
+          - /var/run/docker.sock:/var/run/docker.sock
+        ports:
+          - "8080:8080"
+          - "50000:50000"
+  required_vars:
+    - name: JENKINS_HOME
+      description: Host path for /var/jenkins_home (jobs, plugins, configuration)
+      default: "./jenkins_home"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /var/jenkins_home
+      purpose: Jenkins configuration, job definitions, plugins, and build workspaces
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Jenkins is a widely-used automation server for CI/CD pipelines. The official jenkins/jenkins image runs as UID 1000 (jenkins user).
+
+  Initial setup: On first startup, Jenkins generates an initial admin password in /var/jenkins_home/secrets/initialAdminPassword. Use this to complete the setup wizard and create your first admin account.
+
+  Memory tuning: Jenkins should have at least 1GB of heap memory. Set JAVA_OPTS environment variable in docker-compose for larger deployments. Monitor heap usage in Manage Jenkins > System Information > JVM Heap.
+
+  Agent connectivity: Port 50000 must be exposed and reachable for agents to connect via JNLP. For remote agents, ensure DNS or IP allows agents to reach the controller URL.
+
+  Docker-in-Docker: The compose template mounts /var/run/docker.sock for build containers that need Docker access. Ensure the jenkins user (UID 1000) is in the docker group on the host.
+
+  Plugins: Managed via Jenkins UI. Common useful plugins: Blue Ocean, Pipeline, Email Extension, Slack, GitLab, GitHub.
+
+  Common gotchas:
+  - Permission denied on /var/jenkins_home: Check UID/GID match (must be 1000:1000).
+  - Forgot initial admin password: Retrieve from /var/jenkins_home/secrets/initialAdminPassword.
+  - Agents offline: Verify port 50000 is open and controller URL is reachable.
+  - High memory usage: Increase heap size in JAVA_OPTS and Docker memory limits.
+  - Plugin conflicts: Check Jenkins logs and plugin dependencies in Manage Plugins.

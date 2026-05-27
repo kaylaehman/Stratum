@@ -1,0 +1,255 @@
+id: code-server
+name: Code-Server (VS Code in Browser)
+version: "1.0"
+container_match:
+  image_patterns:
+    - "codercom/code-server"
+    - "linuxserver/code-server"
+  port_hints: [8443]
+category: development
+description: VS Code running in a browser, accessible remotely for web-based development
+docs_url: https://hub.docker.com/r/codercom/code-server
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to /config"
+      - "Failed to create workspace"
+      - "Settings not saving"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to Code-Server user (UID 1000)
+        type: fix
+        command: "chown -R 1000:1000 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: 1000"
+    resolution: |
+      The /config directory ownership was mismatched with Code-Server's running UID/GID. Code-Server runs as UID 1000 inside the container. The fix changed host ownership to match. Code-Server should now be able to save settings, extensions, and workspace configuration.
+
+  - id: authentication-failed
+    name: Cannot authenticate or password not working
+    symptoms:
+      - "Authentication failed"
+      - "Invalid password"
+      - "401 Unauthorized"
+      - "Cannot access VS Code"
+      - "Login page loops"
+    trigger_conditions:
+      - log_pattern: "authentication.*failed"
+      - log_pattern: "unauthorized"
+    steps:
+      - id: step-1
+        description: Check if password authentication is enabled
+        type: check
+        command: "docker exec {container_name} cat /config/.coder/config.yaml 2>/dev/null | grep -i 'password\\|auth' | head -5"
+        expected_output: ""
+      - id: step-2
+        description: Display authentication configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if PASSWORD environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}} {{end}}' | grep -i 'PASSWORD\\|HASHED'"
+        expected_output: ""
+      - id: step-4
+        description: Display password setup instructions
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Code-Server to apply authentication changes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait and verify authentication is working
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'listening\\|started' | tail -3"
+    resolution: |
+      Code-Server authentication has been reconfigured. Ensure the PASSWORD or HASHED_PASSWORD environment variable is set in docker-compose. If using HASHED_PASSWORD, generate a hash via 'docker exec {container_name} code-server --hashed-password-file /tmp/pass.txt'. For password authentication, set PASSWORD=<plaintext> in the compose environment. The container has been restarted to apply changes.
+
+  - id: https-certificate-error
+    name: HTTPS certificate error or insecure connection warning
+    symptoms:
+      - "SSL_ERROR_INVALID_REDIRECT"
+      - "Certificate verification failed"
+      - "ERR_SSL_PROTOCOL_ERROR"
+      - "Browser shows security warning"
+      - "Cannot access over HTTPS"
+    trigger_conditions:
+      - log_pattern: "certificate.*error"
+      - log_pattern: "ssl.*failed"
+    steps:
+      - id: step-1
+        description: Check if Code-Server is listening on port 8443 inside container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8443"
+        expected_output: "LISTEN.*8443"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 8443 is published in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '8443'"
+        expected_output: "8443"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Code-Server logs for certificate errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'certificate\\|ssl\\|https' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Verify PROXY_DOMAIN is set correctly if using reverse proxy
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}} {{end}}' | grep -i 'PROXY'"
+        expected_output: ""
+      - id: step-6
+        description: Restart Code-Server to reinitialize HTTPS
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify HTTPS is working
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'listening.*8443\\|https' | tail -3"
+    resolution: |
+      Code-Server HTTPS connection has been reinitialized. The container generates a self-signed certificate on startup at /config/certs/. If using a reverse proxy (nginx, Traefik), set PROXY_DOMAIN environment variable to your actual domain. For production, terminate TLS at the proxy and forward to Code-Server internally. If certificate errors persist, delete /config/certs and restart to regenerate.
+
+  - id: high-memory-or-cpu
+    name: High memory or CPU usage when editing or running tasks
+    symptoms:
+      - "Container memory usage very high"
+      - "CPU usage above 50% at idle"
+      - "Editing becomes slow or laggy"
+      - "Extension processes consume CPU"
+    trigger_conditions:
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory and CPU usage
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Display resource usage and limits
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check which processes are consuming the most memory inside container
+        type: check
+        command: "docker exec {container_name} ps aux --sort=-%mem | head -10"
+        expected_output: ""
+      - id: step-4
+        description: Display memory optimization recommendations
+        type: inform
+        command: ""
+      - id: step-5
+        description: Increase Docker container memory limits
+        type: fix
+        command: "docker update --memory 2g --memory-swap 2g {container_name} && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor memory after restart
+        type: check
+        command: "sleep 15 && docker stats {container_name} --no-stream"
+    resolution: |
+      Code-Server memory limits have been increased to 2GB. VS Code's extension system can consume significant memory depending on installed extensions. Consider disabling unused extensions, increasing swap space, or allocating more memory to the container. Monitor resource usage after restart. If memory issues persist, check installed extensions via the VS Code UI and uninstall any that are memory-heavy.
+
+default_config:
+  compose_template: |
+    services:
+      code-server:
+        image: codercom/code-server:latest
+        container_name: code-server
+        restart: unless-stopped
+        environment:
+          PASSWORD: ${PASSWORD:-changeme}
+          SUDO_PASSWORD: ${SUDO_PASSWORD:-changeme}
+          PROXY_DOMAIN: ${PROXY_DOMAIN:-localhost}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/home/coder/.config
+          - ${WORKSPACE_PATH:-./workspace}:/home/coder/project
+        ports:
+          - "8443:8443"
+  required_vars:
+    - name: PASSWORD
+      description: Login password for Code-Server
+      default: "changeme"
+    - name: SUDO_PASSWORD
+      description: Sudo password for terminal commands
+      default: "changeme"
+    - name: PROXY_DOMAIN
+      description: Domain name if using reverse proxy (leave as localhost if direct access)
+      default: "localhost"
+    - name: CONFIG_PATH
+      description: Host path for /home/coder/.config (VS Code settings, extensions, keybindings)
+      default: "./config"
+    - name: WORKSPACE_PATH
+      description: Host path for /home/coder/project (workspace and source code)
+      default: "./workspace"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /home/coder/.config
+      purpose: VS Code settings, user extensions, keybindings, snippets
+      recommended_permissions: "755"
+      owner: "1000:1000"
+    - container_path: /home/coder/project
+      purpose: Workspace root and source code
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Code-Server is VS Code running in a browser. The official codercom/code-server image runs as UID 1000 (coder user).
+
+  Authentication: Set PASSWORD (plaintext) or HASHED_PASSWORD (bcrypt hash) environment variable. Without either, the UI is still accessible but localhost-only with no password. For production, always set a strong password or use HASHED_PASSWORD.
+
+  HTTPS: Code-Server generates a self-signed certificate at startup (/home/coder/.config/certs/). Browsers will show security warnings for self-signed certs. For production, use a reverse proxy (nginx, Traefik) to terminate TLS with a valid certificate and forward traffic to Code-Server.
+
+  Reverse proxy: If using a reverse proxy, set PROXY_DOMAIN to your actual domain name (e.g., code.example.com). This tells Code-Server to expect requests from that domain and prevents CORS/redirect issues.
+
+  Extensions: VS Code extensions are stored in /home/coder/.config/extensions/. Extensions consume memory — consider pinning the image version and pre-loading extensions if using code-server across multiple instances.
+
+  Workspace: The /home/coder/project directory is the default workspace root. Mount a large volume here and store all project files. The directory can be any location on the host.
+
+  Terminal access: The integrated terminal in VS Code runs as the coder user (UID 1000) inside the container. To run commands with sudo, the SUDO_PASSWORD must be set. For privileged operations, consider using a reverse-proxy/Docker socket mount pattern (not recommended for security).
+
+  Resource usage: VS Code in a browser uses more memory than desktop VS Code — allocate at least 1.5GB memory. Memory usage scales with number and size of extensions.
+
+  File permissions: Ensure workspace path is readable/writable by UID 1000 (coder user). If checking out repositories owned by root, adjust ownership with chown -R 1000:1000 {workspace_path}.
+
+  Common gotchas:
+  - Permission denied on /config: Check UID/GID match (must be 1000:1000).
+  - Cannot login: Verify PASSWORD or HASHED_PASSWORD environment variable is set.
+  - HTTPS certificate warnings: Normal for self-signed certs; use a reverse proxy for production.
+  - Slow editing: Check installed extensions and memory limits.
+  - Cannot access from remote: Verify PROXY_DOMAIN is set to your actual domain if behind a proxy.

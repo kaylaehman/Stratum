@@ -1,0 +1,222 @@
+id: registry
+name: Docker Registry
+version: "1.0"
+container_match:
+  image_patterns:
+    - "registry"
+    - "registry:latest"
+  port_hints: [5000]
+category: development
+description: Self-hosted Docker image registry for private image storage and distribution
+docs_url: https://hub.docker.com/_/registry
+
+common_issues:
+  - id: auth-htpasswd-misconfigured
+    name: Authentication failure with htpasswd
+    symptoms:
+      - "401 Unauthorized"
+      - "authentication required"
+      - "htpasswd file not found"
+      - "Failed to authenticate to registry"
+    trigger_conditions:
+      - log_pattern: "401.*unauthorized"
+      - log_pattern: "htpasswd"
+    steps:
+      - id: step-1
+        description: Check if htpasswd file exists on host
+        type: check
+        command: "test -f {auth_path}/htpasswd && echo 'File exists' || echo 'File missing'"
+        expected_output: "File exists"
+        on_fail: step-2
+      - id: step-2
+        description: Display authentication configuration status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify htpasswd file has correct permissions
+        type: check
+        command: "stat {auth_path}/htpasswd"
+        expected_output: "Access:"
+        on_fail: step-4
+      - id: step-4
+        description: Set correct permissions on htpasswd file
+        type: fix
+        command: "chmod 644 {auth_path}/htpasswd && chown 0:0 {auth_path}/htpasswd"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart registry to apply authentication changes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify registry is accepting authentication requests
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth' | tail -3"
+    resolution: |
+      The htpasswd authentication file was either missing or had incorrect permissions. Registry has been restarted to reload the authentication configuration. Push/pull operations should now authenticate successfully against the registry using credentials defined in the htpasswd file.
+
+  - id: tls-certificate-missing
+    name: TLS/HTTPS configuration missing or invalid
+    symptoms:
+      - "x509: certificate signed by unknown authority"
+      - "Client sent an HTTP request to an HTTPS server"
+      - "Cannot connect to HTTPS registry"
+      - "connection refused"
+    trigger_conditions:
+      - log_pattern: "x509"
+      - log_pattern: "certificate"
+    steps:
+      - id: step-1
+        description: Verify TLS certificate files exist
+        type: check
+        command: "test -f {cert_path}/cert.pem && test -f {cert_path}/key.pem && echo 'Both files exist' || echo 'Files missing'"
+        expected_output: "Both files exist"
+        on_fail: step-2
+      - id: step-2
+        description: Inform user that TLS is not configured
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check registry configuration for TLS settings
+        type: check
+        command: "cat {config_path}/config.yml | grep -A 5 'tls:' || echo 'No TLS section found'"
+        expected_output: ""
+      - id: step-4
+        description: Display TLS configuration recommendation
+        type: inform
+        command: ""
+      - id: step-5
+        description: Create certificate and key directories if missing
+        type: fix
+        command: "mkdir -p {cert_path} && chmod 700 {cert_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart registry with TLS configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify HTTPS is listening on port 5000
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 5000"
+        expected_output: "LISTEN"
+    resolution: |
+      TLS/HTTPS certificate files were not properly configured. Registry requires valid certificates to serve HTTPS connections securely. Add certificate paths to the registry config under `tls` section with `certfile` and `keyfile` pointing to cert.pem and key.pem. For self-signed certificates, clients must trust the CA or use `--insecure-skip-verify`.
+
+  - id: storage-permission-denied
+    name: Permission denied writing to storage backend
+    symptoms:
+      - "permission denied"
+      - "cannot write to storage"
+      - "failed to put blob"
+      - "mkdir permission denied"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "storage.*failed"
+    steps:
+      - id: step-1
+        description: Check ownership of registry storage directory
+        type: check
+        command: "stat {storage_path}"
+        expected_output: "Access:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current storage directory permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Fix storage directory ownership (ensure container can write)
+        type: fix
+        command: "chown -R 0:0 {storage_path} && chmod -R 755 {storage_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify storage directory is now writable
+        type: check
+        command: "touch {storage_path}/.write-test && rm {storage_path}/.write-test && echo 'Directory is writable'"
+        expected_output: "writable"
+        on_fail: step-5
+      - id: step-5
+        description: Restart registry to clear any cached errors
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check registry logs for storage confirmation
+        type: check
+        command: "docker logs {container_name} | tail -5"
+    resolution: |
+      The registry storage backend directory had incorrect permissions, preventing the container from writing image blobs. Ownership and permissions have been corrected to allow the registry process full read/write access. Image push/pull operations should now succeed. If using a custom storage driver (S3, Azure, GCS), verify credentials and bucket permissions are correctly set in the registry config.
+
+default_config:
+  compose_template: |
+    services:
+      registry:
+        image: registry:latest
+        container_name: docker-registry
+        restart: unless-stopped
+        environment:
+          REGISTRY_HTTP_TLS_CERTIFICATE: /certs/cert.pem
+          REGISTRY_HTTP_TLS_KEY: /certs/key.pem
+          REGISTRY_AUTH: htpasswd
+          REGISTRY_AUTH_HTPASSWD_REALM: Registry Realm
+          REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+          REGISTRY_STORAGE_DELETE_ENABLED: "true"
+        volumes:
+          - ${REGISTRY_STORAGE_PATH:-./registry-data}:/var/lib/registry
+          - ${AUTH_PATH:-./auth}:/auth
+          - ${CERTS_PATH:-./certs}:/certs
+        ports:
+          - "5000:5000/tcp"
+  required_vars:
+    - name: REGISTRY_STORAGE_PATH
+      description: Host path for registry image storage
+      default: "./registry-data"
+    - name: AUTH_PATH
+      description: Host path for htpasswd authentication file
+      default: "./auth"
+    - name: CERTS_PATH
+      description: Host path for TLS certificates and keys
+      default: "./certs"
+  known_mounts:
+    - container_path: /var/lib/registry
+      purpose: Docker image blob storage and metadata
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /auth
+      description: htpasswd credentials file for registry authentication
+      recommended_permissions: "700"
+      owner: "root:root"
+    - container_path: /certs
+      purpose: TLS certificate and key files for HTTPS
+      recommended_permissions: "700"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Docker Registry is a simple stateless server for storing and serving Docker images. It does not provide a web UI for browsing images — consider using Portainer or Docker Registry UI for management interfaces.
+
+  Authentication: The default config uses htpasswd for simple username/password authentication. Generate htpasswd file on the host before starting:
+  ```
+  docker run --rm -v ./auth:/auth httpd:2.4 htpasswd -Bc ./auth/htpasswd username
+  ```
+
+  TLS/HTTPS: Registry requires valid TLS certificates for production. Self-signed certificates must be trusted by Docker clients via `insecure-registries` in daemon.json or by installing the CA cert on client hosts.
+
+  Storage drivers: By default, registry stores images on local filesystem. For distributed deployments, configure alternative storage backends (S3, Azure Blob, Google Cloud Storage) via `REGISTRY_STORAGE_DRIVER_` environment variables.
+
+  Deletion: Set `REGISTRY_STORAGE_DELETE_ENABLED: "true"` to allow image deletion via API. Without this, deleted images remain in storage and consume disk space.
+
+  Cleanup: Use the garbage collection endpoint or scheduled tasks to remove unreferenced blobs:
+  ```
+  docker exec <registry> registry garbage-collect /etc/docker/registry/config.yml
+  ```
+
+  Image size monitoring: Track storage path disk usage to prevent disk fullness. Consider implementing retention policies to automatically delete old images.

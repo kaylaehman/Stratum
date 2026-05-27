@@ -1,0 +1,264 @@
+id: gitea
+name: Gitea Git Service
+version: "1.0"
+container_match:
+  image_patterns:
+    - "gitea/gitea"
+  port_hints: [3000, 22]
+category: development
+description: Lightweight self-hosted Git service with web UI and SSH access
+docs_url: https://hub.docker.com/r/gitea/gitea
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /data mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot create repository"
+      - "Failed to write to data directory"
+      - "Error creating repository"
+    trigger_conditions:
+      - log_pattern: "permission denied.*data"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host data path
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the data path to Gitea user (UID 1000)
+        type: fix
+        command: "chown -R 1000:1000 {data_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {data_path} | grep Uid"
+        expected_output: "Uid: 1000"
+    resolution: |
+      The /data directory ownership was mismatched with Gitea's running UID/GID. Gitea runs as UID 1000 inside the container. The fix changed host ownership to match. Gitea should now be able to create and manage repositories.
+
+  - id: ssh-port-conflict
+    name: SSH port 22 binding fails or conflicts
+    symptoms:
+      - "SSH port 22 bind failed"
+      - "Address already in use"
+      - "Cannot access Gitea via SSH"
+      - "SSH connection refused on port 22"
+    trigger_conditions:
+      - log_pattern: "port.*22.*already in use"
+      - log_pattern: "bind.*failed"
+    steps:
+      - id: step-1
+        description: Check what is currently listening on port 22
+        type: check
+        command: "ss -tlnp | grep 22"
+        expected_output: ""
+      - id: step-2
+        description: Display current service listening on port 22
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Gitea container port mapping in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 2 '22/tcp'"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display recommendation to remap SSH port
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Gitea container to apply new port mapping
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify new SSH port mapping
+        type: check
+        command: "docker inspect {container_name} --format='{{range $p, $conf := .NetworkSettings.Ports}}{{$p}} -> {{(index $conf 0).HostPort}} {{end}}'"
+    resolution: |
+      Port 22 is already in use by another service (likely the host SSH daemon). Remap Gitea's SSH to a different port in docker-compose, e.g., 2222:22, then configure SSH clients with 'ssh -p 2222 git@localhost'. Update Gitea Settings → SSH Settings with the new port for public repository clone URLs.
+
+  - id: database-connection-failed
+    name: Database connection failed or initialization error
+    symptoms:
+      - "Failed to connect to database"
+      - "Connection refused"
+      - "database is locked"
+      - "Cannot initialize database"
+      - "SQLite database file not found"
+    trigger_conditions:
+      - log_pattern: "database.*connection.*failed"
+      - log_pattern: "database is locked"
+    steps:
+      - id: step-1
+        description: Check which database backend is configured
+        type: check
+        command: "docker exec {container_name} grep -i 'DB_TYPE\\|database' /etc/gitea/app.ini 2>/dev/null | head -5"
+        expected_output: ""
+      - id: step-2
+        description: Display database configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if SQLite file exists and is accessible
+        type: check
+        command: "ls -la {data_path}/gitea.db 2>/dev/null || echo 'File not found'"
+        expected_output: ""
+      - id: step-4
+        description: Check database file permissions
+        type: check
+        command: "stat {data_path}/gitea.db"
+        expected_output: "Access:"
+        on_fail: step-5
+      - id: step-5
+        description: Fix database file ownership
+        type: fix
+        command: "chown 1000:1000 {data_path}/gitea.db && chmod 644 {data_path}/gitea.db"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Gitea to reconnect to database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify database connection in logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'database.*success\\|tables.*initialized' | tail -5"
+    resolution: |
+      Gitea's database connection has been restored. The default SQLite database file permissions and ownership have been corrected. For production use with multiple concurrent users, consider migrating to PostgreSQL or MySQL by updating the database configuration in /data/gitea/conf/app.ini.
+
+  - id: web-ui-not-accessible
+    name: Web UI not accessible on port 3000
+    symptoms:
+      - "Connection refused on port 3000"
+      - "Cannot access http://localhost:3000"
+      - "Web server not responding"
+      - "Timeout connecting to Gitea"
+    trigger_conditions:
+      - log_pattern: "listen.*3000.*failed"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Verify Gitea is listening on port 3000
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 3000"
+        expected_output: "LISTEN.*3000"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 3000 is published in container
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '3000/tcp'"
+        expected_output: "3000"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping and Gitea URL configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Gitea logs for startup errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|fatal' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Restart Gitea container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait for startup and verify web UI accessibility
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -20"
+    resolution: |
+      Gitea has been restarted. The web UI should now be accessible at the configured address. Verify ROOT_URL in /data/gitea/conf/app.ini matches your actual host/domain (e.g., http://localhost:3000). If using a reverse proxy, ensure the proxy is routing correctly to the Gitea container port.
+
+default_config:
+  compose_template: |
+    services:
+      gitea:
+        image: gitea/gitea:latest
+        container_name: gitea
+        restart: unless-stopped
+        environment:
+          USER_UID: ${USER_UID:-1000}
+          USER_GID: ${USER_GID:-1000}
+          GITEA__DATABASE__DB_TYPE: ${DB_TYPE:-sqlite3}
+          GITEA__DATABASE__PATH: /data/gitea/gitea.db
+          GITEA__SERVER__ROOT_URL: ${ROOT_URL:-http://localhost:3000}
+          GITEA__SERVER__SSH_DOMAIN: ${SSH_DOMAIN:-localhost}
+          GITEA__SERVER__SSH_PORT: ${SSH_PORT:-22}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+          - /etc/timezone:/etc/timezone:ro
+        ports:
+          - "${WEB_PORT:-3000}:3000"
+          - "${SSH_PORT:-22}:22"
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for /data (repositories, configuration, database)
+      default: "./data"
+    - name: USER_UID
+      description: User ID for Gitea process
+      default: "1000"
+    - name: USER_GID
+      description: Group ID for Gitea process
+      default: "1000"
+    - name: DB_TYPE
+      description: Database type (sqlite3, mysql, postgres)
+      default: "sqlite3"
+    - name: ROOT_URL
+      description: Gitea web root URL (for clone URLs in UI)
+      default: "http://localhost:3000"
+    - name: SSH_DOMAIN
+      description: SSH hostname for Git clone commands
+      default: "localhost"
+    - name: SSH_PORT
+      description: SSH port (exposed from container port 22)
+      default: "22"
+    - name: WEB_PORT
+      description: Web UI port binding
+      default: "3000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /data
+      purpose: Gitea repositories, configuration, database, and attachments
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Gitea is a lightweight self-hosted Git service comparable to GitHub. The official gitea/gitea image runs as UID 1000 (git user).
+
+  Database options: Gitea supports SQLite (default, no external service), MySQL, and PostgreSQL. For single-node homelab use, SQLite is sufficient. For production or high-concurrency, use PostgreSQL.
+
+  SSH configuration: Gitea serves SSH on port 22 inside the container. This must be remapped in docker-compose (e.g., 2222:22) since the host usually has SSH on port 22. Ensure SSH_PORT and SSH_DOMAIN environment variables match your actual binding for correct clone URLs in the UI.
+
+  First-run setup: Visit the web UI on startup (port 3000). The initial setup wizard guides you through database selection, admin account creation, and site configuration. After setup, edit /data/gitea/conf/app.ini for advanced settings.
+
+  Repository mirrors: Gitea can mirror external repositories (GitHub, GitLab) to your instance.
+
+  Common integrations: Gitea integrates with Webhook-capable services (Discord, Slack) and supports OAuth providers (OIDC, GitHub, GitLab as OAuth providers).
+
+  Migration: Gitea can import repositories from GitHub, GitLab, or Gitea instances via the web UI.
+
+  Common gotchas:
+  - Permission denied on /data: Check USER_UID/USER_GID environment variables and host ownership (must be 1000:1000).
+  - SSH port conflict: Port 22 is usually in use by host SSH. Remap Gitea SSH to 2222 or similar.
+  - Clone URLs wrong: Verify GITEA__SERVER__ROOT_URL and SSH settings match your actual access URL.
+  - Database locked: SQLite can be slow under concurrent load. Consider PostgreSQL for production.
+  - Installation wizard hangs: Check database connection; verify DB_TYPE environment variable is set correctly.

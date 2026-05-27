@@ -1,0 +1,300 @@
+id: phpmyadmin
+name: phpMyAdmin Database Admin
+version: "1.0"
+container_match:
+  image_patterns:
+    - "phpmyadmin"
+    - "phpmyadmin/phpmyadmin"
+  port_hints: [80]
+category: database
+description: Web-based MySQL and MariaDB administration interface
+docs_url: https://hub.docker.com/r/phpmyadmin/phpmyadmin
+
+common_issues:
+  - id: cannot-connect-mysql
+    name: Cannot connect to MySQL or MariaDB server
+    symptoms:
+      - "Access denied for user"
+      - "Connection refused"
+      - "Cannot select database"
+      - "Invalid hostname"
+      - "Host unreachable"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "access.*denied"
+    steps:
+      - id: step-1
+        description: Verify PMA_HOST environment variable is set correctly
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep PMA_HOST"
+        expected_output: "PMA_HOST"
+        on_fail: step-2
+      - id: step-2
+        description: Display configured database server hostname
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test network connectivity to MySQL/MariaDB server
+        type: check
+        command: "docker exec {container_name} ping -c 2 {pma_host}"
+        expected_output: "0% packet loss"
+        on_fail: step-4
+      - id: step-4
+        description: Check if MySQL/MariaDB is listening on port 3306
+        type: check
+        command: "docker exec {mysql_container} ss -tlnp | grep 3306"
+        expected_output: "LISTEN.*3306"
+        on_fail: step-5
+      - id: step-5
+        description: Verify MySQL/MariaDB service is running
+        type: check
+        command: "docker ps | grep {mysql_container}"
+        expected_output: "Up"
+        on_fail: step-6
+      - id: step-6
+        description: Display MySQL/MariaDB startup logs for errors
+        type: check
+        command: "docker logs {mysql_container} | grep -i 'error\\|failed' | tail -5"
+        expected_output: ""
+      - id: step-7
+        description: Verify connection parameters in phpMyAdmin
+        type: inform
+        command: ""
+    resolution: |
+      phpMyAdmin could not connect to the MySQL or MariaDB server. This typically occurs due to: (1) incorrect PMA_HOST environment variable, (2) database server not running or not listening on port 3306, (3) network connectivity issues between containers, or (4) authentication credentials mismatch. Verify that the database container is running, that phpMyAdmin is configured with the correct hostname (use Docker service name if on the same network, e.g., mysql:3306), and that the credentials match the database user setup.
+
+  - id: login-authentication-failed
+    name: Login or authentication fails
+    symptoms:
+      - "Access denied"
+      - "Login fails even with correct credentials"
+      - "Cannot authenticate"
+      - "1045 Access denied for user"
+    trigger_conditions:
+      - log_pattern: "access.*denied.*user"
+      - log_pattern: "authentication.*failed"
+    steps:
+      - id: step-1
+        description: Verify PMA_USER and PMA_PASSWORD are configured
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'PMA_USER|PMA_PASSWORD'"
+        expected_output: "PMA_"
+        on_fail: step-2
+      - id: step-2
+        description: Check if root or default MySQL user exists
+        type: check
+        command: "docker exec {mysql_container} mysql -u root -p{mysql_root_password} -e 'SELECT user, host FROM mysql.user;' 2>&1"
+        expected_output: "root"
+        on_fail: step-3
+      - id: step-3
+        description: Display MySQL user and grant information
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify MySQL/MariaDB is accepting connections on the correct port
+        type: check
+        command: "docker exec {container_name} mysql -h {pma_host} -u root -e 'SELECT 1;' 2>&1"
+        expected_output: ""
+      - id: step-5
+        description: Check for recent password changes or user permission issues
+        type: inform
+        command: ""
+    resolution: |
+      phpMyAdmin authentication failed. This usually indicates a mismatch between the configured credentials (PMA_USER, PMA_PASSWORD) and the actual database user account. Verify that the MySQL/MariaDB user exists and has appropriate permissions. If using the root user, ensure PMA_PASSWORD matches the MySQL root password. Check MySQL logs for authentication attempts and any permission errors. For production, use a dedicated database user instead of root.
+
+  - id: blank-page-or-500-error
+    name: Blank page or HTTP 500 error
+    symptoms:
+      - "Blank white page"
+      - "500 Internal Server Error"
+      - "PHP Fatal error"
+      - "No content displayed"
+      - "Connection timeout"
+    trigger_conditions:
+      - log_pattern: "Fatal error"
+      - log_pattern: "500.*error"
+    steps:
+      - id: step-1
+        description: Check phpMyAdmin container logs for PHP errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|exception\\|fatal' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display last 20 lines of phpMyAdmin logs
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify phpMyAdmin configuration is valid
+        type: check
+        command: "docker exec {container_name} php -l /var/www/html/config.inc.php"
+        expected_output: "No syntax errors"
+        on_fail: step-4
+      - id: step-4
+        description: Check /var/www/html directory permissions
+        type: check
+        command: "docker exec {container_name} ls -ld /var/www/html"
+        expected_output: "drwx"
+      - id: step-5
+        description: Restart phpMyAdmin container to clear any PHP state issues
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check if page now loads after restart
+        type: check
+        command: "docker logs {container_name} | tail -10"
+    resolution: |
+      phpMyAdmin displayed a blank page or 500 error, indicating a PHP processing error. This can be caused by configuration issues, missing extensions, or memory limits. The container has been restarted to clear any PHP state problems. Check the container logs for specific PHP errors. Ensure all required PHP extensions are installed (mysqli, mbstring, etc.). If errors persist, verify the PMA_HOST, PMA_USER, and PMA_PASSWORD environment variables are correctly set and the database server is reachable.
+
+  - id: slow-page-load
+    name: Slow page load times
+    symptoms:
+      - "Page takes 10+ seconds to load"
+      - "Database operations are slow"
+      - "Timeouts on large table operations"
+      - "High CPU or memory usage"
+    trigger_conditions:
+      - log_pattern: "timeout"
+    steps:
+      - id: step-1
+        description: Check current memory and CPU usage of phpMyAdmin
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Check for large tables or slow queries in database
+        type: check
+        command: "docker exec {mysql_container} mysql -u {pma_user} -p{pma_password} -e 'SHOW PROCESSLIST;'"
+        expected_output: ""
+      - id: step-3
+        description: Display current MySQL connection count and limits
+        type: check
+        command: "docker exec {mysql_container} mysql -u {pma_user} -p{pma_password} -e 'SHOW VARIABLES LIKE \"max_connections\";'"
+        expected_output: ""
+      - id: step-4
+        description: Check if database indexes are properly configured
+        type: inform
+        command: ""
+      - id: step-5
+        description: Increase max_allowed_packet and other performance tuning parameters
+        type: inform
+        command: ""
+    resolution: |
+      Slow phpMyAdmin performance is typically caused by large databases, missing indexes, or insufficient MySQL buffer pool size. Check the MySQL slow query log and PROCESSLIST to identify problematic queries. Consider increasing max_connections, max_allowed_packet, and innodb_buffer_pool_size in the MySQL configuration. For very large tables, avoid using phpMyAdmin for operations like exports; use command-line tools instead. Ensure the database is not under heavy load from other applications.
+
+  - id: session-configuration-missing
+    name: Configuration not persisted between restarts
+    symptoms:
+      - "Need to reconfigure server settings after restart"
+      - "No saved connections"
+      - "Default configuration used every time"
+      - "Cannot save user preferences"
+    trigger_conditions:
+      - log_pattern: "session.*lost"
+    steps:
+      - id: step-1
+        description: Check if configuration volume is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}}{{end}}' | grep -E '/var/www/html|sessions'"
+        expected_output: "/var/www/html"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Display recommended compose configuration for persistent storage
+        type: inform
+        command: ""
+    resolution: |
+      phpMyAdmin configuration and sessions are not persisted across container restarts because the /var/www/html directory (where config.inc.php is stored) is not mounted to persistent storage. To preserve phpMyAdmin settings and server configurations, mount a Docker volume or host directory to /var/www/html. Alternatively, create a custom config.inc.php file and mount it at container startup with environment variables.
+
+default_config:
+  compose_template: |
+    services:
+      phpmyadmin:
+        image: phpmyadmin:latest
+        container_name: phpmyadmin
+        restart: unless-stopped
+        environment:
+          PMA_HOST: ${PMA_HOST:-mysql}
+          PMA_PORT: ${PMA_PORT:-3306}
+          PMA_USER: ${PMA_USER:-root}
+          PMA_PASSWORD: ${PMA_PASSWORD:-}
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+        volumes:
+          - ${PMA_SESSIONS_PATH:-./sessions}:/sessions
+        ports:
+          - "80:80"
+        networks:
+          - app_network
+        depends_on:
+          - mysql
+      mysql:
+        image: mysql:8.0
+        container_name: mysql
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+          MYSQL_DATABASE: ${MYSQL_DATABASE:-myapp}
+        volumes:
+          - ${MYSQL_DATA_PATH:-./mysql_data}:/var/lib/mysql
+        networks:
+          - app_network
+    networks:
+      app_network:
+        driver: bridge
+  required_vars:
+    - name: PMA_HOST
+      description: MySQL or MariaDB server hostname (use Docker service name if on same network)
+      default: "mysql"
+    - name: PMA_PORT
+      description: MySQL or MariaDB server port
+      default: "3306"
+    - name: PMA_USER
+      description: Username to authenticate with (typically root)
+      default: "root"
+    - name: PMA_PASSWORD
+      description: Password for the MySQL user
+      default: ""
+    - name: MYSQL_ROOT_PASSWORD
+      description: MySQL root password (if running MySQL in same compose)
+      default: "root"
+    - name: PMA_SESSIONS_PATH
+      description: Host path for phpMyAdmin session storage
+      default: "./sessions"
+    - name: MYSQL_DATA_PATH
+      description: Host path for MySQL data (if running MySQL in same compose)
+      default: "./mysql_data"
+  known_mounts:
+    - container_path: /sessions
+      purpose: phpMyAdmin session and preference storage
+      recommended_permissions: "755"
+      owner: "www-data:www-data"
+    - container_path: /var/lib/mysql
+      description: MySQL data directory (for integrated MySQL container)
+      purpose: Persistent database storage
+      recommended_permissions: "700"
+      owner: "mysql:mysql"
+
+notes: |
+  phpMyAdmin is a widely-used web interface for MySQL and MariaDB database administration. The official phpmyadmin image is recommended.
+
+  Database connectivity: Set PMA_HOST to the MySQL/MariaDB hostname. If running MySQL in the same Docker Compose file, use the service name (e.g., mysql:3306). For Docker networks, the service name resolves automatically.
+
+  Configuration: Multiple MySQL servers can be specified using PMA_HOSTS instead of PMA_HOST. PMA_HOSTS is a semicolon-separated list.
+
+  Authentication: PMA_USER and PMA_PASSWORD should match a user configured in MySQL. The root user is common for single-database or development setups; use dedicated users in production.
+
+  Session storage: Mount /sessions to persistent storage to preserve user preferences and session data across container restarts.
+
+  Security: phpMyAdmin exposes database management capabilities; in production, protect access with a reverse proxy, require HTTPS, and restrict access by IP or authentication.
+
+  Performance: On large databases, phpMyAdmin may be slow. Consider using command-line tools (mysql CLI, mysqldump) for bulk operations.
+
+  Common gotchas:
+  - Cannot connect to database: Verify PMA_HOST is correct and resolvable; if using Docker Compose, use the service name.
+  - Access denied: Ensure PMA_USER and PMA_PASSWORD match the database user and the MySQL/MariaDB server is configured to allow connections from the phpMyAdmin container.
+  - Blank page: Check container logs for PHP errors; restart the container and verify database connectivity.
+  - Configuration lost: Mount /sessions and optionally /var/www/html to persistent storage.

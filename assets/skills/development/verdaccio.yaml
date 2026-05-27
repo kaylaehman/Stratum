@@ -1,0 +1,197 @@
+id: verdaccio
+name: Verdaccio
+version: "1.0"
+container_match:
+  image_patterns:
+    - "verdaccio/verdaccio"
+  port_hints: [4873]
+category: development
+description: Lightweight npm private registry and proxy for caching public packages
+docs_url: https://hub.docker.com/r/verdaccio/verdaccio
+
+common_issues:
+  - id: config-permission-denied
+    name: Permission denied on config.yaml or storage volume
+    symptoms:
+      - "EACCES: permission denied"
+      - "Cannot read config file"
+      - "Cannot write to storage directory"
+      - "Failed to initialize registry"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES.*storage"
+    steps:
+      - id: step-1
+        description: Check ownership of the host config directory
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set correct ownership for config and storage directories
+        type: fix
+        command: "chown -R 10001:65534 {config_path} && chown -R 10001:65534 {storage_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify Verdaccio can now read the configuration
+        type: check
+        command: "docker logs {container_name} | grep -i 'listening on' | head -1"
+    resolution: |
+      Verdaccio runs as UID 10001 (verdaccio user) by default. The config and storage directories must be owned by this user. The fix updated ownership to 10001:65534, allowing Verdaccio to read config.yaml and write packages to the storage volume. The registry should now start successfully.
+
+  - id: package-publish-fails
+    name: Package publish fails with authentication or storage error
+    symptoms:
+      - "npm ERR! 401 Unauthorized"
+      - "Cannot write package to storage"
+      - "HTTP 403 Forbidden on publish"
+      - "Failed to create package directory"
+    trigger_conditions:
+      - log_pattern: "401.*unauthorized"
+      - log_pattern: "403.*forbidden"
+      - log_pattern: "storage.*error"
+    steps:
+      - id: step-1
+        description: Check if storage volume has write permissions
+        type: check
+        command: "docker exec {container_name} touch /verdaccio/storage/test.txt && docker exec {container_name} rm /verdaccio/storage/test.txt"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display storage directory status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify config.yaml does not forbid publish operations
+        type: check
+        command: "docker exec {container_name} grep -A 5 'publish:' /verdaccio/conf/config.yaml | head -10"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Review config.yaml publish access rules
+        type: inform
+        command: ""
+      - id: step-5
+        description: Ensure storage directory is writable by container process
+        type: fix
+        command: "chmod 755 {storage_path} && docker exec {container_name} ls -la /verdaccio/storage | head -5"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Test package publish after fix
+        type: check
+        command: "docker logs {container_name} | grep -i 'stored package' | tail -3"
+    resolution: |
+      Package publish failures are typically caused by insufficient storage directory permissions or overly restrictive access rules in config.yaml. The fix ensured the storage directory is world-readable (755 permissions) so the container process can write packages. Verify that your npm authentication token is correct and that config.yaml allows publish for your user scope. Try publishing again.
+
+  - id: upstream-registry-unavailable
+    name: Upstream registry (npmjs.com) connection fails
+    symptoms:
+      - "Cannot reach upstream npm registry"
+      - "Timeout connecting to registry.npmjs.org"
+      - "Failed to fetch package from npm"
+      - "Unknown package when not in local storage"
+    trigger_conditions:
+      - log_pattern: "upstream.*unavailable"
+      - log_pattern: "timeout.*registry"
+      - log_pattern: "enotfound.*npmjs"
+    steps:
+      - id: step-1
+        description: Test DNS resolution to npmjs.org from container
+        type: check
+        command: "docker exec {container_name} getent hosts registry.npmjs.org | head -1"
+        expected_output: "registry.npmjs.org"
+        on_fail: step-2
+      - id: step-2
+        description: Test connectivity to npm registry
+        type: check
+        command: "docker exec {container_name} curl -I https://registry.npmjs.org/ 2>&1 | head -3"
+        expected_output: "200\|301\|302"
+        on_fail: step-3
+      - id: step-3
+        description: Check host network connectivity to external registry
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify Verdaccio is not behind a restrictive firewall
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Verdaccio to clear connection cache
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor for upstream registry reconnection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'listening\\|connected' | tail -3"
+    resolution: |
+      Verdaccio proxies requests to npmjs.org when packages are not found locally. The container needs outbound HTTPS access to reach the upstream registry. The restart cleared any stale connection state. If the issue persists, verify that your network firewall allows HTTPS traffic to registry.npmjs.org on port 443, or configure Verdaccio to use an alternative registry mirror in config.yaml.
+
+default_config:
+  compose_template: |
+    services:
+      verdaccio:
+        image: verdaccio/verdaccio:latest
+        container_name: verdaccio
+        restart: unless-stopped
+        environment:
+          VERDACCIO_USER_AGENT: Verdaccio/${VERDACCIO_VERSION:-latest}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/verdaccio/conf
+          - ${STORAGE_PATH:-./storage}:/verdaccio/storage
+        ports:
+          - "4873:4873"
+        networks:
+          - default
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:4873/-/ping"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for Verdaccio config directory (config.yaml and htpasswd)
+      default: "./config"
+    - name: STORAGE_PATH
+      description: Host path for Verdaccio storage (packages and metadata)
+      default: "./storage"
+  known_mounts:
+    - container_path: /verdaccio/conf
+      purpose: Configuration file (config.yaml) and user authentication database (htpasswd)
+      recommended_permissions: "755"
+      owner: "10001:65534"
+    - container_path: /verdaccio/storage
+      purpose: Cached packages and package metadata
+      recommended_permissions: "755"
+      owner: "10001:65534"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Verdaccio is a lightweight Node.js-based npm private registry. It functions both as a package repository and as a caching proxy to npmjs.com for packages not in local storage.
+
+  Container user: Verdaccio runs as UID 10001 (verdaccio user) and GID 65534 (nogroup). Mount ownership must be set to 10001:65534.
+
+  Config file: /verdaccio/conf/config.yaml defines storage location, authentication method (htpasswd by default), upstream registry, and access rules per scope. The htpasswd file contains npm user credentials for authentication.
+
+  Storage: /verdaccio/storage holds all cached and published packages. Size grows as packages are added or proxied from npmjs.com. Consider separating on fast storage (SSD) to avoid slow package installation.
+
+  Publishing: By default, Verdaccio allows publishing to scoped packages (@myorg/package) and rejects public packages (to avoid conflicts with npmjs.com). Edit config.yaml to customize publish access rules.
+
+  Upstream registry: Defaults to npmjs.org. Configurable in config.yaml via uplinks section if your network uses a mirror or internal proxy.
+
+  Health check: /-/ping endpoint returns 200 when registry is ready.
+
+  Common gotchas:
+  - Permission denied on config.yaml: Verify ownership is 10001:65534, not root or your user.
+  - Package publish fails: Check that your scope is not blocked by access rules in config.yaml.
+  - npm packages not found: Ensure outbound HTTPS to npmjs.org is not blocked by firewall; verify upstream registry is reachable.
+  - Storage fills up: Monitor storage size; implement cleanup or package retention policies in config.yaml for old versions.

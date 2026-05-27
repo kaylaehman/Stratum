@@ -1,0 +1,190 @@
+id: mongodb
+name: MongoDB
+version: "1.0"
+container_match:
+  image_patterns:
+    - "mongo"
+    - "mongodb"
+  port_hints: [27017]
+category: database
+description: Document-oriented NoSQL database with rich querying and aggregation, widely used in JavaScript-heavy stacks
+docs_url: https://docs.mongodb.com/
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /data/db mount
+    symptoms:
+      - "permission denied"
+      - "cannot create directory"
+      - "EACCES"
+      - "Failed to unlink"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of the host /data/db path
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 999"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership for review
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown /data/db to UID 999 (mongodb user)
+        type: fix
+        command: "chown -R 999:999 {data_path}"
+        requires_approval: true
+    resolution: |
+      The official `mongo` image runs as UID 999 (user `mongodb`). If the host
+      path was created as root or another user, the container cannot write data
+      or lock files. The fix changes ownership to the container's user.
+
+  - id: auth-credentials-missing
+    name: Authentication required but credentials not set, or authentication fails
+    symptoms:
+      - "authentication failed"
+      - "not authorized"
+      - "command count failed"
+      - "MongoServerError: command count requires authentication"
+    trigger_conditions:
+      - log_pattern: "authentication"
+      - log_pattern: "not authorized"
+    steps:
+      - id: step-1
+        description: Check if MONGO_INITDB_ROOT_USERNAME and ROOT_PASSWORD are set
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i MONGO_INITDB"
+        expected_output: "MONGO_INITDB"
+        on_fail: step-2
+      - id: step-2
+        description: Authentication is enabled; both username and password must be set
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set credentials in compose file and recreate container
+        type: fix
+        command: "docker compose up -d --force-recreate"
+        requires_approval: true
+    resolution: |
+      If MONGO_INITDB_ROOT_USERNAME is set, MONGO_INITDB_ROOT_PASSWORD must
+      also be set. Without both, the root user cannot authenticate. Set both
+      environment variables in your docker-compose.yml, then recreate.
+
+  - id: replica-set-not-initialized
+    name: Replica set not initialized, many operations fail
+    symptoms:
+      - "not primary"
+      - "no replset"
+      - "cannot convert"
+      - "not a replica set"
+    trigger_conditions:
+      - log_pattern: "not primary"
+      - log_pattern: "replset"
+    steps:
+      - id: step-1
+        description: Check replica set status from inside the container
+        type: check
+        command: "docker exec {container_name} mongosh --eval 'rs.status()' 2>&1 | head -10"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Replica set is not initialized; many features require it
+        type: inform
+        command: ""
+      - id: step-3
+        description: Initialize the replica set with mongosh
+        type: fix
+        command: "docker exec {container_name} mongosh --eval 'rs.initiate()' --quiet"
+        requires_approval: true
+    resolution: |
+      Modern MongoDB (4.0+) features like change streams, transactions, and
+      sharding require a replica set. Even a single-node replica set is valid.
+      The fix initializes a single-node replica set. For production, add
+      multiple members for redundancy.
+
+default_config:
+  compose_template: |
+    services:
+      mongodb:
+        image: mongo:latest
+        container_name: mongodb
+        restart: unless-stopped
+        environment:
+          MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+          MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${MONGODB_DATA_PATH:-./data}:/data/db
+        ports:
+          - "${MONGODB_HOST_PORT:-27017}:27017"
+  required_vars:
+    - name: MONGO_INITDB_ROOT_USERNAME
+      description: Root administrative user (required if using authentication)
+      default: "admin"
+    - name: MONGO_INITDB_ROOT_PASSWORD
+      description: Root password (required, non-empty if username is set)
+      default: ""
+    - name: MONGODB_DATA_PATH
+      description: Host path for /data/db (persistent data)
+      default: "./data"
+    - name: MONGODB_HOST_PORT
+      description: Host port to expose MongoDB on
+      default: "27017"
+    - name: TZ
+      description: Timezone for log timestamps
+      default: "UTC"
+  known_mounts:
+    - container_path: /data/db
+      purpose: MongoDB data directory, databases, journal, lock files
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Official `mongo` image characteristics:
+    - Runs as UID 999 (user `mongodb`).
+    - /data/db must be writable by this user.
+    - Initialization happens on first start; root user is created if
+      MONGO_INITDB_ROOT_USERNAME and MONGO_INITDB_ROOT_PASSWORD are set.
+
+  Authentication:
+    - If only MONGO_INITDB_ROOT_USERNAME is set (no password), the container
+      will not start. Both must be provided or neither.
+    - The root user is created in the `admin` database.
+    - Other users can be created via MONGO_INITDB_DATABASE and a JavaScript
+      init script (advanced use case).
+
+  Replica set:
+    - Single-container deployments are still part of a replica set (1 member).
+    - Many modern features (transactions, change streams, sharded clusters)
+      require a replica set.
+    - Initialize with `mongosh --eval 'rs.initiate()'` or use a healthcheck
+      that polls until initialized.
+
+  Startup behavior:
+    - The first start may take 10-20 seconds for initialization, especially
+      if creating a replica set.
+    - WiredTiger storage engine (default) will compact the data directory on
+      startup if it was not shut down cleanly.
+
+  Data directory reuse:
+    - MongoDB 4.0+ is forward-compatible (5.0 data works in 6.0, etc.).
+    - Backward compatibility is not guaranteed (6.0 data may not work in 4.0).
+    - If moving data between major versions, test in a staging environment first.
+
+  Performance tuning:
+    - By default, WiredTiger uses 50% of available RAM for the cache.
+    - Set `--wiredTigerCacheSizeGB` in `MONGO_INITDB_ARGS` if you need to limit
+      memory usage (e.g., MONGO_INITDB_ARGS="--wiredTigerCacheSizeGB=1").
+
+  Port and networking:
+    - 27017 is MongoDB's default port.
+    - If using a named Docker network, clients connect to the service name
+      (e.g., `mongodb:27017`) instead of localhost.
+    - Expose only to trusted networks; MongoDB has no built-in encryption by
+      default (TLS must be configured separately).

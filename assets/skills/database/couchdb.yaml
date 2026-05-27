@@ -1,0 +1,216 @@
+id: couchdb
+name: Apache CouchDB Document Database
+version: "1.0"
+container_match:
+  image_patterns:
+    - "couchdb"
+    - "couchdb:latest"
+    - "couchdb:3"
+  port_hints: [5984]
+category: database
+description: Document-oriented NoSQL database with HTTP API, peer-to-peer replication, and eventual consistency
+docs_url: https://hub.docker.com/_/couchdb
+
+common_issues:
+  - id: auth-required
+    name: Admin credentials not configured or authentication failing
+    symptoms:
+      - "401 Unauthorized"
+      - "You do not have permission to access this resource"
+      - "Authentication required"
+      - "Could not authenticate to CouchDB"
+      - "Missing admin credentials"
+    trigger_conditions:
+      - log_pattern: "401.*unauthorized"
+      - log_pattern: "authentication.*failed"
+      - log_pattern: "credentials.*invalid"
+    steps:
+      - id: step-1
+        description: Check if CouchDB admin credentials are configured
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:5984/_users | head -20"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display CouchDB configuration status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set admin username and password via API
+        type: fix
+        command: "docker exec {container_name} curl -X PUT http://localhost:5984/_node/nonode@nohost/_config/admins/{couchdb_admin_user} -d '\"'{couchdb_admin_password}'\"'"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify admin credentials work by querying database info
+        type: check
+        command: "docker exec {container_name} curl -s -u {couchdb_admin_user}:{couchdb_admin_password} http://localhost:5984/ | grep -o 'couchdb'"
+        expected_output: "couchdb"
+    resolution: |
+      CouchDB admin credentials have been configured. All subsequent HTTP API calls to CouchDB must now include Basic Authentication (username:password) or use a token. Update your application's CouchDB connection strings to include credentials: http://username:password@host:5984. For production deployments, consider using HTTPS and strong passwords. Store credentials securely in your secrets manager.
+
+  - id: disk-space-exhausted
+    name: Disk space full or CouchDB unable to write data
+    symptoms:
+      - "No space left on device"
+      - "ENOSPC"
+      - "Compact request failed"
+      - "Database write failed"
+      - "Disk quota exceeded"
+      - "Cannot create new database"
+    trigger_conditions:
+      - log_pattern: "no space.*device"
+      - log_pattern: "enospc"
+      - log_pattern: "disk.*full"
+    steps:
+      - id: step-1
+        description: Check disk usage on the host system
+        type: check
+        command: "df -h {data_path} | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Check CouchDB data directory size
+        type: check
+        command: "du -sh {data_path}"
+        expected_output: ""
+      - id: step-3
+        description: Display disk usage breakdown
+        type: inform
+        command: ""
+      - id: step-4
+        description: Trigger CouchDB database compaction to reclaim space
+        type: fix
+        command: "docker exec {container_name} curl -s -X POST -u {couchdb_admin_user}:{couchdb_admin_password} http://localhost:5984/_compact"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Monitor compaction progress
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'compact' | tail -3"
+        expected_output: ""
+    resolution: |
+      CouchDB database compaction has been initiated. Compaction reclaims unused disk space by removing deleted documents and obsolete data. Monitor the container logs to observe progress. If compaction completes but disk space remains critical, consider: moving CouchDB data to a larger volume, deleting old/unused databases, or adding additional storage. For databases in active use, schedule compaction during low-traffic periods.
+
+  - id: replication-failed
+    name: Replication lag, failed replications, or remote node unreachable
+    symptoms:
+      - "Replication failed"
+      - "Connection refused to remote database"
+      - "Remote database not responding"
+      - "Replication checkpoints out of sync"
+      - "_replicator database errors"
+    trigger_conditions:
+      - log_pattern: "replication.*failed"
+      - log_pattern: "connection.*refused"
+      - log_pattern: "remote.*unreachable"
+    steps:
+      - id: step-1
+        description: Check CouchDB replication status
+        type: check
+        command: "docker exec {container_name} curl -s -u {couchdb_admin_user}:{couchdb_admin_password} http://localhost:5984/_active_tasks"
+        expected_output: ""
+      - id: step-2
+        description: List all replication documents
+        type: check
+        command: "docker exec {container_name} curl -s -u {couchdb_admin_user}:{couchdb_admin_password} http://localhost:5984/_replicator/_all_docs?include_docs=true | head -50"
+        expected_output: ""
+      - id: step-3
+        description: Display replication status and error messages
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify connectivity to remote CouchDB node
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://{remote_couchdb_host}:5984/"
+        expected_output: "200"
+        on_fail: step-5
+      - id: step-5
+        description: Explain replication troubleshooting steps
+        type: inform
+        command: ""
+    resolution: |
+      Replication status has been checked. If the remote node is unreachable, verify network connectivity, firewall rules, and remote CouchDB authentication credentials. For failed replications, check the _replicator database documents for error details. Consider: retrying the replication, adjusting timeout settings, or validating source/target database consistency with the _compare endpoint. Consult CouchDB replication documentation for advanced conflict resolution strategies.
+
+default_config:
+  compose_template: |
+    services:
+      couchdb:
+        image: couchdb:3-alpine
+        container_name: couchdb
+        restart: unless-stopped
+        environment:
+          COUCHDB_USER: ${COUCHDB_ADMIN_USER:-admin}
+          COUCHDB_PASSWORD: ${COUCHDB_ADMIN_PASSWORD:-insecure}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./data}:/opt/couchdb/data
+        ports:
+          - "${COUCHDB_PORT:-5984}:5984"
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:5984/"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+  required_vars:
+    - name: COUCHDB_ADMIN_USER
+      description: Admin username for CouchDB
+      default: "admin"
+    - name: COUCHDB_ADMIN_PASSWORD
+      description: Admin password for CouchDB (use strong password in production)
+      default: "insecure"
+    - name: COUCHDB_PORT
+      description: Port to expose CouchDB HTTP API on host
+      default: "5984"
+    - name: DATA_PATH
+      description: Host path for CouchDB data persistence
+      default: "./data"
+    - name: TZ
+      description: Timezone for container
+      default: "UTC"
+  known_mounts:
+    - container_path: /opt/couchdb/data
+      purpose: CouchDB database files, indexes, and replication checkpoints
+      recommended_permissions: "755"
+      owner: "5984:5984"
+
+notes: |
+  CouchDB is a document-oriented NoSQL database designed for fault tolerance and eventual consistency. It provides HTTP REST API access, built-in replication, and multi-master peer-to-peer synchronization.
+
+  Key concepts:
+  - Documents: stored as JSON; each document has a unique _id and _rev (revision) identifier
+  - Replication: one-way or bi-directional synchronization between CouchDB instances
+  - Views: pre-computed aggregations using Map/Reduce functions
+  - Eventual consistency: changes propagate asynchronously across replicas
+
+  Authentication:
+  - By default, CouchDB runs with no authentication (Admin Party mode) — insecure for production
+  - Set COUCHDB_USER and COUCHDB_PASSWORD to enable admin credentials
+  - All API calls can then require Basic Authentication or API tokens
+
+  Performance tuning:
+  - Increase HTTP timeout for large bulk operations
+  - Pre-create views on test data before production use to avoid slow queries
+  - Monitor _active_tasks endpoint during indexing and compaction
+  - Use database-level replication filters if replicating large datasets
+
+  Replication gotchas:
+  - Replication requires _replicator database; on first start, CouchDB creates it automatically
+  - Replication documents in _replicator trigger continuous replication; remove document to stop
+  - Checkpoint documents prevent re-processing data; clear checkpoints only if full re-sync intended
+  - Document conflicts resolved using deterministic approach (winning revision stored, losing stored as conflict)
+
+  Compaction:
+  - Necessary periodically as deleted documents still consume disk space until compaction runs
+  - Database compaction: compact individual database
+  - View compaction: compact Map/Reduce indexes to reclaim space
+  - Can be triggered manually via API or scheduled in backing scheduler
+
+  Cluster mode (CouchDB 3.x):
+  - Default single-node setup; for clustering, requires additional configuration
+  - Cluster discovery, consensus, and shard placement managed by CouchDB
+  - High availability setup requires 3+ nodes for split-brain avoidance
+
+  Common errors:
+  - 401 Unauthorized: credentials missing or incorrect; ensure COUCHDB_USER/PASSWORD set
+  - 409 Conflict: document _rev mismatch; include correct _rev in update request
+  - 503 Service Unavailable: node may be down; check reachability and logs
