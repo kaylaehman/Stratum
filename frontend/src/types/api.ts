@@ -255,3 +255,73 @@ export interface FsUploadResponse {
   path: string
   bytes: number
 }
+
+// UID/GID Conflict Visualizer types
+
+export type UidRowClass = 'match' | 'mismatch' | 'unresolvable'
+
+export interface UidRow {
+  id: number
+  host_name?: string
+  container_name?: string
+  on_host: boolean
+  on_container: boolean
+  class: UidRowClass
+}
+
+export interface UidAnalysis {
+  uid_rows: UidRow[]
+  gid_rows: UidRow[]
+  legend: {
+    match: number
+    mismatch: number
+    unresolvable: number
+  }
+}
+
+export interface ContainerMount {
+  type: string
+  source: string
+  destination: string
+  mode: string
+  rw: boolean
+}
+
+export interface ContainerInspect {
+  id: string
+  name: string
+  image: string
+  image_id?: string
+  state: string
+  config_user?: string
+  mounts: ContainerMount[]
+  privileged: boolean
+  cap_add?: string[]
+  cap_drop?: string[]
+  pid_mode?: string
+  network_mode?: string
+  repo_digests?: string[]
+  run_uid: number
+  run_gid: number
+  supplementary_gids?: number[]
+  is_root: boolean
+}
+
+export interface FileVerdict {
+  file_uid: number
+  file_gid: number
+  file_mode_octal: string
+  host_owner_name?: string
+  host_group_name?: string
+  container_owner_name?: string
+  eff_uid: number
+  eff_gid: number
+  supplementary_gids?: number[]
+  process_is_root: boolean
+  root_override: boolean
+  category: 'owner' | 'owner(root)' | 'group' | 'other'
+  read_granted: boolean
+  write_granted: boolean
+  exec_granted: boolean
+  reason: string
+}
