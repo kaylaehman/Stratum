@@ -102,6 +102,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"PUT /api/scripts/{id}":                 true,
 		"DELETE /api/scripts/{id}":              true,
 		"POST /api/scripts/{id}/run":            true,
+		"POST /api/nodes/{id}/backups":          true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

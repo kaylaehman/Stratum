@@ -63,6 +63,8 @@ const (
 	ActionScriptUpdate = "script.update"
 	ActionScriptDelete = "script.delete"
 	ActionScriptRun    = "script.run"
+
+	ActionBackupStart = "backup.start"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -147,6 +149,8 @@ var actionCatalog = []ActionInfo{
 	{ActionScriptUpdate, "Script updated", "script", TargetScript},
 	{ActionScriptDelete, "Script deleted", "script", TargetScript},
 	{ActionScriptRun, "Script run", "script", TargetScript},
+
+	{ActionBackupStart, "Backup started", "backup", TargetNode},
 }
 
 var actionByName = func() map[string]ActionInfo {

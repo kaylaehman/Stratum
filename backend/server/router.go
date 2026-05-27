@@ -132,6 +132,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Script library list (CRUD/run are audited below).
 			r.Get("/scripts", d.Handlers.ListScripts)
 
+			// Backup history (admin-gated; start is audited below).
+			r.Get("/backups", d.Handlers.ListBackups)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -187,6 +190,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/scripts/{id}", d.Handlers.UpdateScript)
 			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)
 			audited.Post("/scripts/{id}/run", d.Handlers.RunScript)
+			audited.Post("/nodes/{id}/backups", d.Handlers.StartBackup)
 		})
 	})
 

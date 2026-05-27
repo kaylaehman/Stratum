@@ -213,6 +213,20 @@ type ImageUpdateRow struct {
 	CheckedAt     time.Time
 }
 
+// BackupRow is a backup job + its outcome (Feature 28).
+type BackupRow struct {
+	ID         string
+	NodeID     string
+	Kind       string // volume | proxmox
+	Target     string
+	DestPath   string
+	SizeBytes  int64
+	Status     string // running | ok | error
+	Error      string
+	StartedAt  time.Time
+	FinishedAt *time.Time
+}
+
 // Script is a saved shell script for the script runner (Feature 27).
 type Script struct {
 	ID          string
@@ -415,6 +429,11 @@ type Store interface {
 	GetImageScan(ctx context.Context, imageDigest string) (ImageScanRow, error)
 	ReplaceCVEResults(ctx context.Context, imageDigest string, rows []CVEResultRow) error
 	ListCVEResults(ctx context.Context, imageDigest string) ([]CVEResultRow, error)
+
+	// Backups (Feature 28)
+	CreateBackup(ctx context.Context, b BackupRow) error
+	UpdateBackup(ctx context.Context, b BackupRow) error
+	ListBackups(ctx context.Context) ([]BackupRow, error)
 
 	// Script runner (Feature 27)
 	CreateScript(ctx context.Context, s Script) error
