@@ -1,0 +1,96 @@
+# ─── Secrets & local config (NEVER commit) ───────────────────────────────
+.env
+.env.*
+!.env.example
+*.local
+# Stratum runtime data dir (SQLite DB, agent CA, snapshots)
+/data/
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+# Agent / TLS material
+*.pem
+*.key
+*.crt
+*.csr
+!**/testdata/**/*.pem
+!**/testdata/**/*.crt
+
+# ─── Go (backend, agent) ──────────────────────────────────────────────────
+# Compiled binaries / build output
+/bin/
+/backend/bin/
+/agent/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+# Go workspace cache / vendor (vendor only if you choose to vendor)
+go.work.sum
+# Coverage
+coverage.out
+coverage.html
+*.cover
+
+# ─── Frontend (Vite + React + TS) ─────────────────────────────────────────
+node_modules/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.vite/
+/frontend/coverage/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── Proto / codegen (generated Go IS committed; keep buf cache out) ───────
+.buf-cache/
+
+# ─── Docker / compose local overrides ─────────────────────────────────────
+docker-compose.override.yml
+
+# ─── Logs ─────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── OS cruft ─────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ─── Editors / IDEs ───────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+*.swp
+*.swo
+*~
+
+# ─── Temp ─────────────────────────────────────────────────────────────────
+tmp/
+*.tmp
+
+# ─── Local-only (kept out of version control) ─────────────────────────────
+# Per maintainer decision: these live locally, not committed to the repo.
+/CLAUDE.md
+/FEATURES.md
+/DESIGN.md
+/assets/
+skills-lock.json
+
