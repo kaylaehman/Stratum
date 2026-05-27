@@ -12,6 +12,8 @@ var curatedCaps = map[string]string{
 	"SYS_RAWIO":      "raw I/O port and memory access — can bypass kernel protections",
 	"SYS_BOOT":       "reboot the host",
 	"SYS_CHROOT":     "use chroot — can be combined with other caps to escape",
+	"SYS_TIME":       "change the system clock — breaks audit-log integrity and can defeat certificate validity windows",
+	"MKNOD":          "create device special files — can fabricate block/char devices for a device-based escape",
 	"NET_ADMIN":      "reconfigure host networking, firewall, interfaces",
 	"NET_RAW":        "craft raw packets — enables spoofing and some network attacks",
 	"DAC_READ_SEARCH": "bypass file read permission checks — read any file on shared mounts",

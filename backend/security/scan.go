@@ -67,7 +67,9 @@ func Scan(info docker.InspectInfo, runUID int, isRoot bool) (SecurityFlags, []Po
 				caps = append(caps, n)
 			}
 		}
-		f.DangerousCaps = caps
+		// An explicit --cap-drop removes caps even from cap-add=ALL; reflect that
+		// in the per-cap detail so the UI doesn't list caps the operator dropped.
+		f.DangerousCaps = subtractCaps(caps, info.CapDrop)
 	}
 	if f.DangerousCaps == nil {
 		f.DangerousCaps = []string{}
@@ -75,6 +77,29 @@ func Scan(info docker.InspectInfo, runUID int, isRoot bool) (SecurityFlags, []Po
 	sort.Strings(f.DangerousCaps)
 
 	return f, classifyPorts(info.Ports)
+}
+
+// subtractCaps removes any normalized cap-drop entries from caps. A cap-drop of
+// "ALL" clears everything. Used so cap-add=ALL minus an explicit drop is honored.
+func subtractCaps(caps, drop []string) []string {
+	if len(drop) == 0 {
+		return caps
+	}
+	dropped := make(map[string]bool, len(drop))
+	for _, d := range drop {
+		n := normalizeCap(d)
+		if n == "ALL" {
+			return nil
+		}
+		dropped[n] = true
+	}
+	out := caps[:0:0]
+	for _, c := range caps {
+		if !dropped[c] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // isHostMode reports whether a PidMode/NetworkMode/UsernsMode string is "host".

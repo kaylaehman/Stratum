@@ -110,28 +110,21 @@ func (h *Handlers) Ports(w http.ResponseWriter, r *http.Request) {
 }
 
 // nonDockerListeners cross-references host ss listeners against Docker-published
-// ports per node, suppressing nodes that have a host-network container (their
-// in-container listeners legitimately appear at host level).
+// ports per node and reports every listener NOT explained by a Docker port
+// mapping. We deliberately do NOT suppress a node because it runs a host-network
+// container: that would hide genuinely rogue listeners (a false negative is the
+// dangerous outcome for a security audit). The cost is that a host-network
+// container's own listeners surface here — a safe over-report the admin can
+// recognize, not a hidden risk.
 func (h *Handlers) nonDockerListeners(ctx context.Context, ports []db.PortExposureRow) []map[string]any {
 	nodes, err := h.Store.ListNodes(ctx)
 	if err != nil {
 		return nil
 	}
-	secRows, _ := h.Store.ListContainerSecurity(ctx)
 	out := []map[string]any{}
 	for _, n := range nodes {
 		caps, _ := capabilities.Parse([]byte(n.CapabilitiesJSON))
 		if !caps.Docker {
-			continue
-		}
-		// Suppress if any container on the node uses host networking.
-		hostNet := false
-		for _, s := range secRows {
-			if s.NodeID == n.ID && s.NetHost {
-				hostNet = true
-			}
-		}
-		if hostNet {
 			continue
 		}
 		dockerPorts := map[int]bool{}

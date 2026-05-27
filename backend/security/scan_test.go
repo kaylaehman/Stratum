@@ -34,6 +34,23 @@ func TestScanDangerousCapsNormalized(t *testing.T) {
 	}
 }
 
+func TestScanCapDropSubtracted(t *testing.T) {
+	// --cap-add=ALL --cap-drop=NET_RAW: still cap-add-all, but the per-cap detail
+	// must not list a cap the operator explicitly dropped.
+	f, _ := Scan(docker.InspectInfo{CapAdd: []string{"ALL"}, CapDrop: []string{"CAP_NET_RAW"}}, 0, false)
+	if !f.CapAddAll {
+		t.Fatal("cap-add=ALL should still set CapAddAll even with a drop")
+	}
+	for _, c := range f.DangerousCaps {
+		if c == "NET_RAW" {
+			t.Errorf("dropped cap NET_RAW must not appear in DangerousCaps: %v", f.DangerousCaps)
+		}
+	}
+	if len(f.DangerousCaps) != len(curatedCaps)-1 {
+		t.Errorf("expected all curated caps minus 1, got %d of %d", len(f.DangerousCaps), len(curatedCaps))
+	}
+}
+
 func TestScanSecurityOptAndNamespaces(t *testing.T) {
 	f, _ := Scan(docker.InspectInfo{
 		SecurityOpt: []string{"seccomp=unconfined", "apparmor:unconfined"},
