@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/kaylaehman/stratum/backend/capabilities"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/logtail"
@@ -42,6 +43,18 @@ func (h *Handlers) resolveLogContainer(w http.ResponseWriter, r *http.Request) (
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
+		return db.Container{}, "", false
+	}
+	// Gate on docker BEFORE any server-side topic grant: never grant logs:<id>
+	// for a container whose node can't tail logs.
+	node, err := h.Store.GetNode(r.Context(), ctr.NodeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return db.Container{}, "", false
+	}
+	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
+	if err := capabilities.Require(caps, capabilities.Docker); err != nil {
+		writeCapabilityUnavailable(w, "docker", "")
 		return db.Container{}, "", false
 	}
 	return ctr, clientID, true

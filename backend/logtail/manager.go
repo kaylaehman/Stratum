@@ -97,11 +97,12 @@ func (m *Manager) Subscribe(
 	entry, exists := m.tailers[dockerID]
 	if !exists {
 		tailerCtx, cancel := context.WithCancel(m.baseCtx)
-		entry = &tailerEntry{cancel: cancel}
+		// Create the entry fully-formed (refcount 1) and store it BEFORE
+		// launching the tailer goroutine, so any concurrent CancelContainer sees
+		// a live entry whose cancel also stops this tailer (no phantom entry).
+		entry = &tailerEntry{cancel: cancel, refcount: 1}
 		m.tailers[dockerID] = entry
-		// Start the tailer outside the lock so it can call publish which also
-		// needs to acquire the lock for listeners. We pass a pointer copy.
-		go func(e *tailerEntry) {
+		go func() {
 			client, clientErr := m.provider(tailerCtx, nodeID)
 			if clientErr != nil {
 				// Provider unavailable — emit synthetic error line then exit.
@@ -114,9 +115,10 @@ func (m *Manager) Subscribe(
 			}
 			publish := func(ll LogLine) { m.publishLine(dockerID, ll) }
 			m.startTailer(tailerCtx, cancel, dockerID, client, publish)
-		}(entry)
+		}()
+	} else {
+		entry.refcount++
 	}
-	entry.refcount++
 
 	m.hub.Subscribe(clientID, topic(dockerID))
 	m.clients[clientID] = append(m.clients[clientID], clientSub{dockerID: dockerID, nodeID: nodeID})
