@@ -12,6 +12,8 @@ interface TreeNodeRowProps {
   expandable?: boolean
   expanded?: boolean
   selected?: boolean
+  /** Optional badge rendered before the status dot (e.g. security flag indicator). */
+  badge?: ReactNode
   onToggle?: () => void
   onClick?: () => void
 }
@@ -28,6 +30,7 @@ export function TreeNodeRow({
   expandable,
   expanded,
   selected,
+  badge,
   onToggle,
   onClick,
 }: TreeNodeRowProps) {
@@ -101,6 +104,9 @@ export function TreeNodeRow({
           {sublabel}
         </span>
       )}
+
+      {/* Security badge (e.g. shield icon for flagged containers) */}
+      {badge && <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>{badge}</span>}
 
       {/* Status dot */}
       {status && (

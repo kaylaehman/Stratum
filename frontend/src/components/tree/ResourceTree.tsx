@@ -1,8 +1,10 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, Plus } from 'lucide-react'
+import { Loader, Plus, ShieldAlert } from 'lucide-react'
 import { useTree, useTreeLiveUpdates } from '../../lib/api/tree'
+import { useSecurityBadges } from '../../lib/api/security'
 import { useTreeStore } from '../../store/tree'
+import { useMe } from '../../hooks/useMe'
 import { TreeNodeRow } from './TreeNodeRow'
 import { NodeTypeIcon, VMIcon, ContainerIcon, FolderIcon } from './icons'
 import type { TreeNode, VM, Container } from '../../types/api'
@@ -61,9 +63,10 @@ function VMRows({ node, vms }: VMRowsProps) {
 interface ContainerRowsProps {
   node: TreeNode
   containers: Container[]
+  badges: Record<string, boolean>
 }
 
-function ContainerRows({ node, containers }: ContainerRowsProps) {
+function ContainerRows({ node, containers, badges }: ContainerRowsProps) {
   const { expanded, toggleExpanded, selection, setSelected } = useTreeStore()
 
   return (
@@ -72,6 +75,7 @@ function ContainerRows({ node, containers }: ContainerRowsProps) {
         const cKey = `container:${c.id}`
         const cExpanded = expanded.has(cKey)
         const cSelected = selection?.kind === 'container' && selection.containerId === c.id
+        const hasBadge = badges[c.id] === true
 
         return (
           <div key={c.id}>
@@ -85,6 +89,13 @@ function ContainerRows({ node, containers }: ContainerRowsProps) {
               expandable
               expanded={cExpanded}
               selected={cSelected}
+              badge={
+                hasBadge ? (
+                  <span title="Unacknowledged security flags" style={{ display: 'flex' }}>
+                    <ShieldAlert size={11} style={{ color: 'var(--status-error)' }} />
+                  </span>
+                ) : undefined
+              }
               onToggle={() => toggleExpanded(cKey)}
               onClick={() => setSelected({ kind: 'container', nodeId: node.id, containerId: c.id })}
             />
@@ -115,9 +126,10 @@ function ContainerRows({ node, containers }: ContainerRowsProps) {
 
 interface NodeSubtreeProps {
   node: TreeNode
+  badges: Record<string, boolean>
 }
 
-function NodeSubtree({ node }: NodeSubtreeProps) {
+function NodeSubtree({ node, badges }: NodeSubtreeProps) {
   const { expanded, toggleExpanded, selection, setSelected } = useTreeStore()
   const nodeKey = `node:${node.id}`
   const nodeExpanded = expanded.has(nodeKey)
@@ -153,7 +165,7 @@ function NodeSubtree({ node }: NodeSubtreeProps) {
 
           {/* Containers — only for docker capability */}
           {node.capabilities.docker && node.containers.length > 0 && (
-            <ContainerRows node={node} containers={node.containers} />
+            <ContainerRows node={node} containers={node.containers} badges={badges} />
           )}
 
           {/* Host filesystem entry point */}
@@ -182,6 +194,11 @@ export function ResourceTree() {
 
   const { data, isLoading, isError } = useTree()
   const { nodes: liveNodes, expanded, toggleExpanded } = useTreeStore()
+
+  const { data: meData } = useMe()
+  const isAdmin = meData?.role === 'admin'
+  const { data: badgesData } = useSecurityBadges(isAdmin)
+  const badges: Record<string, boolean> = badgesData?.badges ?? {}
 
   // Auto-expand when nodes first load
   useEffect(() => {
@@ -262,7 +279,7 @@ export function ResourceTree() {
       ) : (
         <div>
           {displayNodes.map((node) => (
-            <NodeSubtree key={node.id} node={node} />
+            <NodeSubtree key={node.id} node={node} badges={badges} />
           ))}
         </div>
       )}

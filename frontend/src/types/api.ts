@@ -457,3 +457,74 @@ export interface LogSubscribeRequest {
 export interface LogSubscribeResponse {
   topic: string
 }
+
+// Security types (Sub-project 8)
+
+export type FlagType =
+  | 'privileged'
+  | 'cap'
+  | 'seccomp'
+  | 'apparmor'
+  | 'device'
+  | 'userns_host'
+  | 'pid_host'
+  | 'net_host'
+  | 'root'
+
+export interface SecurityFlag {
+  type: FlagType
+  key: string
+  risk: string
+  acknowledged: boolean
+}
+
+export interface FlaggedContainer {
+  container_id: string
+  node_id: string
+  flags: SecurityFlag[]
+}
+
+export interface PrivilegedResponse {
+  containers: FlaggedContainer[]
+}
+
+export type InterfaceClass = 'all' | 'loopback' | 'external'
+
+export interface PortExposure {
+  id: string
+  node_id: string
+  container_id: string
+  host_ip: string
+  host_port: number
+  container_port: number
+  protocol: string
+  interface_class: InterfaceClass
+  is_new: boolean
+  notified_at?: string
+  first_seen: string
+  last_seen: string
+}
+
+export interface Listener {
+  node_id: string
+  protocol: string
+  address: string
+  port: number
+  process: string
+}
+
+export interface PortsResponse {
+  ports: PortExposure[]
+  non_docker_listeners: Listener[]
+}
+
+export interface SecurityBadgesResponse {
+  badges: Record<string, boolean>
+}
+
+export interface AcknowledgeRequest {
+  container_id: string
+  flag_type: string
+  flag_key: string
+  note?: string
+}
