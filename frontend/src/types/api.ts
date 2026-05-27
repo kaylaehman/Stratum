@@ -887,6 +887,19 @@ export interface UpdatesResponse {
 
 // Container Health Check types
 
+export interface SetHealthcheckRequest {
+  disable: boolean
+  test?: string[]
+  interval_sec?: number
+  timeout_sec?: number
+  start_period_sec?: number
+  retries?: number
+}
+
+export interface SetHealthcheckResponse {
+  new_container_id: string
+}
+
 export type HealthStatus = 'healthy' | 'unhealthy' | 'starting' | 'none'
 
 export interface HealthLogEntry {

@@ -6,8 +6,13 @@ import {
   Clock,
   MinusCircle,
   Loader,
+  Pencil,
+  Save,
+  X,
 } from 'lucide-react'
-import { useContainerHealth } from '../../lib/api/health'
+import { useContainerHealth, useSetHealthcheck } from '../../lib/api/health'
+import { ApiError } from '../../lib/api'
+import { useCan } from '../../lib/roles'
 import type { HealthStatus, HealthLogEntry } from '../../types/api'
 
 interface HealthCheckProps {
@@ -116,8 +121,287 @@ function LogRow({ entry }: { entry: HealthLogEntry }) {
   )
 }
 
+// ---- Number input helper ----
+
+interface NumInputProps {
+  label: string
+  value: number
+  min: number
+  onChange: (v: number) => void
+}
+
+function NumInput({ label, value, min, onChange }: NumInputProps) {
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className="text-xs shrink-0 w-28"
+        style={{ color: 'var(--text-muted)' }}
+      >
+        {label}
+      </span>
+      <input
+        type="number"
+        min={min}
+        value={value}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10)
+          if (!isNaN(n) && n >= min) onChange(n)
+        }}
+        className="font-mono text-xs w-20 px-2 py-1"
+        style={{
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '3px',
+          color: 'var(--text-primary)',
+          outline: 'none',
+        }}
+      />
+    </div>
+  )
+}
+
+// ---- Edit form ----
+
+interface EditFormState {
+  command: string
+  interval: number
+  timeout: number
+  startPeriod: number
+  retries: number
+}
+
+interface HealthEditFormProps {
+  containerId: string
+  initialState: EditFormState
+  onCancel: () => void
+}
+
+function HealthEditForm({ containerId, initialState, onCancel }: HealthEditFormProps) {
+  const [form, setForm] = useState<EditFormState>(initialState)
+  const [confirming, setConfirming] = useState<'save' | 'disable' | null>(null)
+
+  const { mutate, isPending, error, reset: resetMutation } = useSetHealthcheck(containerId)
+
+  const apiErr = error as ApiError | null
+  const errCode = apiErr?.body != null && typeof apiErr.body === 'object'
+    ? (apiErr.body as Record<string, string>).error
+    : null
+  const inlineError =
+    errCode === 'test_required' ? 'Command is required when not disabling.'
+    : errCode === 'healthcheck_failed' ? 'Healthcheck apply failed — container could not be recreated.'
+    : apiErr ? 'An unexpected error occurred.'
+    : null
+
+  function submit(disable: boolean) {
+    resetMutation()
+    const req = disable
+      ? { disable: true as const }
+      : {
+          disable: false as const,
+          test: ['CMD-SHELL', form.command.trim()],
+          interval_sec: form.interval,
+          timeout_sec: form.timeout,
+          start_period_sec: form.startPeriod,
+          retries: form.retries,
+        }
+    mutate(req, { onSuccess: () => onCancel() })
+  }
+
+  return (
+    <div
+      className="flex flex-col gap-3 px-3 py-3"
+      style={{ borderTop: '1px solid var(--border-subtle)' }}
+    >
+      <span
+        className="text-xs font-medium uppercase tracking-wider"
+        style={{ color: 'var(--text-muted)' }}
+      >
+        Edit Healthcheck
+      </span>
+
+      {/* Command input */}
+      <div className="flex items-center gap-3">
+        <span
+          className="text-xs shrink-0 w-28"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Command
+        </span>
+        <input
+          type="text"
+          value={form.command}
+          placeholder="curl -f http://localhost/health || exit 1"
+          onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
+          className="font-mono text-xs flex-1 px-2 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            borderRadius: '3px',
+            color: 'var(--text-primary)',
+            outline: 'none',
+          }}
+        />
+      </div>
+
+      <NumInput
+        label="Interval (s)"
+        value={form.interval}
+        min={1}
+        onChange={(v) => setForm((f) => ({ ...f, interval: v }))}
+      />
+      <NumInput
+        label="Timeout (s)"
+        value={form.timeout}
+        min={1}
+        onChange={(v) => setForm((f) => ({ ...f, timeout: v }))}
+      />
+      <NumInput
+        label="Start period (s)"
+        value={form.startPeriod}
+        min={0}
+        onChange={(v) => setForm((f) => ({ ...f, startPeriod: v }))}
+      />
+      <NumInput
+        label="Retries"
+        value={form.retries}
+        min={1}
+        onChange={(v) => setForm((f) => ({ ...f, retries: v }))}
+      />
+
+      {/* Inline error */}
+      {inlineError && !confirming && (
+        <span className="font-mono text-xs" style={{ color: 'var(--status-error)' }}>
+          {inlineError}
+        </span>
+      )}
+
+      {/* Action row (pre-confirm) */}
+      {!confirming && (
+        <div className="flex items-center gap-2 mt-1">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => { resetMutation(); setConfirming('save') }}
+            className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--accent)',
+              color: isPending ? 'var(--text-muted)' : 'var(--accent)',
+              borderRadius: '3px',
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              opacity: isPending ? 0.6 : 1,
+            }}
+          >
+            <Save size={11} />
+            Save
+          </button>
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => { resetMutation(); setConfirming('disable') }}
+            className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--status-error)',
+              color: isPending ? 'var(--text-muted)' : 'var(--status-error)',
+              borderRadius: '3px',
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              opacity: isPending ? 0.6 : 1,
+            }}
+          >
+            <X size={11} />
+            Disable healthcheck
+          </button>
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={onCancel}
+            className="font-mono text-xs px-2.5 py-1"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+              borderRadius: '3px',
+              cursor: isPending ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Confirm dialog (inline, matches SnapshotsPanel pattern) */}
+      {confirming && (
+        <div
+          className="flex flex-col gap-2 p-3"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--status-warn)',
+            borderRadius: '3px',
+          }}
+        >
+          <p className="font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
+            {confirming === 'disable'
+              ? 'Disable the healthcheck on this container?'
+              : 'Apply healthcheck changes to this container?'}
+          </p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            This will <strong>stop and recreate</strong> the container to apply the change.
+            The operation may take several seconds.
+          </p>
+          {inlineError && (
+            <span className="font-mono text-xs" style={{ color: 'var(--status-error)' }}>
+              {inlineError}
+            </span>
+          )}
+          <div className="flex items-center gap-2 mt-1">
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => submit(confirming === 'disable')}
+              className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+              style={{
+                background: 'rgba(240,160,32,0.15)',
+                border: '1px solid var(--status-warn)',
+                color: isPending ? 'var(--text-muted)' : 'var(--status-warn)',
+                borderRadius: '3px',
+                cursor: isPending ? 'not-allowed' : 'pointer',
+                opacity: isPending ? 0.6 : 1,
+              }}
+            >
+              {isPending
+                ? <Loader size={11} className="animate-spin" />
+                : <Save size={11} />}
+              {confirming === 'disable' ? 'Disable & recreate' : 'Apply & recreate'}
+            </button>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => { resetMutation(); setConfirming(null) }}
+              className="font-mono text-xs px-2.5 py-1"
+              style={{
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-secondary)',
+                borderRadius: '3px',
+                cursor: isPending ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- Main component ----
+
 export function HealthCheck({ containerId }: HealthCheckProps) {
   const { data, isLoading, isError, error } = useContainerHealth(containerId)
+  const { isAdmin } = useCan()
+  const [editing, setEditing] = useState(false)
 
   const is502 =
     isError &&
@@ -125,6 +409,19 @@ export function HealthCheck({ containerId }: HealthCheckProps) {
     error !== null &&
     'status' in error &&
     (error as { status: number }).status === 502
+
+  function buildInitialState(): EditFormState {
+    if (!data || !data.configured) {
+      return { command: '', interval: 30, timeout: 10, startPeriod: 0, retries: 3 }
+    }
+    return {
+      command: formatTestCommand(data.test),
+      interval: data.interval_sec,
+      timeout: data.timeout_sec,
+      startPeriod: data.start_period_sec,
+      retries: data.retries,
+    }
+  }
 
   return (
     <div
@@ -137,16 +434,35 @@ export function HealthCheck({ containerId }: HealthCheckProps) {
     >
       {/* Header */}
       <div
-        className="px-3 py-2 flex items-center gap-2"
+        className="px-3 py-2 flex items-center justify-between gap-2"
         style={{ borderBottom: '1px solid var(--border-subtle)' }}
       >
-        <HeartPulse size={12} style={{ color: 'var(--text-muted)' }} />
-        <p
-          className="text-xs font-medium uppercase tracking-wider"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          Health Check
-        </p>
+        <div className="flex items-center gap-2">
+          <HeartPulse size={12} style={{ color: 'var(--text-muted)' }} />
+          <p
+            className="text-xs font-medium uppercase tracking-wider"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            Health Check
+          </p>
+        </div>
+        {isAdmin && data && !isLoading && !editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="flex items-center gap-1.5 font-mono text-xs px-2 py-0.5"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            <Pencil size={11} />
+            {data.configured ? 'Edit' : 'Add'}
+          </button>
+        )}
       </div>
 
       {/* Loading */}
@@ -177,7 +493,7 @@ export function HealthCheck({ containerId }: HealthCheckProps) {
           </div>
 
           {/* Config (only when configured) */}
-          {data.configured && (
+          {data.configured && !editing && (
             <div
               className="px-3 py-3 flex flex-col gap-1.5"
               style={{ borderTop: '1px solid var(--border-subtle)' }}
@@ -262,8 +578,17 @@ export function HealthCheck({ containerId }: HealthCheckProps) {
             </div>
           )}
 
+          {/* Edit form (admin only) */}
+          {editing && (
+            <HealthEditForm
+              containerId={containerId}
+              initialState={buildInitialState()}
+              onCancel={() => setEditing(false)}
+            />
+          )}
+
           {/* Log results */}
-          {data.configured && (
+          {data.configured && !editing && (
             <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
               <div
                 className="px-3 py-2 flex items-center justify-between"
