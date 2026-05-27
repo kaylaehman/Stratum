@@ -73,20 +73,27 @@ func (m *Manager) Get(ctx context.Context, nodeID string) (*Clients, error) {
 		cl.Proxmox = proxmox.New(node.ProxmoxEndpoint, creds.ProxmoxTokenID, creds.ProxmoxSecret, node.ProxmoxTLSInsecure)
 	}
 
+	// Double-checked insert: if another caller built the clients while we were
+	// building (no lock held during build), discard ours and use theirs.
 	m.mu.Lock()
+	if existing, ok := m.cache[nodeID]; ok {
+		m.mu.Unlock()
+		if cl.Docker != nil {
+			_ = cl.Docker.Close() // safe: no one else holds this discarded build
+		}
+		return existing, nil
+	}
 	m.cache[nodeID] = cl
 	m.mu.Unlock()
 	return cl, nil
 }
 
-// Invalidate drops a node's cached clients (call on node update/delete),
-// closing the Docker client if present.
+// Invalidate drops a node's cached clients (call on node update/delete). It does
+// NOT close the Docker client: a concurrent in-flight poll may still hold the
+// pointer, and closing it would risk use-after-close. The Docker SDK client only
+// wraps an http.Client (idle keep-alive connections), which the GC reclaims.
 func (m *Manager) Invalidate(nodeID string) {
 	m.mu.Lock()
-	c, ok := m.cache[nodeID]
 	delete(m.cache, nodeID)
 	m.mu.Unlock()
-	if ok && c.Docker != nil {
-		_ = c.Docker.Close()
-	}
 }
