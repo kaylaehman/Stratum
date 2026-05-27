@@ -1334,3 +1334,45 @@ export interface SetProxyConfigRequest {
   token?: string
 }
 
+// DNS Record Management types (Feature F3)
+
+export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'PTR' | 'TXT' | 'SRV'
+
+export interface DnsCapabilities {
+  list: boolean
+  create: boolean
+  update: boolean
+  delete: boolean
+}
+
+export interface DnsRecord {
+  id: string
+  adapter_type: string
+  type: DnsRecordType
+  name: string
+  value: string
+  ttl?: number
+  comment?: string
+}
+
+export interface SupportedDns {
+  name: string
+  capabilities: DnsCapabilities
+}
+
+export interface DnsStatus {
+  detected: string
+  capabilities: DnsCapabilities
+  configured: boolean
+  endpoint?: string
+  has_token: boolean
+  records: DnsRecord[]
+  record_error?: string
+  supported: SupportedDns[]
+}
+
+export interface SetDnsConfigRequest {
+  endpoint: string
+  token?: string
+}
+

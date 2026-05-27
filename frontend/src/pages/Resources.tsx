@@ -4,6 +4,7 @@ import { WakeOnLan } from '../components/nodes/WakeOnLan'
 import { SSHKeys } from '../components/nodes/SSHKeys'
 import { Scheduler } from '../components/nodes/Scheduler'
 import { ReverseProxyPanel } from '../components/proxy/ReverseProxyPanel'
+import { DnsPanel } from '../components/dns/DnsPanel'
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
@@ -395,6 +396,7 @@ function DetailPane() {
             <SSHKeys nodeId={selection.nodeId} />
             <Scheduler nodeId={selection.nodeId} />
             <ReverseProxyPanel nodeId={selection.nodeId} />
+            <DnsPanel nodeId={selection.nodeId} />
           </div>
         )}
 
