@@ -114,6 +114,9 @@ func (h *Handlers) GetNode(w http.ResponseWriter, r *http.Request) {
 
 // CreateNode probes + registers a node.
 func (h *Handlers) CreateNode(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
 	var body createNodeBody
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_body")
@@ -152,6 +155,9 @@ func (h *Handlers) CreateNode(w http.ResponseWriter, r *http.Request) {
 
 // RenameNode updates a node's display name.
 func (h *Handlers) RenameNode(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var body struct {
 		Name string `json:"name"`
@@ -173,8 +179,15 @@ func (h *Handlers) RenameNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
-// DeleteNode removes a node.
+// DeleteNode removes a node (admin + step-up 2FA — it discards the host's
+// stored credentials and all derived inventory).
 func (h *Handlers) DeleteNode(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	err := h.Nodes.Delete(r.Context(), id)
 	if errors.Is(err, db.ErrNotFound) {
@@ -189,8 +202,12 @@ func (h *Handlers) DeleteNode(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ReprobeNode re-runs detection on an existing node.
+// ReprobeNode re-runs detection on an existing node (admin — it makes the
+// backend connect to the stored host).
 func (h *Handlers) ReprobeNode(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	v, err := h.Nodes.Reprobe(r.Context(), id)
 	switch {

@@ -98,6 +98,28 @@ func TestRBACRoleGating(t *testing.T) {
 	}
 }
 
+// TestRBACNodeCRUDAdminOnly guards the (previously ungated) node management
+// endpoints: a viewer must not be able to create/rename/delete/reprobe nodes.
+func TestRBACNodeCRUDAdminOnly(t *testing.T) {
+	srv, adminTok := newNodeTestServer(t)
+	c := &http.Client{}
+	createUser(t, c, srv.URL, adminTok, "viewer", "viewer")
+	viewerTok := loginAs(t, c, srv.URL, "viewer")
+
+	cases := []struct{ method, url string }{
+		{http.MethodPost, srv.URL + "/api/nodes"},
+		{http.MethodPut, srv.URL + "/api/nodes/x"},
+		{http.MethodDelete, srv.URL + "/api/nodes/x"},
+		{http.MethodPost, srv.URL + "/api/nodes/x/probe"},
+	}
+	for _, tc := range cases {
+		body := map[string]any{"name": "n", "host": "10.0.0.1", "ssh_port": 22, "credentials": map[string]string{"method": "ssh_key"}}
+		if s := status(t, c, authReq(t, tc.method, tc.url, viewerTok, body)); s != http.StatusForbidden {
+			t.Errorf("viewer %s %s = %d, want 403", tc.method, tc.url, s)
+		}
+	}
+}
+
 // TestRBACUserManagement covers create/list/role-change/delete plus the
 // last-admin and self-delete guards.
 func TestRBACUserManagement(t *testing.T) {

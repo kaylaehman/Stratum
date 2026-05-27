@@ -76,6 +76,9 @@ func (h *Handlers) DeleteSecretGroup(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	if err := h.Store.DeleteSecretGroup(r.Context(), id); errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -145,6 +148,9 @@ func (h *Handlers) ImportSecrets(w http.ResponseWriter, r *http.Request) {
 // DeleteSecret removes one secret. Admin-gated + audited.
 func (h *Handlers) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
+		return
+	}
+	if !h.requireStepUp(w, r) {
 		return
 	}
 	id := chi.URLParam(r, "id")
