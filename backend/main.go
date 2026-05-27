@@ -24,6 +24,8 @@ import (
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
 	"github.com/kaylaehman/stratum/backend/hub"
+	"github.com/kaylaehman/stratum/backend/inventory"
+	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/server"
 )
@@ -64,12 +66,17 @@ func run(logger *slog.Logger) error {
 	}
 
 	jwt := auth.NewJWT(cfg.JWTSecret, accessTokenTTL)
+	h := hub.New()
+	conn := nodeconn.NewManager(store, cipher)
+	poller := inventory.NewPoller(store, conn, h, logger)
+
 	handlers := &api.Handlers{
 		Store:          store,
 		Activity:       activity.NewStore(store),
 		JWT:            jwt,
-		Hub:            hub.New(),
+		Hub:            h,
 		Nodes:          nodes.NewService(store, cipher),
+		Poller:         poller,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -81,6 +88,9 @@ func run(logger *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	go poller.Run(ctx) // inventory poller; stops on shutdown
+
 	return srv.Run(ctx)
 }
 

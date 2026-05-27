@@ -45,9 +45,12 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/me", d.Handlers.Me)
 			r.Get("/ws", d.Handlers.WebSocket)
 
-			// Read-only node routes.
+			// Read-only node + tree routes.
 			r.Get("/nodes", d.Handlers.ListNodes)
 			r.Get("/nodes/{id}", d.Handlers.GetNode)
+			r.Get("/tree", d.Handlers.Tree)
+			r.Get("/nodes/{id}/vms", d.Handlers.NodeVMs)
+			r.Get("/nodes/{id}/containers", d.Handlers.NodeContainers)
 
 			// Authenticated + audited mutations.
 			audited := r.With(mw.Activity(d.Handlers.Activity))

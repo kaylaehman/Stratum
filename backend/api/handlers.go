@@ -10,6 +10,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/hub"
+	"github.com/kaylaehman/stratum/backend/inventory"
 	"github.com/kaylaehman/stratum/backend/nodes"
 )
 
@@ -20,6 +21,7 @@ type Handlers struct {
 	JWT       *auth.JWT
 	Hub       *hub.Hub
 	Nodes     *nodes.Service
+	Poller    *inventory.Poller
 	Logger    *slog.Logger
 	StartedAt time.Time
 
