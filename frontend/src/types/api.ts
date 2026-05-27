@@ -1390,6 +1390,44 @@ export interface RunbookRequest {
   requires_approval: boolean
 }
 
+// File Change Detection types (Feature 22)
+
+export interface FileWatch {
+  id: string
+  node_id: string
+  path: string
+  recursive: boolean
+  created_by: string
+  created_at: string
+}
+
+export interface FileWatchesResponse {
+  watches: FileWatch[]
+}
+
+export interface AddWatchRequest {
+  path: string
+  recursive: boolean
+}
+
+export interface ScanResponse {
+  detected: number
+}
+
+export type FileEventType = 'create' | 'modify' | 'delete' | 'rename' | 'chmod' | string
+
+export interface FileEvent {
+  id: string
+  node_id: string
+  path: string
+  event_type: FileEventType
+  detected_at: string
+}
+
+export interface FileEventsResponse {
+  events: FileEvent[]
+}
+
 // DNS Record Management types (Feature F3)
 
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'PTR' | 'TXT' | 'SRV'

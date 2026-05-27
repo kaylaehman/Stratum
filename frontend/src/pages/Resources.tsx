@@ -5,6 +5,7 @@ import { SSHKeys } from '../components/nodes/SSHKeys'
 import { Scheduler } from '../components/nodes/Scheduler'
 import { ReverseProxyPanel } from '../components/proxy/ReverseProxyPanel'
 import { DnsPanel } from '../components/dns/DnsPanel'
+import { FileWatchPanel } from '../components/security/FileWatchPanel'
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
@@ -397,6 +398,7 @@ function DetailPane() {
             <Scheduler nodeId={selection.nodeId} />
             <ReverseProxyPanel nodeId={selection.nodeId} />
             <DnsPanel nodeId={selection.nodeId} />
+            <FileWatchPanel nodeId={selection.nodeId} />
           </div>
         )}
 
