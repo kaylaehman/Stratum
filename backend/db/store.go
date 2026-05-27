@@ -139,19 +139,21 @@ type ContainerSecurityRow struct {
 }
 
 // PortExposureRow is one published port. IsNew is durable until acknowledged.
+// JSON tags: this row is serialized directly in the ports-audit API responses,
+// so it must match the snake_case convention used by the rest of the API.
 type PortExposureRow struct {
-	ID             string
-	NodeID         string
-	ContainerID    string
-	HostIP         string
-	HostPort       int
-	ContainerPort  int
-	Protocol       string
-	InterfaceClass string
-	IsNew          bool
-	NotifiedAt     *time.Time
-	FirstSeen      time.Time
-	LastSeen       time.Time
+	ID             string     `json:"id"`
+	NodeID         string     `json:"node_id"`
+	ContainerID    string     `json:"container_id"`
+	HostIP         string     `json:"host_ip"`
+	HostPort       int        `json:"host_port"`
+	ContainerPort  int        `json:"container_port"`
+	Protocol       string     `json:"protocol"`
+	InterfaceClass string     `json:"interface_class"`
+	IsNew          bool       `json:"is_new"`
+	NotifiedAt     *time.Time `json:"notified_at,omitempty"`
+	FirstSeen      time.Time  `json:"first_seen"`
+	LastSeen       time.Time  `json:"last_seen"`
 }
 
 // SecurityAck suppresses a specific flag's badge/alert.
