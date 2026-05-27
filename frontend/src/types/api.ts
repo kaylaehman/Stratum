@@ -631,6 +631,32 @@ export interface TopologyResponse {
   containers: TopologyContainer[]
 }
 
+// Dependency Graph types (Feature 16)
+
+export type DepGraphNodeKind = 'container' | 'network' | 'volume'
+export type DepGraphEdgeKind = 'network' | 'volume'
+
+export interface DepGraphNode {
+  id: string
+  kind: DepGraphNodeKind
+  label: string
+  status?: string
+  compose_project?: string
+  driver?: string
+}
+
+export interface DepGraphEdge {
+  source: string
+  target: string
+  kind: DepGraphEdgeKind
+}
+
+export interface DepGraph {
+  node_id: string
+  nodes: DepGraphNode[]
+  edges: DepGraphEdge[]
+}
+
 // Resource Timeline types (Feature 9)
 
 export interface MetricSample {

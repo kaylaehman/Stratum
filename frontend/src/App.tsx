@@ -16,6 +16,7 @@ import Activity from './pages/Activity'
 import Volumes from './pages/Volumes'
 import Metrics from './pages/Metrics'
 import Network from './pages/Network'
+import Dependencies from './pages/Dependencies'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -106,6 +107,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Network />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/dependencies"
+          element={
+            <AuthGuard>
+              <Dependencies />
             </AuthGuard>
           }
         />
