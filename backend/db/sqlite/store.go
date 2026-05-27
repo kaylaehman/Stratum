@@ -244,7 +244,7 @@ func (s *Store) ListActivity(ctx context.Context, f appdb.ActivityFilter) ([]app
 		e.TargetType = ptrFromNull(targetType)
 		e.TargetID = ptrFromNull(targetID)
 		e.DetailJSON = ptrFromNull(detail)
-		if e.CreatedAt, err = parseTS(createdAt.String); err != nil {
+		if e.CreatedAt, err = scanTS(createdAt); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

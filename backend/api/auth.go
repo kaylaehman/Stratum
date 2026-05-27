@@ -42,6 +42,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.Store.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
+		auth.DummyCompare(req.Password) // equalize timing to prevent user enumeration
 		h.logLogin(r, nil, activity.ResultError)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials")
 		return

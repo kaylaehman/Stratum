@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -24,11 +25,16 @@ func (h *Handlers) WebSocket(w http.ResponseWriter, r *http.Request) {
 	defer h.Hub.Unsubscribe(id) // runs before CloseNow (LIFO): stops writer first
 	h.Hub.Subscribe(id, "ping")
 
-	ctx := r.Context()
+	// Cancelled when the writer hits a dead connection, so the reader's blocked
+	// c.Read returns and the handler unwinds (Unsubscribe + CloseNow) instead of
+	// leaking the registration until an unrelated read error.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 
 	go func() {
 		for msg := range send {
 			if err := c.Write(ctx, websocket.MessageText, msg); err != nil {
+				cancel()
 				return
 			}
 		}
