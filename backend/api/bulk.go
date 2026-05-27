@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
+
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/bulk"
 	"github.com/kaylaehman/stratum/backend/db"
@@ -15,8 +17,9 @@ import (
 )
 
 const (
-	bulkConcurrency = 8
-	bulkOpTimeout   = 30 * time.Second
+	bulkConcurrency   = 8
+	bulkOpTimeout     = 30 * time.Second
+	bulkMaxContainers = 500 // cap per request to bound DB lookups + goroutines
 )
 
 type bulkRequest struct {
@@ -59,6 +62,10 @@ func (h *Handlers) BulkContainers(w http.ResponseWriter, r *http.Request) {
 	var body bulkRequest
 	if err := decodeJSON(r, &body); err != nil || !bulk.Valid(body.Action) || len(body.ContainerIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "invalid_bulk_request")
+		return
+	}
+	if len(body.ContainerIDs) > bulkMaxContainers {
+		writeError(w, http.StatusBadRequest, "too_many_containers")
 		return
 	}
 
@@ -150,7 +157,13 @@ func (h *Handlers) runBulkOne(ctx context.Context, it bulk.Item, do func(*docker
 	opCtx, cancel := context.WithTimeout(ctx, bulkOpTimeout)
 	defer cancel()
 	if err := do(clients.Docker, opCtx, it.DockerID); err != nil {
-		res.Result, res.Error = "error", "action_failed"
+		// A conflict (e.g. remove of a container that's actually running, or an
+		// already-in-state lifecycle action) is a state problem, not a failure.
+		errCode := "action_failed"
+		if cerrdefs.IsConflict(err) {
+			errCode = "conflict"
+		}
+		res.Result, res.Error = "error", errCode
 		h.auditBulk(ctx, auditAction, it, userID, activity.ResultError)
 		return res
 	}
@@ -159,6 +172,11 @@ func (h *Handlers) runBulkOne(ctx context.Context, it bulk.Item, do func(*docker
 }
 
 func (h *Handlers) auditBulk(ctx context.Context, action string, it bulk.Item, userID *string, result string) {
+	// Detach from request cancellation: the daemon action may have already
+	// executed (a removed container can't be un-removed), so its audit row MUST
+	// be written even if the client disconnected mid-batch. Mirrors the activity
+	// middleware's context.WithoutCancel handling.
+	ctx = context.WithoutCancel(ctx)
 	_ = h.Activity.Append(ctx, activity.Entry{
 		UserID:     userID,
 		Action:     action,
