@@ -14,13 +14,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/time/rate"
+
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/config"
+	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
 	"github.com/kaylaehman/stratum/backend/hub"
+	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/server"
 )
 
@@ -54,15 +58,22 @@ func run(logger *slog.Logger) error {
 
 	maybeSeedAdmin(context.Background(), store, cfg, logger)
 
+	cipher, err := crypto.New(cfg.EncryptionKey)
+	if err != nil {
+		return err
+	}
+
 	jwt := auth.NewJWT(cfg.JWTSecret, accessTokenTTL)
 	handlers := &api.Handlers{
-		Store:         store,
-		Activity:      activity.NewStore(store),
-		JWT:           jwt,
-		Hub:           hub.New(),
-		Logger:        logger,
-		StartedAt:     time.Now(),
-		SecureCookies: strings.HasPrefix(cfg.BaseURL, "https"),
+		Store:          store,
+		Activity:       activity.NewStore(store),
+		JWT:            jwt,
+		Hub:            hub.New(),
+		Nodes:          nodes.NewService(store, cipher),
+		Logger:         logger,
+		StartedAt:      time.Now(),
+		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
+		PreviewLimiter: rate.NewLimiter(rate.Every(2*time.Second), 5),
 	}
 
 	router := server.NewRouter(&server.Deps{Handlers: handlers, JWT: jwt, Store: store})

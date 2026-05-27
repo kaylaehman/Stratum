@@ -45,8 +45,18 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/me", d.Handlers.Me)
 			r.Get("/ws", d.Handlers.WebSocket)
 
+			// Read-only node routes.
+			r.Get("/nodes", d.Handlers.ListNodes)
+			r.Get("/nodes/{id}", d.Handlers.GetNode)
+
 			// Authenticated + audited mutations.
-			r.With(mw.Activity(d.Handlers.Activity)).Post("/auth/logout", d.Handlers.Logout)
+			audited := r.With(mw.Activity(d.Handlers.Activity))
+			audited.Post("/auth/logout", d.Handlers.Logout)
+			audited.Post("/nodes", d.Handlers.CreateNode)
+			audited.Put("/nodes/{id}", d.Handlers.RenameNode)
+			audited.Delete("/nodes/{id}", d.Handlers.DeleteNode)
+			audited.Post("/nodes/{id}/probe", d.Handlers.ReprobeNode)
+			audited.Post("/nodes/probe-preview", d.Handlers.ProbePreview)
 		})
 	})
 
