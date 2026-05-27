@@ -5,6 +5,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // ContainerUsers is a container's parsed passwd/group plus derived id->name maps.
@@ -28,6 +30,7 @@ type ContainerCache struct {
 
 	mu    sync.Mutex
 	cache map[string]containerEntry
+	sf    singleflight.Group // dedupe concurrent fetches for the same container
 }
 
 type containerEntry struct {
@@ -51,24 +54,27 @@ func (c *ContainerCache) ResolveContainer(ctx context.Context, nodeID, container
 	}
 	c.mu.Unlock()
 
-	cu := &ContainerUsers{UIDToName: map[int]string{}, GIDToName: map[int]string{}}
-	if data, err := c.fetch(ctx, nodeID, containerID, "/etc/passwd"); err == nil && len(data) > 0 {
-		cu.Passwd = ParsePasswdFull(bytes.NewReader(data))
-		for _, e := range cu.Passwd {
-			cu.UIDToName[e.UID] = e.Name
+	// Dedupe concurrent misses for the same container so only one tar-read runs.
+	v, _, _ := c.sf.Do(containerID, func() (any, error) {
+		cu := &ContainerUsers{UIDToName: map[int]string{}, GIDToName: map[int]string{}}
+		if data, err := c.fetch(ctx, nodeID, containerID, "/etc/passwd"); err == nil && len(data) > 0 {
+			cu.Passwd = ParsePasswdFull(bytes.NewReader(data))
+			for _, e := range cu.Passwd {
+				cu.UIDToName[e.UID] = e.Name
+			}
 		}
-	}
-	if data, err := c.fetch(ctx, nodeID, containerID, "/etc/group"); err == nil && len(data) > 0 {
-		cu.Group = ParseGroupFull(bytes.NewReader(data))
-		for _, g := range cu.Group {
-			cu.GIDToName[g.GID] = g.Name
+		if data, err := c.fetch(ctx, nodeID, containerID, "/etc/group"); err == nil && len(data) > 0 {
+			cu.Group = ParseGroupFull(bytes.NewReader(data))
+			for _, g := range cu.Group {
+				cu.GIDToName[g.GID] = g.Name
+			}
 		}
-	}
-
-	c.mu.Lock()
-	c.cache[containerID] = containerEntry{users: cu, expires: time.Now().Add(c.ttl)}
-	c.mu.Unlock()
-	return cu, nil
+		c.mu.Lock()
+		c.cache[containerID] = containerEntry{users: cu, expires: time.Now().Add(c.ttl)}
+		c.mu.Unlock()
+		return cu, nil
+	})
+	return v.(*ContainerUsers), nil
 }
 
 // Invalidate drops a container's cached user table (call on a SP2 'removed'

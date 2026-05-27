@@ -42,14 +42,12 @@ func TestEffectiveIdentity(t *testing.T) {
 		wantUID    int
 		wantGID    int
 		wantRoot   bool
-		wantSupp   []int
 	}{
-		{"", 0, 0, true, nil},
-		{"node", 1000, 1000, false, []int{44, 998}},
-		{"1000", 1000, 1000, false, []int{44, 998}},
-		{"1000:1000", 1000, 1000, false, []int{44, 998}},
-		{"app:media", 999, 44, false, []int{44}}, // app is in media(44) and that's the primary => supp excludes primary... see note
-		{"unknownuser", 0, 0, true, nil},          // unknown name -> uid stays 0 (root-ish); acceptable
+		{"", 0, 0, true},
+		{"node", 1000, 1000, false},
+		{"1000", 1000, 1000, false},
+		{"1000:1000", 1000, 1000, false},
+		{"app:media", 999, 44, false},
 	}
 	for _, c := range cases {
 		id := EffectiveIdentity(c.configUser, passwd, group)
@@ -57,6 +55,16 @@ func TestEffectiveIdentity(t *testing.T) {
 			t.Errorf("EffectiveIdentity(%q) = uid %d gid %d root %v; want %d %d %v",
 				c.configUser, id.UID, id.GID, id.IsRoot, c.wantUID, c.wantGID, c.wantRoot)
 		}
+	}
+
+	// Unknown username must NOT resolve to root (false-allow regression).
+	unknown := EffectiveIdentity("ghost", passwd, group)
+	if !unknown.Unresolvable || unknown.IsRoot {
+		t.Errorf("unknown user should be Unresolvable and not root, got %+v", unknown)
+	}
+	v := FileAnalysis(FileFacts{UID: 0, GID: 0, ModeOctal: "0777"}, unknown, nil, nil, nil)
+	if v.Category != "unknown" || v.ReadGranted || v.WriteGranted || v.ExecGranted {
+		t.Errorf("unknown-user verdict must grant nothing, got %+v", v)
 	}
 }
 

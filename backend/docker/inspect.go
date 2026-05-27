@@ -14,8 +14,8 @@ import (
 	"io"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/errdefs"
 )
 
 // Mount is a faithful subset of a container mount point.
@@ -129,10 +129,14 @@ func (c *Client) Inspect(ctx context.Context, id string) (InspectInfo, error) {
 // requested path does not exist in the container (e.g. a distroless image).
 var ErrFileNotFoundInContainer = errors.New("docker: file not found in container")
 
+// ErrFileTooLargeInContainer is returned when a copied file exceeds the read
+// cap, so callers never parse a silently-truncated file (e.g. /etc/passwd).
+var ErrFileTooLargeInContainer = errors.New("docker: file too large to copy from container")
+
 // mapCopyErr translates a Docker SDK copy error to ErrFileNotFoundInContainer
 // when errdefs.IsNotFound reports true, and otherwise returns the original error.
 func mapCopyErr(err error) error {
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return ErrFileNotFoundInContainer
 	}
 	return err
@@ -153,6 +157,9 @@ func firstFileFromTar(r io.Reader) ([]byte, error) {
 		}
 		if hdr.Typeflag == tar.TypeReg || hdr.Typeflag == 0 {
 			const maxSize = 8 << 20 // 8 MB
+			if hdr.Size > maxSize {
+				return nil, ErrFileTooLargeInContainer // don't return a silently-truncated /etc/passwd
+			}
 			return io.ReadAll(io.LimitReader(tr, maxSize))
 		}
 	}

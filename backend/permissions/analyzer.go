@@ -123,6 +123,10 @@ type Identity struct {
 	GID               int
 	SupplementaryGIDs []int
 	IsRoot            bool
+	// Unresolvable is set when Config.User names a user absent from the
+	// container's /etc/passwd. The verdict must NOT assume root (a false allow)
+	// in this case — it is reported as an unknown identity instead.
+	Unresolvable bool
 }
 
 // EffectiveIdentity resolves Config.User against the container's passwd/group.
@@ -150,6 +154,10 @@ func EffectiveIdentity(configUser string, passwd []PasswdEntry, group []GroupEnt
 				id.UID = e.UID
 				id.GID = e.GID
 				username = e.Name
+			} else {
+				// Unknown username: do NOT default to root (false allow).
+				id.Unresolvable = true
+				id.UID = -1
 			}
 		}
 	}
@@ -249,6 +257,13 @@ func FileAnalysis(file FileFacts, id Identity, hostUIDs, hostGIDs, ctrUIDs map[i
 		ContainerOwnerName: ctrUIDs[file.UID],
 		EffUID:             id.UID, EffGID: id.GID, SupplementaryGIDs: id.SupplementaryGIDs,
 		ProcessIsRoot: id.IsRoot,
+	}
+
+	// Unknown run user: report unknown, grant nothing (never a false root allow).
+	if id.Unresolvable {
+		v.Category = "unknown"
+		v.Reason = "container run user could not be resolved from /etc/passwd; access cannot be determined (the container likely fails to start)"
+		return v
 	}
 
 	var bits int

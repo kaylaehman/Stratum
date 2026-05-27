@@ -140,13 +140,27 @@ func (h *Handlers) UIDAnalysisCSV(w http.ResponseWriter, r *http.Request) {
 	_ = cw.Write([]string{"kind", "id", "host_name", "container_name", "on_host", "on_container", "class"})
 	writeRows := func(kind string, rows []permissions.Row) {
 		for _, row := range rows {
-			_ = cw.Write([]string{kind, strconv.Itoa(row.ID), row.HostName, row.ContainerName,
+			_ = cw.Write([]string{kind, strconv.Itoa(row.ID), csvSafe(row.HostName), csvSafe(row.ContainerName),
 				strconv.FormatBool(row.OnHost), strconv.FormatBool(row.OnContainer), row.Class})
 		}
 	}
 	writeRows("uid", uidRows)
 	writeRows("gid", gidRows)
 	cw.Flush()
+}
+
+// csvSafe defuses CSV formula injection: a cell beginning with =, +, -, or @ is
+// prefixed with a single quote so spreadsheet apps treat it as text. Usernames
+// come from a remote /etc/passwd and are untrusted.
+func csvSafe(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@':
+		return "'" + s
+	}
+	return s
 }
 
 // UIDAnalysisJSON downloads the mismatch report as a JSON file.

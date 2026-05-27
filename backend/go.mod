@@ -4,6 +4,7 @@ go 1.25.7
 
 require (
 	github.com/coder/websocket v1.8.14
+	github.com/containerd/errdefs v1.0.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -11,6 +12,7 @@ require (
 	github.com/pkg/sftp v1.13.10
 	github.com/pressly/goose/v3 v3.27.1
 	golang.org/x/crypto v0.52.0
+	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.15.0
 	modernc.org/sqlite v1.50.1
 )
@@ -18,7 +20,6 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
@@ -48,7 +49,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	modernc.org/libc v1.72.3 // indirect
