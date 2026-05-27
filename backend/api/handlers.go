@@ -18,6 +18,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/security"
+	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/volumes"
 )
 
@@ -36,6 +37,7 @@ type Handlers struct {
 	Mounts         *mountindex.Index
 	Security       *security.Scanner
 	Volumes        *volumes.Service
+	Topology       *topology.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

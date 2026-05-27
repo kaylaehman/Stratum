@@ -28,6 +28,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
+	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/volumes"
 
 	"context"
@@ -77,6 +78,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Mounts:         mountIdx,
 		Security:       security.NewScanner(store, security.ClientProvider(noDocker), ctrUsers, time.Minute),
 		Volumes:        volumes.New(store, volumes.ClientProvider(noDocker), mountIdx, 0),
+		Topology:       topology.New(store, topology.ClientProvider(noDocker)),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),
