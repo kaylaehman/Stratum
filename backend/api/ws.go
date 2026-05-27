@@ -51,6 +51,9 @@ func (h *Handlers) WebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	id, send := h.Hub.Register(userID)
 	defer h.Hub.Unsubscribe(id) // runs before CloseNow (LIFO): stops writer first
+	if h.Logs != nil {
+		defer h.Logs.ReleaseClient(id) // release log-tailer refs when the connection drops
+	}
 	h.Hub.Subscribe(id, "ping")
 
 	// Cancelled when the writer hits a dead connection, so the reader's blocked

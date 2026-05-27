@@ -18,17 +18,22 @@ import (
 	"github.com/kaylaehman/stratum/backend/crypto"
 	appdb "github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/kaylaehman/stratum/backend/docker"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
+	"github.com/kaylaehman/stratum/backend/logtail"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/server"
 
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 )
+
+var errNoDockerInTest = errors.New("no docker in test")
 
 // newNodeTestServer builds a server with the nodes service wired in and returns
 // it plus an admin access token (via the setup + login flow).
@@ -50,16 +55,23 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 	}
 	cipher, _ := crypto.New(key)
 	jwt := auth.NewJWT([]byte("0123456789abcdef0123456789abcdef"), 15*time.Minute)
+	hb := hub.New()
+	logsMgr := logtail.NewManager(
+		func(context.Context, string) (*docker.Client, error) { return nil, errNoDockerInTest },
+		hb,
+		func(context.Context, string, string) (bool, error) { return true, nil },
+	)
 
 	h := &api.Handlers{
 		Store:          store,
 		Activity:       activity.NewStore(store),
 		JWT:            jwt,
-		Hub:            hub.New(),
+		Hub:            hb,
 		Nodes:          nodes.NewService(store, cipher),
 		Files:          fs.NewService(store, cipher, 0),
 		Conn:           nodeconn.NewManager(store, cipher),
 		ContainerUsers: permissions.NewContainerCache(func(context.Context, string, string, string) ([]byte, error) { return nil, nil }, time.Minute),
+		Logs:           logsMgr,
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

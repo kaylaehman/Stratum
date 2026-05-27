@@ -24,9 +24,11 @@ import (
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/kaylaehman/stratum/backend/docker"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
+	"github.com/kaylaehman/stratum/backend/logtail"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
@@ -83,6 +85,20 @@ func run(logger *slog.Logger) error {
 		return clients.Docker.CopyFromContainer(ctx, containerID, p)
 	}, 5*time.Minute)
 
+	dockerForNode := func(ctx context.Context, nodeID string) (*docker.Client, error) {
+		clients, err := conn.Get(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		if clients.Docker == nil {
+			return nil, fmt.Errorf("node %s has no docker client", nodeID)
+		}
+		return clients.Docker, nil
+	}
+	// MVP single-admin: any authenticated user may read any node's logs; RBAC
+	// (feature 30) will replace this with a per-node read-access check.
+	logsMgr := logtail.NewManager(dockerForNode, h, func(context.Context, string, string) (bool, error) { return true, nil })
+
 	handlers := &api.Handlers{
 		Store:          store,
 		Activity:       activity.NewStore(store),
@@ -93,6 +109,7 @@ func run(logger *slog.Logger) error {
 		Files:          fs.NewService(store, cipher, uploadMaxBytes()),
 		Conn:           conn,
 		ContainerUsers: containerUsers,
+		Logs:           logsMgr,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

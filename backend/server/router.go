@@ -62,6 +62,10 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/containers/{id}/file-uid", d.Handlers.FileUID)
 			r.Post("/containers/{id}/diagnostic", d.Handlers.Diagnostic)
 
+			// Log streaming subscription (server-side topic grant; lines flow over /api/ws).
+			r.Post("/logs/subscribe", d.Handlers.LogsSubscribe)
+			r.Post("/logs/unsubscribe", d.Handlers.LogsUnsubscribe)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
