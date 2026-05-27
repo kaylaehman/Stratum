@@ -21,6 +21,7 @@ import Bulk from './pages/Bulk'
 import Notifications from './pages/Notifications'
 import Updates from './pages/Updates'
 import Templates from './pages/Templates'
+import Secrets from './pages/Secrets'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -151,6 +152,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Templates />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/secrets"
+          element={
+            <AuthGuard>
+              <Secrets />
             </AuthGuard>
           }
         />

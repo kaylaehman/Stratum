@@ -909,3 +909,44 @@ export interface SearchResponse {
   vms: SearchVMHit[]
   bookmarks: SearchBookmarkHit[]
 }
+
+// Secrets Manager types (Feature 12)
+
+export interface SecretKey {
+  id: string
+  key: string
+}
+
+export interface SecretGroup {
+  id: string
+  name: string
+  description: string
+  secrets: SecretKey[]
+}
+
+export interface SecretsResponse {
+  groups: SecretGroup[]
+}
+
+export interface CreateSecretGroupRequest {
+  name: string
+  description?: string
+}
+
+export interface SetSecretRequest {
+  key: string
+  value: string
+}
+
+export interface ImportSecretsRequest {
+  env: string
+}
+
+export interface ImportSecretsResponse {
+  imported: number
+}
+
+export interface RevealResponse {
+  key: string
+  value: string
+}
