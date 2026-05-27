@@ -97,9 +97,13 @@ func (s *Service) changedPaths(ctx context.Context, nodeID string, w db.FileWatc
 	if !w.Recursive {
 		depth = " -maxdepth 1"
 	}
-	// RFC3339 timestamp is understood by GNU find's -newermt.
-	script := fmt.Sprintf(`find %q%s -type f -newermt %q 2>/dev/null | head -n %d`,
-		w.Path, depth, since.Format(time.RFC3339), maxEventsPerScan)
+	// The path is admin-configured but MUST be single-quoted for the shell:
+	// inside the sh -c script a bare or %q-quoted path would still allow $(...),
+	// backticks, and $VAR expansion. Single quotes expand nothing; an embedded
+	// single quote is escaped as '\''. The RFC3339 timestamp is our own value,
+	// quoted the same way for consistency.
+	script := fmt.Sprintf(`find %s%s -type f -newermt %s 2>/dev/null | head -n %d`,
+		shellQuote(w.Path), depth, shellQuote(since.Format(time.RFC3339)), maxEventsPerScan)
 	out, err := s.exec(ctx, nodeID, "sh", "-c", script)
 	if err != nil {
 		return nil
@@ -111,6 +115,13 @@ func (s *Service) changedPaths(ctx context.Context, nodeID string, w db.FileWatc
 		}
 	}
 	return paths
+}
+
+// shellQuote wraps s in single quotes for safe use in an sh -c script, escaping
+// embedded single quotes as '\''. Nothing inside single quotes is expanded, so
+// shell metacharacters in the path are inert.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // AddWatch registers a path to monitor on a node.
