@@ -35,6 +35,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/depgraph"
+	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
@@ -119,6 +120,10 @@ func run(logger *slog.Logger) error {
 	depGraphSvc := depgraph.New(store, depgraph.ClientProvider(dockerForNode), mountIdx)
 	updateSvc := updates.New(store, updates.ClientProvider(dockerForNode), 6*time.Hour)
 	secretSvc := secrets.New(store, cipher)
+	filesSvc := fs.NewService(store, cipher, uploadMaxBytes())
+	schedulerSvc := scheduler.New(filesSvc.Exec, func(ctx context.Context, nid, p string, c []byte) error {
+		return filesSvc.Write(ctx, nid, p, c, nil)
+	})
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -127,7 +132,7 @@ func run(logger *slog.Logger) error {
 		Hub:            h,
 		Nodes:          nodes.NewService(store, cipher),
 		Poller:         poller,
-		Files:          fs.NewService(store, cipher, uploadMaxBytes()),
+		Files:          filesSvc,
 		Conn:           conn,
 		ContainerUsers: containerUsers,
 		Logs:           logsMgr,
@@ -139,6 +144,7 @@ func run(logger *slog.Logger) error {
 		Webhooks:       webhookDispatcher,
 		Updater:        updateSvc,
 		Secrets:        secretSvc,
+		Scheduler:      schedulerSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

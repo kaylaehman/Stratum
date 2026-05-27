@@ -27,6 +27,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
@@ -68,6 +69,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 	logsMgr := logtail.NewManager(noDocker, hb, func(context.Context, string, string) (bool, error) { return true, nil })
 	ctrUsers := permissions.NewContainerCache(func(context.Context, string, string, string) ([]byte, error) { return nil, nil }, time.Minute)
 	mountIdx := mountindex.New(store, noDocker, time.Minute)
+	filesSvc := fs.NewService(store, cipher, 0)
 
 	h := &api.Handlers{
 		Store:          store,
@@ -75,7 +77,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		JWT:            jwt,
 		Hub:            hb,
 		Nodes:          nodes.NewService(store, cipher),
-		Files:          fs.NewService(store, cipher, 0),
+		Files:          filesSvc,
 		Conn:           nodeconn.NewManager(store, cipher),
 		ContainerUsers: ctrUsers,
 		Logs:           logsMgr,
@@ -87,6 +89,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Webhooks:       webhooks.New(store),
 		Updater:        updates.New(store, updates.ClientProvider(noDocker), time.Minute),
 		Secrets:        secrets.New(store, cipher),
+		Scheduler:      scheduler.New(filesSvc.Exec, func(ctx context.Context, nid, p string, c []byte) error { return filesSvc.Write(ctx, nid, p, c, nil) }),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

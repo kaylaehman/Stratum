@@ -122,6 +122,9 @@ func NewRouter(d *Deps) http.Handler {
 			// SSH key audit (admin-gated in handler; delete is audited below).
 			r.Get("/nodes/{id}/sshkeys", d.Handlers.ListSSHKeys)
 
+			// Scheduled tasks: cron + systemd timers (admin-gated; cron edit below).
+			r.Get("/nodes/{id}/schedule", d.Handlers.NodeSchedule)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -171,6 +174,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/secrets/{id}", d.Handlers.DeleteSecret)
 			audited.Post("/secrets/{id}/reveal", d.Handlers.RevealSecret)
 			audited.Post("/nodes/{id}/sshkeys/delete", d.Handlers.DeleteSSHKey)
+			audited.Put("/nodes/{id}/cron", d.Handlers.SetCron)
 		})
 	})
 

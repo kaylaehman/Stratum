@@ -54,6 +54,8 @@ const (
 	ActionSecretImport      = "secret.import"
 
 	ActionSSHKeyDelete = "sshkey.delete"
+
+	ActionCronSet = "cron.set"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -128,6 +130,8 @@ var actionCatalog = []ActionInfo{
 	{ActionSecretImport, "Secrets imported from .env", "secret", TargetSecret},
 
 	{ActionSSHKeyDelete, "SSH key removed", "sshkey", TargetSSHKey},
+
+	{ActionCronSet, "Crontab updated", "cron", TargetNode},
 }
 
 var actionByName = func() map[string]ActionInfo {

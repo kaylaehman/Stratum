@@ -18,6 +18,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/topology"
@@ -46,6 +47,7 @@ type Handlers struct {
 	Webhooks       *webhooks.Dispatcher
 	Updater        *updates.Service
 	Secrets        *secrets.Service
+	Scheduler      *scheduler.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
