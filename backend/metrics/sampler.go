@@ -26,9 +26,18 @@ type Sampler struct {
 	interval  time.Duration
 	retention time.Duration
 
-	mu   sync.Mutex
-	prev map[string]docker.StatSample // keyed by container internal id
+	mu        sync.Mutex
+	prev      map[string]docker.StatSample // keyed by container internal id
+	lastPrune time.Time
 }
+
+// statCallTimeout bounds a single StatsOneShot so one hung daemon cannot stall
+// the whole sample cycle.
+const statCallTimeout = 8 * time.Second
+
+// pruneInterval throttles retention pruning (the sampler ticks every 15s, but a
+// table-scan delete each tick is wasteful).
+const pruneInterval = time.Hour
 
 // NewSampler builds a sampler. interval is the poll period (e.g. 15s); retention
 // bounds how long samples are kept (e.g. 7d).
@@ -70,7 +79,10 @@ func (s *Sampler) cycle(ctx context.Context) {
 		s.sampleNode(ctx, n.ID, live)
 	}
 	s.evictMissing(live)
-	_, _ = s.store.PruneResourceSamplesBefore(ctx, time.Now().Add(-s.retention))
+	if now := time.Now(); now.Sub(s.lastPrune) >= pruneInterval {
+		s.lastPrune = now
+		_, _ = s.store.PruneResourceSamplesBefore(ctx, now.Add(-s.retention))
+	}
 }
 
 func (s *Sampler) sampleNode(ctx context.Context, nodeID string, live map[string]bool) {
@@ -89,9 +101,11 @@ func (s *Sampler) sampleNode(ctx context.Context, nodeID string, live map[string
 				return // node unreachable this cycle
 			}
 		}
-		cur, err := client.StatsOneShot(ctx, c.DockerID)
+		callCtx, cancel := context.WithTimeout(ctx, statCallTimeout)
+		cur, err := client.StatsOneShot(callCtx, c.DockerID)
+		cancel()
 		if err != nil {
-			continue // container vanished mid-cycle
+			continue // container vanished mid-cycle, or the daemon timed out
 		}
 		live[c.ID] = true
 		cpuPct := s.cpuPercent(c.ID, cur)

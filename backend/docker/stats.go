@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 )
@@ -53,7 +54,10 @@ func (c *Client) StatsOneShot(ctx context.Context, id string) (StatSample, error
 }
 
 // workingSetMemory mirrors `docker stats`: subtract the reclaimable file cache
-// from total usage. cgroup v2 reports "inactive_file"; v1 reports "total_inactive_file".
+// from total usage. cgroup v1 exposes "total_inactive_file" (hierarchy sum) and
+// v2 exposes "inactive_file"; prefer the v1 key when present (it's the value
+// Docker itself subtracts on v1), falling back to the v2 key. The clamp guards
+// against underflow on pathological readings.
 func workingSetMemory(m container.MemoryStats) uint64 {
 	cache := m.Stats["inactive_file"]
 	if v, ok := m.Stats["total_inactive_file"]; ok {
@@ -66,34 +70,15 @@ func workingSetMemory(m container.MemoryStats) uint64 {
 }
 
 // blkioBytes sums the recursive io-service-bytes entries for a given op
-// ("read"/"write"), case-insensitively.
+// ("read"/"write"), case-insensitively (Docker reports "Read"/"read").
 func blkioBytes(b container.BlkioStats, op string) uint64 {
 	var total uint64
 	for _, e := range b.IoServiceBytesRecursive {
-		if equalFold(e.Op, op) {
+		if strings.EqualFold(e.Op, op) {
 			total += e.Value
 		}
 	}
 	return total
-}
-
-func equalFold(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		ca, cb := a[i], b[i]
-		if ca >= 'A' && ca <= 'Z' {
-			ca += 'a' - 'A'
-		}
-		if cb >= 'A' && cb <= 'Z' {
-			cb += 'a' - 'A'
-		}
-		if ca != cb {
-			return false
-		}
-	}
-	return true
 }
 
 // CPUPercent computes the CPU usage percentage between two consecutive samples

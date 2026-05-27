@@ -96,6 +96,8 @@ func Downsample(samples []db.ResourceSample, maxPoints int) []db.ResourceSample 
 	return out
 }
 
+// averageBucket collapses a bucket of samples into one. The result intentionally
+// has no ID — downsampled rows are response-only and must never be re-inserted.
 func averageBucket(b []db.ResourceSample) db.ResourceSample {
 	var cpuSum, memSum float64
 	for _, s := range b {
