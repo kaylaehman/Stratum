@@ -89,6 +89,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/containers/{id}/metrics", d.Handlers.ContainerMetrics)
 			r.Get("/containers/{id}/metrics.csv", d.Handlers.ContainerMetricsCSV)
 
+			// Container healthcheck config + history (read-only).
+			r.Get("/containers/{id}/health", d.Handlers.ContainerHealth)
+
 			// Network topology (read-only; per node).
 			r.Get("/nodes/{id}/topology", d.Handlers.NodeTopology)
 
