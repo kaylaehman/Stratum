@@ -1,0 +1,287 @@
+id: restic
+name: Restic Backup
+version: "1.0"
+container_match:
+  image_patterns:
+    - "restic/restic"
+  port_hints: []
+category: backup
+description: Lightweight CLI backup tool with encryption, deduplication, and scheduling support
+docs_url: https://hub.docker.com/r/restic/restic
+
+common_issues:
+  - id: repository-password-missing
+    name: Repository password not set or incorrect
+    symptoms:
+      - "Fatal: unable to open config file, wrong password"
+      - "Password incorrect"
+      - "Failed to decrypt repository"
+      - "Invalid key for encryption"
+    trigger_conditions:
+      - log_pattern: "wrong password"
+      - log_pattern: "password.*incorrect"
+      - log_pattern: "decrypt.*failed"
+    steps:
+      - id: step-1
+        description: Check if RESTIC_PASSWORD environment variable is set
+        type: check
+        command: "env | grep RESTIC_PASSWORD"
+        expected_output: "RESTIC_PASSWORD="
+        on_fail: step-2
+      - id: step-2
+        description: Verify password file exists at expected location
+        type: check
+        command: "test -f {password_file} && echo 'Password file found' || echo 'Password file missing'"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display environment variable and file configuration hints
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify repository initialization completed
+        type: check
+        command: "docker run --rm -v {repo_path}:/repo restic/restic list locks"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Display repository status and initialization guidance
+        type: inform
+        command: ""
+    resolution: |
+      Restic requires the repository password to be provided via either the RESTIC_PASSWORD environment variable or a password file (RESTIC_PASSWORD_FILE). Ensure the password is correctly set in your docker-compose.yml or in a mounted password file. For security, use a password file mounted as a volume rather than storing the password in environment variables. If the repository has not been initialized yet, run `restic init` with the correct password before attempting backups.
+
+  - id: repository-not-initialized
+    name: Repository not initialized
+    symptoms:
+      - "Fatal: unable to open config file"
+      - "Repository not found"
+      - "No config file found"
+      - "Backup fails: repository error"
+    trigger_conditions:
+      - log_pattern: "config file"
+      - log_pattern: "not found"
+      - log_pattern: "repository error"
+    steps:
+      - id: step-1
+        description: Check if repository path exists and is accessible
+        type: check
+        command: "test -d {repo_path} && echo 'Repo path exists' || echo 'Repo path missing'"
+        expected_output: "Repo path exists"
+        on_fail: step-2
+      - id: step-2
+        description: Display repository path configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if config file exists in repository
+        type: check
+        command: "test -f {repo_path}/config && echo 'Config found' || echo 'Config missing'"
+        expected_output: "Config found"
+        on_fail: step-4
+      - id: step-4
+        description: Display repository structure and initialization status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Confirm backup operation type (init vs backup)
+        type: confirm
+        command: "Initialize a new Restic repository at {repo_path}? This is a one-time operation."
+      - id: step-6
+        description: Initialize new Restic repository
+        type: fix
+        command: "docker run --rm -e RESTIC_PASSWORD={password} -v {repo_path}:/repo restic/restic init"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify repository initialization completed
+        type: check
+        command: "test -f {repo_path}/config && echo 'Repository initialized' || echo 'Initialization failed'"
+        expected_output: "Repository initialized"
+    resolution: |
+      The Restic repository at the specified path has not been initialized. Repository initialization is a one-time operation that creates the necessary directory structure and encryption keys. After initialization, you can proceed with backing up data. Restic repositories can be stored locally (filesystem), on remote servers (SFTP, REST), or in cloud storage (S3, Azure, Google Cloud) by configuring the RESTIC_REPOSITORY variable appropriately.
+
+  - id: backup-storage-auth-failed
+    name: Backup storage authentication failed (remote repository)
+    symptoms:
+      - "Authentication failed"
+      - "Invalid credentials"
+      - "Access denied to repository"
+      - "S3 access key invalid"
+      - "SFTP connection refused"
+    trigger_conditions:
+      - log_pattern: "auth.*failed"
+      - log_pattern: "credential.*invalid"
+      - log_pattern: "connection.*refused"
+    steps:
+      - id: step-1
+        description: Check backup logs for storage authentication error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|credential\\|access' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display repository backend type and connection configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify storage backend credentials are set in environment
+        type: check
+        command: "env | grep -i 'AWS\\|AZURE\\|GOOGLE\\|SFTP\\|REST' | head -5"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display expected environment variables for current repository type
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test connectivity to remote repository
+        type: check
+        command: "docker run --rm -e RESTIC_REPOSITORY={repo_url} -e RESTIC_PASSWORD={password} restic/restic list locks"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display network and credential troubleshooting steps
+        type: inform
+        command: ""
+    resolution: |
+      Remote repositories (S3, SFTP, REST, Azure, Google Cloud) require proper credentials and connectivity. Verify your RESTIC_REPOSITORY variable is correctly formatted for your backend type, and that all required authentication environment variables are set (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY for S3; username/password for SFTP). Test credentials directly with your storage provider before configuring Restic. For cloud backends, ensure API keys or access tokens have not expired.
+
+  - id: insufficient-storage-space
+    name: Repository storage is full or nearly full
+    symptoms:
+      - "No space left on device"
+      - "Backup failed: write error"
+      - "Backup incomplete or truncated"
+      - "Backup abort: disk full"
+    trigger_conditions:
+      - log_pattern: "no space left"
+      - log_pattern: "disk full"
+      - log_pattern: "write.*error"
+    steps:
+      - id: step-1
+        description: Check available space in repository storage
+        type: check
+        command: "df -h {repo_path}"
+        expected_output: ""
+      - id: step-2
+        description: Check total repository size and breakdown
+        type: check
+        command: "du -sh {repo_path}"
+        expected_output: ""
+      - id: step-3
+        description: Display storage usage summary
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Restic repository statistics
+        type: check
+        command: "docker run --rm -e RESTIC_PASSWORD={password} -v {repo_path}:/repo restic/restic stats 2>&1 | head -10"
+        expected_output: ""
+      - id: step-5
+        description: Check for old snapshots that could be pruned
+        type: check
+        command: "docker run --rm -e RESTIC_PASSWORD={password} -v {repo_path}:/repo restic/restic snapshots --json 2>&1 | wc -l"
+        expected_output: ""
+      - id: step-6
+        description: Confirm intention to prune unused data
+        type: confirm
+        command: "Prune old/unused snapshots from repository to free space? This removes data not referenced by remaining snapshots."
+      - id: step-7
+        description: Prune unused data from repository
+        type: fix
+        command: "docker run --rm -e RESTIC_PASSWORD={password} -v {repo_path}:/repo restic/restic prune"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify space was recovered after prune
+        type: check
+        command: "df -h {repo_path} && du -sh {repo_path}"
+    resolution: |
+      Repository storage was full, preventing new backups. The `prune` operation has been executed to remove data associated with deleted snapshots, which should recover storage space. Prune is a safe operation that only removes data no longer referenced by any snapshot. After pruning, backups should proceed normally. If storage continues to fill rapidly, consider increasing repository storage capacity or implementing a retention policy to automatically remove old snapshots.
+
+default_config:
+  compose_template: |
+    services:
+      restic-backup:
+        image: restic/restic:latest
+        container_name: restic-backup
+        restart: unless-stopped
+        environment:
+          RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-/repo}
+          RESTIC_PASSWORD: ${RESTIC_PASSWORD}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${BACKUP_SOURCE_PATH:-./data}:/source:ro
+          - ${REPO_PATH:-./repository}:/repo
+          - ${SCRIPTS_PATH:-./scripts}:/scripts:ro
+        entrypoint: /bin/sh
+        command: -c "while true; do sleep 86400; done"
+  required_vars:
+    - name: RESTIC_PASSWORD
+      description: Password for Restic repository encryption
+      default: ""
+    - name: RESTIC_REPOSITORY
+      description: Repository location (local path, S3, SFTP, etc.) or leave default for local
+      default: "/repo"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: BACKUP_SOURCE_PATH
+      description: Host path to backup (mounted read-only into container)
+      default: "./data"
+    - name: REPO_PATH
+      description: Host path for repository storage (local repositories only)
+      default: "./repository"
+    - name: SCRIPTS_PATH
+      description: Host path for backup scripts and schedules (optional)
+      default: "./scripts"
+  known_mounts:
+    - container_path: /source
+      purpose: Data to be backed up (read-only)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /repo
+      purpose: Restic repository storage (local repositories only)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /scripts
+      purpose: Backup scripts, cron jobs, and scheduling configuration
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Restic is a lightweight, open-source CLI backup tool designed for automation and scripting. Unlike other backup tools, Restic does not include a web UI or daemon process — it is invoked via CLI commands and typically scheduled via cron, systemd timers, or container orchestration.
+
+  Container usage patterns:
+  - **Scheduled backups:** Mount restic-backup container with systemd timers or Docker restart policies on a schedule.
+  - **One-shot backups:** Run `docker run --rm restic/restic backup /source` for immediate backup operations.
+  - **Cron scheduling:** Mount scripts directory with cron entries that invoke restic inside the container.
+
+  Repository types:
+  - Local: `/repo` (filesystem)
+  - S3/S3-compatible: `s3:s3.amazonaws.com/bucket/path` (set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+  - SFTP: `sftp://user:password@host/path`
+  - REST: `rest:http://rest-server:8000`
+  - Azure, Google Cloud, B2: Supported via environment variables (see Restic docs)
+
+  Encryption: All data is encrypted client-side with the repository password. Encryption is automatic and transparent.
+
+  Deduplication: Restic uses content-addressable storage; identical blocks across snapshots are deduplicated automatically.
+
+  Performance: Restic is optimized for speed and minimal resource usage, making it suitable for resource-constrained environments.
+
+  Retention and pruning:
+  - Snapshots: Each backup creates a snapshot. Multiple snapshots can coexist.
+  - Forget: `restic forget [snapshot]` deletes a snapshot.
+  - Prune: `restic prune` removes data not referenced by any remaining snapshot.
+  - Retention policy: Use `restic forget --keep-*` flags to automatically delete old snapshots.
+
+  Common gotchas:
+  - No repository initialized: Run `restic init` with the correct password first.
+  - Password incorrect: Restic cannot decrypt the repository; verify RESTIC_PASSWORD.
+  - Remote repository auth failed: Verify credentials and RESTIC_REPOSITORY format for your backend type.
+  - Storage full: Run `restic prune` to free space by removing unreferenced data.
+  - Lock contention: Only one restic process can access a repository at a time; avoid concurrent backups.

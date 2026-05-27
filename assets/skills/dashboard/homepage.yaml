@@ -1,0 +1,196 @@
+id: homepage
+name: Homepage Dashboard
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/gethomepage/homepage"
+    - "gethomepage/homepage"
+  port_hints: [3000]
+category: dashboard
+description: Highly customizable homepage and application dashboard with Docker and service integrations
+docs_url: https://gethomepage.dev/
+
+common_issues:
+  - id: config-file-not-mounted
+    name: Configuration file not mounted or missing
+    symptoms:
+      - "default homepage displayed"
+      - "services not showing"
+      - "configuration not loaded"
+      - "empty dashboard"
+    trigger_conditions:
+      - log_pattern: "config.*not found"
+      - log_pattern: "no configuration"
+    steps:
+      - id: step-1
+        description: Check if config directory is mounted in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "/config"
+        on_fail: step-2
+      - id: step-2
+        description: Display current mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if config.yml exists on host
+        type: check
+        command: "ls -la {config_path}/config.yml"
+        expected_output: "config.yml"
+        on_fail: step-4
+      - id: step-4
+        description: Create default config.yml if missing
+        type: fix
+        command: "cat > {config_path}/config.yml << 'EOF'\nindexing:\n  weighted: false\n  openSearch: false\nsettings:\n  theme: dark\n  layout: grid\n  color: blue\nservices: []\nEOF"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify config file is readable
+        type: check
+        command: "cat {config_path}/config.yml | head -10"
+        expected_output: "indexing"
+    resolution: |
+      A default configuration file has been created. Homepage will now render with basic settings. Edit the config.yml file to add your services, customize appearance, and enable integrations.
+
+  - id: service-ping-failures
+    name: Services not responding or showing as offline
+    symptoms:
+      - "services showing red/offline"
+      - "service ping timeout"
+      - "cannot reach services"
+      - "health check failing"
+    trigger_conditions:
+      - log_pattern: "ping.*timeout"
+      - log_pattern: "service.*unreachable"
+    steps:
+      - id: step-1
+        description: Check Homepage logs for service ping errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'ping\\|timeout\\|error' | tail -15"
+        expected_output: ""
+      - id: step-2
+        description: Display service connectivity issues
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify network connectivity from Homepage container
+        type: check
+        command: "docker exec {container_name} ping -c 1 localhost"
+        expected_output: "bytes from"
+        on_fail: step-4
+      - id: step-4
+        description: Check if services are on same Docker network
+        type: check
+        command: "docker network ls --filter name=homepage"
+        expected_output: "homepage"
+      - id: step-5
+        description: Restart Homepage container to refresh service checks
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor service status after restart
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -20"
+    resolution: |
+      Service connectivity has been retested. Ensure all services are on the same Docker network as Homepage. If services are on different networks, either move them to a shared network or use full hostname resolution (container-name.docker-network). Services may take a few seconds to respond after Homepage startup.
+
+  - id: permission-denied-config-write
+    name: Permission denied writing to config directory
+    symptoms:
+      - "permission denied"
+      - "cannot write config"
+      - "changes not saved"
+      - "EACCES error"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check config directory ownership
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display ownership details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Fix config directory permissions
+        type: fix
+        command: "chmod 755 {config_path} && chown -R 1000:1000 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify permissions are correct
+        type: check
+        command: "stat {config_path} | grep 'Uid\\|Gid'"
+    resolution: |
+      Configuration directory permissions have been corrected. Homepage can now read and write configuration changes. The directory is now owned by UID 1000 (standard unprivileged user) with 755 permissions.
+
+default_config:
+  compose_template: |
+    services:
+      homepage:
+        image: ghcr.io/gethomepage/homepage:latest
+        container_name: homepage
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/app/config
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+        ports:
+          - "3000:3000"
+        networks:
+          - default
+
+  required_vars:
+    - name: PUID
+      description: User ID to run Homepage as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Homepage
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for Homepage configuration files
+      default: "./config"
+
+  known_mounts:
+    - container_path: /app/config
+      purpose: YAML configuration files (config.yml, services.yml, etc.)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket for container discovery
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Homepage is a lightweight, YAML-driven dashboard for homelabs. Services are defined in YAML configuration files rather than through a web UI, making it easily version-controllable.
+
+  Configuration structure:
+  - config.yml: Main settings (theme, layout, widgets)
+  - services.yml: Service definitions with icons, URLs, and integrations
+  - bookmarks.yml: Quick-access bookmarks
+  - docker.yml: Docker container widget configuration
+
+  Docker integration: The compose template mounts /var/run/docker.sock to enable Homepage to discover and display running containers. This allows automatic service detection if Docker labels are configured properly.
+
+  YAML-first design: All changes are made via YAML editing, not through a web interface. This approach provides version control and reproducibility but requires understanding YAML syntax.
+
+  Service ping: Homepage pings configured services to display health status. Ensure services are reachable from the Homepage container on the same Docker network. Use container names or fully qualified hostnames.
+
+  Performance: Homepage is lightweight and suitable for low-resource environments. It loads quickly and uses minimal CPU/RAM.
+
+  Customization: Extensive widget support including weather, system stats, Docker containers, and custom links. Configuration changes take effect on browser refresh.

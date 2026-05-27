@@ -1,0 +1,147 @@
+id: freepbx
+name: FreePBX
+version: "1.0"
+container_match:
+  image_patterns:
+    - "tiredofit/freepbx"
+  port_hints: [80, 443]
+category: voip
+description: Web-based management GUI for Asterisk PBX systems
+docs_url: https://hub.docker.com/r/tiredofit/freepbx
+
+common_issues:
+  - id: asterisk-backend-disconnected
+    name: FreePBX cannot reach the Asterisk backend
+    symptoms:
+      - "Asterisk Status: Offline"
+      - "Cannot retrieve Asterisk information"
+      - "Unable to connect to Asterisk"
+      - "Extension changes do not apply"
+    trigger_conditions:
+      - log_pattern: "asterisk.*offline"
+      - log_pattern: "ami.*failed"
+    steps:
+      - id: step-1
+        description: Verify the Asterisk container is running
+        type: check
+        command: "docker ps --filter name=asterisk --format '{{.Names}}: {{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test FreePBX → Asterisk reachability on AMI port 5038
+        type: check
+        command: "docker exec {container_name} nc -zv asterisk 5038 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about Docker networking and AMI credentials
+        type: inform
+        command: ""
+    resolution: |
+      FreePBX talks to Asterisk over the Asterisk Manager Interface (AMI) on
+      port 5038. Both containers must share a user-defined Docker network and
+      reach each other by container name. Verify AMI credentials in
+      Asterisk's manager.conf match what FreePBX has configured.
+
+  - id: web-ui-not-loading
+    name: FreePBX web UI returns 502 or blank page
+    symptoms:
+      - "502 Bad Gateway"
+      - "Blank page after login"
+      - "Connection refused on port 80"
+    trigger_conditions:
+      - log_pattern: "502"
+      - log_pattern: "apache.*error"
+    steps:
+      - id: step-1
+        description: Verify Apache is listening inside the container
+        type: check
+        command: "docker exec {container_name} ss -tlnp 2>/dev/null | grep ':80 '"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Tail recent Apache/PHP errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'apache|php.*error' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Restart to reload Apache + PHP
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      First-run Apache + PHP-FPM startup can take 30–60 seconds. If the UI is
+      still unreachable after restart, check the host firewall and verify
+      ports 80/443 are published in the compose file.
+
+  - id: config-not-writable
+    name: Cannot save configuration changes
+    symptoms:
+      - "permission denied"
+      - "Cannot write to /var/www/html"
+      - "Module install failed"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the config mount
+        type: check
+        command: "stat {config_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Chown to www-data (UID 33) inside the container
+        type: fix
+        command: "chown -R 33:33 {config_path}"
+        requires_approval: true
+    resolution: |
+      FreePBX runs as www-data (UID 33). /var/www/html must be writable by
+      that user for module installs and config edits to persist.
+
+default_config:
+  compose_template: |
+    services:
+      freepbx:
+        image: tiredofit/freepbx:latest
+        container_name: freepbx
+        restart: unless-stopped
+        depends_on:
+          - asterisk
+        environment:
+          TZ: ${TZ:-UTC}
+          ASTERISK_DB: sqlite
+        volumes:
+          - ${CONFIG_PATH:-./config}:/var/www/html
+          - ${VOICEMAIL_PATH:-./voicemail}:/var/spool/asterisk/voicemail
+        ports:
+          - "8088:80"
+  required_vars:
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /var/www/html
+      default: "./config"
+    - name: VOICEMAIL_PATH
+      description: Host path for /var/spool/asterisk/voicemail
+      default: "./voicemail"
+  known_mounts:
+    - container_path: /var/www/html
+      purpose: FreePBX web app, modules, and SQLite DB
+      recommended_permissions: "755"
+      owner: "33:33"
+    - container_path: /var/spool/asterisk/voicemail
+      purpose: Voicemail recordings
+      recommended_permissions: "755"
+      owner: "100:101"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  FreePBX is just the GUI — it requires an Asterisk container to manage. See
+  asterisk.yaml in this category for the backend. Pair them on the same
+  Docker network so AMI traffic on port 5038 reaches both ways.
+
+  Default admin credentials should be changed immediately on first login.
+  First-run initialization can take 2–5 minutes; watch container logs.

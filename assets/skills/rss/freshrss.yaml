@@ -1,0 +1,184 @@
+id: freshrss
+name: FreshRSS Reader
+version: "1.0"
+container_match:
+  image_patterns:
+    - "freshrss/freshrss"
+  port_hints: [80, 443]
+category: rss
+description: Self-hosted RSS reader with multi-user support and web-based interface
+docs_url: https://hub.docker.com/r/freshrss/freshrss
+
+common_issues:
+  - id: database-permission-denied
+    name: Permission denied on database directory
+    symptoms:
+      - "permission denied"
+      - "cannot open database"
+      - "EACCES"
+      - "Failed to create or write to database"
+      - "Unable to initialize FreshRSS"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "database.*error"
+    steps:
+      - id: step-1
+        description: Check current ownership of the data mount directory
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display permission and ownership details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Ensure the data directory is owned by the container user
+        type: fix
+        command: "chown -R 33:33 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Set restrictive permissions on the data directory
+        type: fix
+        command: "chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: *33"
+    resolution: |
+      FreshRSS runs as the www-data user (UID 33) inside the container. The data directory permission was incorrect, preventing the database from being created or accessed. Ownership has been changed to UID 33 and permissions set to allow reading and writing. FreshRSS should now initialize properly.
+
+  - id: feed-fetch-network-error
+    name: Feeds not updating or timeout errors when fetching
+    symptoms:
+      - "cURL error: 6"
+      - "Failed to fetch feed"
+      - "Connection timeout"
+      - "Network is unreachable"
+      - "Feeds show stale data"
+      - "Unable to reach example.com"
+    trigger_conditions:
+      - log_pattern: "curl.*error"
+      - log_pattern: "timeout"
+      - log_pattern: "unreachable"
+    steps:
+      - id: step-1
+        description: Test network connectivity from the container
+        type: check
+        command: "docker exec {container_name} ping -c 4 8.8.8.8"
+        expected_output: "4 received"
+        on_fail: step-2
+      - id: step-2
+        description: Check DNS resolution from the container
+        type: check
+        command: "docker exec {container_name} nslookup google.com"
+        expected_output: "Name:.*Address:"
+        on_fail: step-3
+      - id: step-3
+        description: Display network diagnostic results
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if cURL is properly configured in the container
+        type: check
+        command: "docker exec {container_name} curl -I https://example.com 2>&1 | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Verify feed URLs are correctly formatted and accessible
+        type: inform
+        command: ""
+    resolution: |
+      Feed fetch failures are typically due to network isolation, DNS resolution issues, or connectivity problems from the container to the feed sources. Verify that the container has outbound internet access. If using a proxy, configure it in FreshRSS Settings → Networking. Some feeds may have rate limiting or require User-Agent headers; FreshRSS handles this automatically but particularly slow feeds may timeout. Consider increasing the cURL timeout in advanced settings if network is slow.
+
+  - id: web-interface-blank
+    name: Web interface shows blank page or HTTP 500 error
+    symptoms:
+      - "Blank white page"
+      - "HTTP 500 Internal Server Error"
+      - "No CSS or styling visible"
+      - "Cannot load any page in FreshRSS"
+    trigger_conditions:
+      - log_pattern: "500.*error"
+      - log_pattern: "fatal"
+    steps:
+      - id: step-1
+        description: Check FreshRSS container logs for errors
+        type: check
+        command: "docker logs {container_name} | tail -30"
+        expected_output: ""
+      - id: step-2
+        description: Verify database is accessible
+        type: check
+        command: "docker exec {container_name} php -r \"echo 'PHP is working';\" "
+        expected_output: "working"
+        on_fail: step-3
+      - id: step-3
+        description: Check if PHP extensions are loaded
+        type: check
+        command: "docker exec {container_name} php -m | grep -i sqlite"
+        expected_output: ""
+      - id: step-4
+        description: Restart FreshRSS to clear transient errors
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait and verify web interface loads
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s http://localhost/ | head -20"
+    resolution: |
+      The FreshRSS web interface error has been investigated. Restarting the container often resolves transient PHP or database connection issues. If the problem persists, check that all required files are present in the mount, PHP is properly configured, and the database is not corrupted. Review container logs for specific error messages indicating database, permission, or dependency issues.
+
+default_config:
+  compose_template: |
+    services:
+      freshrss:
+        image: freshrss/freshrss:latest
+        container_name: freshrss
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./data}:/var/www/FreshRSS/data
+        ports:
+          - "80:80/tcp"
+  required_vars:
+    - name: TZ
+      description: Timezone for FreshRSS
+      default: "UTC"
+    - name: DATA_PATH
+      description: Host path for persistent data (SQLite database by default)
+      default: "./data"
+  known_mounts:
+    - container_path: /var/www/FreshRSS/data
+      purpose: FreshRSS database, feeds, and user configuration
+      recommended_permissions: "755"
+      owner: "33:33"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  FreshRSS is a free, self-hosted RSS and Atom feed aggregator. It stores feeds and user data in a single data directory, using SQLite as the default database (no MySQL/PostgreSQL required).
+
+  Database backends:
+  - SQLite (default, embedded, zero configuration)
+  - MySQL/MariaDB (optional, for multi-server deployments)
+  - PostgreSQL (optional, for large installations)
+
+  Initial setup: On first run, FreshRSS will create the database and prompt you to create an admin user. Default port is 80; configure reverse proxy for HTTPS.
+
+  Feed updates: FreshRSS can update feeds via a background refresh mechanism. Enable automatic refresh in Settings → Sharing, or configure a cron job to periodically call the refresh endpoint.
+
+  Backup: Regularly back up the ./data directory to prevent loss of feeds and user subscriptions.
+
+  Common gotchas:
+  - No feeds updating: Check network connectivity from the container and verify feed URLs are accessible.
+  - Permission errors: Ensure /var/www/FreshRSS/data is owned by UID 33 (www-data).
+  - Blank page: Review logs for PHP errors; database may be corrupted or missing.
+  - Multiple instances: Each FreshRSS instance should have its own separate data directory.

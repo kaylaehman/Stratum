@@ -1,0 +1,349 @@
+id: immich
+name: Immich Photo Management Suite
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/immich-app/immich-server"
+    - "immich-server"
+  port_hints: [2283, 3001]
+category: photos
+description: Self-hosted photo and video management application with AI-powered search, mobile sync, and machine learning features
+docs_url: https://docs.immich.app/install/docker-compose/
+
+common_issues:
+  - id: permission-denied-upload-storage
+    name: Permission denied on upload or storage directory
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot save uploaded file"
+      - "Failed to write to uploads directory"
+      - "Thumbnail generation failed"
+    trigger_conditions:
+      - log_pattern: "permission denied.*upload"
+      - log_pattern: "storage.*EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the upload storage path
+        type: check
+        command: "stat {upload_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively fix ownership of upload directory
+        type: fix
+        command: "chown -R {puid}:{pgid} {upload_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Set appropriate permissions on upload directory
+        type: fix
+        command: "chmod -R 755 {upload_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {upload_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The upload/storage directory ownership was mismatched with the container's running UID/GID. This prevents Immich from saving uploaded photos, videos, and generating thumbnails. The fix changed ownership and permissions to match the container process. Immich should now be able to write files to the storage directory.
+
+  - id: machine-learning-disconnected
+    name: Machine learning service not responding or disconnected
+    symptoms:
+      - "ML service disconnected"
+      - "Smart search unavailable"
+      - "Face recognition disabled"
+      - "Object detection not working"
+      - "Cannot connect to ML service"
+    trigger_conditions:
+      - log_pattern: "ml.*disconnect"
+      - log_pattern: "failed.*connect.*ml"
+    steps:
+      - id: step-1
+        description: Verify machine learning container is running
+        type: check
+        command: "docker ps | grep immich-machine-learning"
+        expected_output: "immich-machine-learning"
+        on_fail: step-2
+      - id: step-2
+        description: Check ML container logs for startup errors
+        type: check
+        command: "docker logs immich-machine-learning 2>&1 | tail -30"
+        expected_output: ""
+      - id: step-3
+        description: Display ML service startup status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test connectivity from server to ML service
+        type: check
+        command: "docker exec {container_name} curl -s http://immich-machine-learning:3003/ping"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Verify ML container has sufficient memory allocated
+        type: check
+        command: "docker inspect immich-machine-learning --format='{{json .HostConfig.Memory}}'"
+        expected_output: ""
+      - id: step-6
+        description: Restart the machine learning container
+        type: fix
+        command: "docker restart immich-machine-learning"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for ML service to initialize and test connection
+        type: check
+        command: "sleep 30 && docker logs immich-machine-learning | tail -10"
+    resolution: |
+      The machine learning service has been restarted. Model initialization may take 30-60 seconds on first start. Smart search, face recognition, and object detection features will resume once the ML service is fully ready. Allocate sufficient memory (recommend 2GB minimum) for ML container to avoid OOM kills during model loading.
+
+  - id: database-connection-timeout
+    name: Database connection timeout or PostgreSQL not starting
+    symptoms:
+      - "connection timeout"
+      - "dial tcp.*5432"
+      - "database error"
+      - "Failed to connect to postgres"
+      - "PostgreSQL failed to initialize"
+    trigger_conditions:
+      - log_pattern: "connection.*timeout.*5432"
+      - log_pattern: "postgres.*error"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running
+        type: check
+        command: "docker ps | grep immich-postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Check PostgreSQL container logs for initialization errors
+        type: check
+        command: "docker logs immich-postgres 2>&1 | tail -30"
+        expected_output: ""
+      - id: step-3
+        description: Display database initialization status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test connectivity to PostgreSQL from Immich server
+        type: check
+        command: "docker exec {container_name} pg_isready -h immich-postgres -p 5432 -U postgres"
+        expected_output: "accepting"
+        on_fail: step-5
+      - id: step-5
+        description: Check database environment variables in server
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}} {{end}}' | grep -i 'db\\|postgres'"
+        expected_output: ""
+      - id: step-6
+        description: Restart PostgreSQL container to allow fresh initialization
+        type: fix
+        command: "docker restart immich-postgres"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for PostgreSQL to fully initialize
+        type: check
+        command: "sleep 15 && docker logs immich-postgres | grep -i 'ready\\|initialization' | tail -5"
+    resolution: |
+      PostgreSQL has been restarted and will reinitialize on startup. Database initialization may take 2-3 minutes on first run. Ensure the database data directory has proper permissions and sufficient disk space. Verify DB_PASSWORD environment variable matches between server and database services and uses only A-Za-z0-9 characters to avoid parsing issues.
+
+  - id: redis-memory-exceeded
+    name: Redis service crashing or memory issues
+    symptoms:
+      - "OOMError"
+      - "Redis connection refused"
+      - "Redis crashed"
+      - "Memory limit exceeded"
+      - "Cannot allocate memory"
+    trigger_conditions:
+      - log_pattern: "OOM"
+      - log_pattern: "redis.*connection refused"
+    steps:
+      - id: step-1
+        description: Verify Redis container is running
+        type: check
+        command: "docker ps | grep redis"
+        expected_output: "redis"
+        on_fail: step-2
+      - id: step-2
+        description: Check Redis container logs
+        type: check
+        command: "docker logs immich-redis 2>&1 | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Display Redis memory usage
+        type: check
+        command: "docker exec immich-redis redis-cli INFO memory"
+        expected_output: ""
+      - id: step-4
+        description: Review Redis configuration and memory limit
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Redis container to clear memory
+        type: fix
+        command: "docker restart immich-redis"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor Redis memory after restart
+        type: check
+        command: "sleep 5 && docker exec immich-redis redis-cli INFO memory | grep used_memory_human"
+    resolution: |
+      Redis has been restarted to clear memory. Sessions and cache will be cleared but no persistent data is lost. If Redis continues to crash due to memory limits, increase the container's memory allocation or implement Redis maxmemory eviction policy. Consider using Valkey 8+ as an optimized alternative.
+
+default_config:
+  compose_template: |
+    services:
+      immich-server:
+        image: ghcr.io/immich-app/immich-server:release
+        container_name: immich-server
+        restart: unless-stopped
+        environment:
+          LOG_LEVEL: info
+          UPLOAD_LOCATION: ${UPLOAD_LOCATION:-./upload}
+          DB_DATABASE_NAME: immich
+          DB_HOSTNAME: immich-postgres
+          DB_USERNAME: ${DB_USERNAME:-immich}
+          DB_PASSWORD: ${DB_PASSWORD:-immichpass123}
+          DB_PORT: 5432
+          REDIS_HOSTNAME: immich-redis
+          REDIS_PORT: 6379
+          IMMICH_MACHINE_LEARNING_URL: http://immich-machine-learning:3003
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${UPLOAD_LOCATION:-./upload}:/usr/src/app/upload
+        ports:
+          - "2283:3001"
+        depends_on:
+          immich-postgres:
+            condition: service_healthy
+          immich-redis:
+            condition: service_healthy
+          immich-machine-learning:
+            condition: service_healthy
+
+      immich-machine-learning:
+        image: ghcr.io/immich-app/immich-machine-learning:release
+        container_name: immich-machine-learning
+        restart: unless-stopped
+        environment:
+          TRANSFORMERS_CACHE: /cache
+        volumes:
+          - ./ml-cache:/cache
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:3003/ping"]
+          interval: 30s
+          timeout: 10s
+          retries: 5
+
+      immich-postgres:
+        image: pgvecto-rs/pgvecto-rs:pg16-v0.4.0
+        container_name: immich-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${DB_USERNAME:-immich}
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-immichpass123}
+          POSTGRES_DB: immich
+          POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=vectors.so"
+        volumes:
+          - ./postgres-data:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-immich} -d immich"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      immich-redis:
+        image: docker.io/valkey/valkey:8-alpine
+        container_name: immich-redis
+        restart: unless-stopped
+        command: valkey-server --appendonly yes
+        volumes:
+          - ./redis-data:/data
+        healthcheck:
+          test: ["CMD", "valkey-cli", "ping"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+  required_vars:
+    - name: PUID
+      description: User ID to run Immich as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Immich
+      default: "1000"
+    - name: UPLOAD_LOCATION
+      description: Host path for uploaded media files
+      default: "./upload"
+    - name: DB_USERNAME
+      description: PostgreSQL username (use only A-Za-z0-9)
+      default: "immich"
+    - name: DB_PASSWORD
+      description: PostgreSQL password (use only A-Za-z0-9, minimum 8 characters)
+      default: "immichpass123"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+
+  known_mounts:
+    - container_path: /usr/src/app/upload
+      purpose: Uploaded photos and videos
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /cache
+      purpose: Machine learning model cache
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database files
+      recommended_permissions: "700"
+      owner: "70:70"
+    - container_path: /data
+      purpose: Redis data and persistence
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Immich is a modern, feature-rich photo and video management platform designed as a self-hosted Google Photos alternative. The stack includes multiple specialized containers:
+
+  Service Dependencies:
+  - immich-server: Primary API and web interface (requires postgres and redis)
+  - immich-machine-learning: AI features (face recognition, object detection, semantic search)
+  - immich-postgres: pgvecto-rs PostgreSQL with vector extension for similarity searches
+  - immich-redis: Valkey/Redis for session management and caching
+
+  Critical Configuration Notes:
+
+  1. Database Password: Use only A-Za-z0-9 characters in DB_PASSWORD. Special characters can cause Docker Compose parsing failures.
+
+  2. Machine Learning: Model initialization takes 30-60 seconds on first start. Allocate minimum 2GB memory. Features like face recognition and smart search are unavailable until ML service is healthy.
+
+  3. Storage Paths: Keep upload, ML cache, database, and Redis data on fast local storage if possible. Database on SSD recommended for performance.
+
+  4. Postgres Alternative: Use pgvecto-rs image (includes vector extension) as shown, not standard PostgreSQL. This is required for Immich's AI search functionality.
+
+  5. Redis Alternative: Valkey is recommended as a drop-in PostgreSQL replacement with better performance.
+
+  6. Initial Setup: After all services are healthy, access web UI at http://localhost:2283 to create admin account and configure.
+
+  7. Memory Requirements: Entire stack requires minimum 2GB RAM available (server ~400MB, ML 1.5GB, postgres 256MB, redis 128MB).
+
+  Common gotchas:
+  - ML service disconnected: Insufficient memory allocation or slow disk causing timeout
+  - Permission denied on uploads: Verify UID/GID match between host and container
+  - Database connection timeout: PostgreSQL still initializing - wait 2-3 minutes before retrying
+  - Redis crashes: Memory limit exceeded - increase container memory allocation
+  - Smart search not working: Machine learning service not running or not healthy

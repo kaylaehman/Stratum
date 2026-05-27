@@ -1,0 +1,276 @@
+id: kopia
+name: Kopia Backup
+version: "1.0"
+container_match:
+  image_patterns:
+    - "kopia/kopia"
+  port_hints: [51515]
+category: backup
+description: Fast, deduplicating backup tool with client-side encryption and web UI
+docs_url: https://hub.docker.com/r/kopia/kopia
+
+common_issues:
+  - id: server-not-accessible
+    name: Kopia server web UI not accessible
+    symptoms:
+      - "Cannot connect to Kopia web interface"
+      - "Port 51515 connection refused"
+      - "Timeout accessing localhost:51515"
+      - "Cannot reach server at specified address"
+    trigger_conditions:
+      - log_pattern: "cannot.*bind.*51515"
+      - log_pattern: "address already in use"
+    steps:
+      - id: step-1
+        description: Verify Kopia server is listening on port 51515
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 51515"
+        expected_output: "LISTEN.*51515"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 51515 is published in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '51515'"
+        expected_output: "51515"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping and network configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check for port conflicts on host
+        type: check
+        command: "ss -tlnp | grep 51515"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Display processes bound to port 51515
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Kopia container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify server is accessible
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'listening\\|server.*started' | tail -3"
+    resolution: |
+      The Kopia web server requires port 51515 to be exposed. The container has been restarted. If the issue persists, check that no other service is bound to port 51515 on your host. Verify the container's port mapping is correctly configured in your docker-compose.yml. If using a reverse proxy, ensure it is configured to forward to port 51515 within the container.
+
+  - id: repository-init-failed
+    name: Repository initialization or unlock failed
+    symptoms:
+      - "Repository locked"
+      - "Cannot initialize repository"
+      - "Unlock failed"
+      - "Password or connection string invalid"
+    trigger_conditions:
+      - log_pattern: "repository.*lock"
+      - log_pattern: "unlock.*failed"
+      - log_pattern: "init.*failed"
+    steps:
+      - id: step-1
+        description: Check Kopia logs for repository error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'repository\\|unlock\\|init' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display repository configuration summary
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify repository storage is accessible and mounted
+        type: check
+        command: "test -d {repo_path} && echo 'Repository path exists' || echo 'Repository path missing'"
+        expected_output: "Repository path exists"
+        on_fail: step-4
+      - id: step-4
+        description: Display mounted volumes and repository configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check if repository is already locked by another process
+        type: check
+        command: "docker exec {container_name} ls -la {repo_path}/.lock 2>/dev/null || echo 'No lock file found'"
+        expected_output: ""
+      - id: step-6
+        description: Verify repository credentials and connection string
+        type: check
+        command: "docker exec {container_name} test -f {config_path}/.kopia.cache && echo 'Config cached' || echo 'Config not cached'"
+        expected_output: ""
+      - id: step-7
+        description: Recommend password reset via Kopia web UI
+        type: inform
+        command: ""
+    resolution: |
+      Kopia repository issues are typically caused by locked repositories, incorrect passwords, or missing/inaccessible storage. If the repository is locked due to a previous unclean shutdown, you may need to force-unlock via the web UI or CLI. If the password is incorrect, you can reset it through the Kopia web UI. Ensure the repository storage path is mounted and accessible to the container. For cloud storage backends, verify credentials and connectivity.
+
+  - id: backup-snapshot-failed
+    name: Backup snapshot creation or upload failed
+    symptoms:
+      - "Snapshot failed"
+      - "Upload failed to repository"
+      - "Cannot write to repository storage"
+      - "Backup job incomplete or incomplete with errors"
+    trigger_conditions:
+      - log_pattern: "snapshot.*failed"
+      - log_pattern: "upload.*failed"
+      - log_pattern: "write.*error"
+    steps:
+      - id: step-1
+        description: Check Kopia logs for snapshot error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'snapshot\\|upload\\|error' | tail -15"
+        expected_output: ""
+      - id: step-2
+        description: Display recent snapshot status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify repository storage has sufficient free space
+        type: check
+        command: "df -h {repo_path} | tail -1"
+        expected_output: ""
+      - id: step-4
+        description: Check if source path is mounted and readable
+        type: check
+        command: "docker exec {container_name} test -r {source_path} && echo 'Source readable' || echo 'Source not readable'"
+        expected_output: "Source readable"
+        on_fail: step-5
+      - id: step-5
+        description: Display mounted volumes and source path configuration
+        type: inform
+        command: ""
+      - id: step-6
+        description: Check repository connectivity and health
+        type: check
+        command: "docker exec {container_name} kopia repo status 2>&1 | head -10"
+        expected_output: ""
+      - id: step-7
+        description: Recommend manual backup retry via Kopia web UI
+        type: inform
+        command: ""
+    resolution: |
+      Backup snapshot failures can be caused by insufficient storage space, source path not being readable, network connectivity issues to the repository, or repository corruption. Ensure the repository storage has sufficient free space, the source path is properly mounted and readable by the container, and the repository is healthy. You can retry the backup job from the Kopia web UI. For persistent issues, check repository integrity via the web UI health check.
+
+  - id: performance-slow-backups
+    name: Backups are slow or taking too long
+    symptoms:
+      - "Backup takes hours for small data"
+      - "Upload speed is very slow"
+      - "High CPU or I/O during backup"
+      - "Timeouts or incomplete backups"
+    trigger_conditions:
+      - log_pattern: "took.*hours"
+      - log_pattern: "timeout"
+    steps:
+      - id: step-1
+        description: Check current CPU and I/O usage of Kopia container
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Display container resource usage
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check source filesystem type and I/O performance
+        type: check
+        command: "df -T {source_path} | tail -1"
+        expected_output: ""
+      - id: step-4
+        description: Verify repository storage backend performance
+        type: check
+        command: "docker exec {container_name} kopia repo status | grep -i 'storage\\|backend' | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Check for deduplication statistics and compression impact
+        type: check
+        command: "docker logs {container_name} | grep -i 'dedup\\|compress\\|bytes' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Review Kopia backup policy settings
+        type: inform
+        command: ""
+    resolution: |
+      Slow backups can result from several factors: CPU constraints on the host, slow source filesystem, network latency to the repository, or aggressive deduplication and compression settings. Monitor CPU and I/O during backups via `docker stats`. If CPU is maxed, consider limiting concurrent file processing or compression settings in the backup policy. For network-based repositories (S3, cloud storage), verify network bandwidth. Kopia's deduplication is automatic and efficient; tuning compression levels may offer speedups if CPU becomes a bottleneck.
+
+default_config:
+  compose_template: |
+    services:
+      kopia:
+        image: kopia/kopia:latest
+        container_name: kopia
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+          KOPIA_PASSWORD: ${KOPIA_PASSWORD}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/app/config
+          - ${BACKUP_SOURCE_PATH:-./data}:/source:ro
+          - ${CACHE_PATH:-./cache}:/cache
+          - ${REPO_PATH:-./repository}:/repository
+        ports:
+          - "51515:51515/tcp"
+        command: server start --address=0.0.0.0:51515 --disable-csrf-token-validation
+  required_vars:
+    - name: KOPIA_PASSWORD
+      description: Password for Kopia repository encryption and access
+      default: ""
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /app/config (Kopia cache and configuration)
+      default: "./config"
+    - name: BACKUP_SOURCE_PATH
+      description: Host path to backup (mounted read-only into container)
+      default: "./data"
+    - name: CACHE_PATH
+      description: Host path for /cache (Kopia metadata cache)
+      default: "./cache"
+    - name: REPO_PATH
+      description: Host path for /repository (Kopia repository storage)
+      default: "./repository"
+  known_mounts:
+    - container_path: /app/config
+      purpose: Kopia cache and configuration files
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /source
+      purpose: Data to be backed up (read-only)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /cache
+      purpose: Metadata cache for faster operations
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /repository
+      purpose: Kopia repository storage (backups and metadata)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Kopia is a fast, modern backup tool with built-in client-side encryption, deduplication, and compression. The web UI runs on port 51515 and provides a dashboard for managing backups and repositories.
+
+  Repository setup: The first run requires initializing a repository, which can be done via the web UI. The repository password is critical for accessing backups and should be stored securely.
+
+  Deduplication: Kopia uses automatic content-addressed deduplication, reducing storage requirements for similar files across snapshots.
+
+  Performance: Kopia is optimized for speed; backups of large datasets typically complete quickly due to efficient scanning and deduplication.
+
+  Storage backends: Kopia supports local filesystem, S3-compatible storage, Google Cloud Storage, Azure Blob Storage, and more. Configure via the web UI.
+
+  Encryption: All data is encrypted client-side before being stored in the repository. Encryption is automatic and transparent.
+
+  Common gotchas:
+  - Repository locked: Occurs if a previous backup process did not exit cleanly. Force-unlock via web UI if necessary.
+  - Web UI not accessible: Verify port 51515 is exposed and no other service is using that port.
+  - Slow backups: Check CPU and network performance; adjust compression settings if CPU is the bottleneck.
+  - Password lost: Recovery is not possible without the repository password; ensure it is stored securely and not lost.

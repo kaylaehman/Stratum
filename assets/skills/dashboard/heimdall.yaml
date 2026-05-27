@@ -1,0 +1,235 @@
+id: heimdall
+name: Heimdall Application Dashboard
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/heimdall"
+  port_hints: [80, 443]
+category: dashboard
+description: An elegant application dashboard and launcher for your services
+docs_url: https://docs.linuxserver.io/images/docker-heimdall/
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot create directory in /config"
+      - "Failed to write settings"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID (PUID/PGID). This prevents Heimdall from writing settings and database files. The fix changed ownership to match the container process. Heimdall should now function correctly.
+
+  - id: port-binding-conflict
+    name: Port 80 or 443 already in use
+    symptoms:
+      - "port already in use"
+      - "Address already in use"
+      - "bind: permission denied"
+      - "container exits on startup"
+    trigger_conditions:
+      - log_pattern: "port.*in use"
+      - log_pattern: "Address already in use"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check what process is using port 80
+        type: check
+        command: "sudo ss -tlnp | grep ':80 '"
+        expected_output: ""
+      - id: step-2
+        description: Display current port usage
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check what process is using port 443
+        type: check
+        command: "sudo ss -tlnp | grep ':443 '"
+        expected_output: ""
+      - id: step-4
+        description: Display recommendation for port remapping
+        type: inform
+        command: ""
+      - id: step-5
+        description: Provide example of remapped ports in docker-compose
+        type: inform
+        command: ""
+    resolution: |
+      Port 80 (HTTP) and/or 443 (HTTPS) are already in use by another service. You can remap Heimdall to different ports in your docker-compose.yml. For example, use 8080:80 to access Heimdall on port 8080, or 8443:443 for HTTPS. Alternatively, stop the conflicting service or implement a reverse proxy to route traffic.
+
+  - id: database-locked
+    name: Database locked or corrupted
+    symptoms:
+      - "database is locked"
+      - "database disk image is malformed"
+      - "container crashes after startup"
+      - "Settings changes not saved"
+    trigger_conditions:
+      - log_pattern: "database.*locked"
+      - log_pattern: "disk image.*malformed"
+    steps:
+      - id: step-1
+        description: Check if Heimdall process is running
+        type: check
+        command: "docker ps | grep heimdall"
+        expected_output: "heimdall"
+        on_fail: step-2
+      - id: step-2
+        description: Check container logs for database errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'database\\|locked\\|malformed' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Stop the container gracefully
+        type: fix
+        command: "docker stop -t 30 {container_name}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Back up the database file
+        type: fix
+        command: "cp {config_path}/app.db {config_path}/app.db.backup.$(date +%s)"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Remove the corrupted database
+        type: fix
+        command: "rm -f {config_path}/app.db"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Heimdall to create a fresh database
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor startup and verify application is responsive
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -15"
+    resolution: |
+      The corrupted database has been removed and a fresh database has been created on startup. A backup of the original database was saved. All application settings have been reset to defaults. If you have Heimdall data backups, you may restore them from the backup directory.
+
+  - id: ssl-certificate-invalid
+    name: SSL/TLS certificate invalid or expired
+    symptoms:
+      - "certificate error"
+      - "SSL_ERROR_RX_RECORD_TOO_LONG"
+      - "self-signed certificate"
+      - "HTTPS connection fails"
+    trigger_conditions:
+      - log_pattern: "certificate.*error"
+      - log_pattern: "SSL.*error"
+    steps:
+      - id: step-1
+        description: Check if SSL certificate files exist
+        type: check
+        command: "ls -la {config_path}/ssl/"
+        expected_output: "cert"
+        on_fail: step-2
+      - id: step-2
+        description: Display SSL certificate status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check certificate expiration date if present
+        type: check
+        command: "openssl x509 -in {config_path}/ssl/cert.crt -text -noout 2>/dev/null | grep -A2 'Not Before\\|Not After' || echo 'Certificate file not found or invalid'"
+        expected_output: ""
+      - id: step-4
+        description: Restart Heimdall to generate new self-signed certificate
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait for new certificate generation and verify
+        type: check
+        command: "sleep 10 && ls -la {config_path}/ssl/ | grep -E 'cert|key'"
+    resolution: |
+      Heimdall has regenerated SSL/TLS certificates. By default, Heimdall generates self-signed certificates on startup. Browsers will show a security warning, which is normal for self-signed certs. For production use, replace the certificates with ones signed by a trusted CA. The self-signed certificate is suitable for internal homelab use.
+
+default_config:
+  compose_template: |
+    services:
+      heimdall:
+        image: linuxserver/heimdall:latest
+        container_name: heimdall
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "80:80"
+          - "443:443"
+
+  required_vars:
+    - name: PUID
+      description: User ID to run Heimdall as (LinuxServer.io convention)
+      default: "1000"
+    - name: PGID
+      description: Group ID for Heimdall (LinuxServer.io convention)
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for Heimdall configuration and database
+      default: "./config"
+
+  known_mounts:
+    - container_path: /config
+      purpose: Heimdall configuration files, database, and SSL certificates
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Heimdall is a modern application dashboard with a clean, intuitive interface. It's ideal for homelabs and self-hosted environments where you want quick access to many services.
+
+  LinuxServer.io image: This uses the linuxserver/heimdall image which follows LinuxServer.io conventions. PUID/PGID environment variables control the user/group the application runs as. This is critical for proper file ownership and permission management.
+
+  Port configuration: By default, Heimdall listens on ports 80 (HTTP) and 443 (HTTPS). If these ports are in use, remap them in docker-compose.yml. For example: ports: ["8080:80", "8443:443"]
+
+  SSL certificates: Self-signed SSL certificates are generated automatically on first startup. Browsers will show a warning, but the connection is encrypted. For production, install proper certificates in the ssl/ subdirectory.
+
+  Database: Heimdall uses SQLite (app.db) stored in the /config directory. This contains all application settings and user data. Regular backups are recommended.
+
+  Customization: Add application shortcuts and dashboards through the Heimdall web interface. All settings are saved to the local database.
+
+  Performance: Lightweight and suitable for all system architectures. The linuxserver/heimdall image supports multiple architectures (amd64, arm64, armhf, i386).
+
+  PUID/PGID UID mismatch: The most common cause of issues is UID/GID mismatch between the host /config directory and the container process. Always ensure the directory is owned by the PUID:PGID values configured.

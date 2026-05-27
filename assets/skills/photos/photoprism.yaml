@@ -1,0 +1,295 @@
+id: photoprism
+name: PhotoPrism AI Photo Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "photoprism/photoprism"
+  port_hints: [2342]
+category: photos
+description: AI-powered photo management and browsing system with support for storage management, backup, and mobile sync
+docs_url: https://docs.photoprism.app/getting-started/docker/
+
+common_issues:
+  - id: permission-denied-originals
+    name: Permission denied on originals or storage mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot import photos"
+      - "Failed to write to storage"
+      - "Cannot create thumbnail directory"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "storage.*EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host storage path
+        type: check
+        command: "stat {storage_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively fix ownership of storage directory to match container UID/GID
+        type: fix
+        command: "chown -R {puid}:{pgid} {storage_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Set appropriate permissions on storage directory
+        type: fix
+        command: "chmod -R 755 {storage_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {storage_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The storage directory ownership was mismatched with the container's running UID/GID. This prevents PhotoPrism from importing photos, creating thumbnails, and writing metadata. The fix changed ownership and permissions to match the container process. PhotoPrism should now be able to read and write files to the storage directory.
+
+  - id: import-stuck-zero-progress
+    name: Import stuck or not detecting photos
+    symptoms:
+      - "Import progress stuck at 0%"
+      - "No photos imported despite files in directory"
+      - "Files in originals directory not appearing"
+      - "Import completes but finds no media"
+    trigger_conditions:
+      - log_pattern: "import.*0 files"
+      - log_pattern: "no media found"
+    steps:
+      - id: step-1
+        description: Verify originals directory is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "originals"
+        on_fail: step-2
+      - id: step-2
+        description: Check if files are actually present in the originals directory
+        type: check
+        command: "ls -la {originals_path} | head -20"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display contents and file count of originals directory
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check PhotoPrism logs for import errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed\\|import' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Restart PhotoPrism to clear any stuck import state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor logs after restart for import progress
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -20"
+    resolution: |
+      PhotoPrism has been restarted to clear any stuck import state. The system will now rescan the originals directory and import media files. Initial imports may take several minutes depending on the number of files and available CPU. Verify that mounted directories contain supported image formats (JPEG, PNG, RAW, GIF, BMP, TIFF, WebP) and that files are readable by the container process.
+
+  - id: indexing-high-cpu
+    name: Indexing consuming excessive CPU or hanging
+    symptoms:
+      - "CPU usage above 80% during indexing"
+      - "Indexing process hanging or not responding"
+      - "High memory usage during thumbnail generation"
+      - "Web UI unresponsive during index operation"
+    trigger_conditions:
+      - log_pattern: "index"
+      - log_pattern: "transcod.*jpg"
+    steps:
+      - id: step-1
+        description: Check current CPU and memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Display PhotoPrism indexing status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check for active indexing processes in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'index\\|thumbs' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Review environment settings for optimization
+        type: inform
+        command: ""
+      - id: step-5
+        description: Pause indexing to reduce CPU pressure
+        type: fix
+        command: "docker exec {container_name} photoprism index --pause"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor CPU usage after pausing
+        type: check
+        command: "sleep 5 && docker stats {container_name} --no-stream"
+    resolution: |
+      Indexing and thumbnail generation are CPU-intensive operations. PhotoPrism has been paused to reduce load. For better performance during indexing, consider: reducing PHOTOPRISM_WORKERS, increasing time between index runs, moving storage to faster disk, or scheduling indexing during off-peak hours. You can resume indexing via the web UI or command line when ready.
+
+  - id: database-connection-refused
+    name: Database connection refused or PostgreSQL initialization fails
+    symptoms:
+      - "connection refused"
+      - "dial tcp.*5432"
+      - "database error"
+      - "PostgreSQL failed to initialize"
+      - "Cannot connect to database"
+    trigger_conditions:
+      - log_pattern: "connection refused.*5432"
+      - log_pattern: "database.*error"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running
+        type: check
+        command: "docker ps | grep -i postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Check PostgreSQL container logs for errors
+        type: check
+        command: "docker logs photoprism-db 2>&1 | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Display database initialization status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test connectivity to PostgreSQL from PhotoPrism
+        type: check
+        command: "docker exec {container_name} pg_isready -h photoprism-db -p 5432"
+        expected_output: "accepting"
+        on_fail: step-5
+      - id: step-5
+        description: Verify PostgreSQL environment variables are correct
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}} {{end}}' | grep -i 'postgres\\|db_'"
+        expected_output: ""
+      - id: step-6
+        description: Restart both PhotoPrism and PostgreSQL containers
+        type: fix
+        command: "docker-compose restart"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify connection is established
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'connect\\|error' | tail -5"
+    resolution: |
+      Database connectivity has been restored by restarting the services. PostgreSQL initializes on first run, which may take several minutes. Allow sufficient startup time and ensure POSTGRES_PASSWORD environment variable matches across all services. Check docker-compose configuration for correct hostnames and port bindings.
+
+default_config:
+  compose_template: |
+    services:
+      photoprism:
+        image: photoprism/photoprism:latest
+        container_name: photoprism
+        restart: unless-stopped
+        environment:
+          PHOTOPRISM_ADMIN_PASSWORD: ${PHOTOPRISM_ADMIN_PASSWORD:?'Password required - see docs'}
+          PHOTOPRISM_STORAGE_PATH: ${STORAGE_PATH:-./storage}
+          PHOTOPRISM_ORIGINALS_PATH: ${ORIGINALS_PATH:-./originals}
+          PHOTOPRISM_WORKERS: ${PHOTOPRISM_WORKERS:-4}
+          PHOTOPRISM_DISABLE_BACKUPS: "false"
+          PHOTOPRISM_DISABLE_WEBDAV: "false"
+          PHOTOPRISM_DATABASE_DRIVER: postgres
+          PHOTOPRISM_DATABASE_DSN: postgres://${DB_USER:-photoprism}:${DB_PASSWORD:-photoprism}@photoprism-db:5432/${DB_NAME:-photoprism}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${ORIGINALS_PATH:-./originals}:/photoprism/originals
+          - ${STORAGE_PATH:-./storage}:/photoprism/storage
+        ports:
+          - "2342:2342"
+        depends_on:
+          photoprism-db:
+            condition: service_healthy
+
+      photoprism-db:
+        image: postgres:16-alpine
+        container_name: photoprism-db
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${DB_USER:-photoprism}
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-photoprism}
+          POSTGRES_DB: ${DB_NAME:-photoprism}
+        volumes:
+          - ./db:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-photoprism}"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+  required_vars:
+    - name: PHOTOPRISM_ADMIN_PASSWORD
+      description: Initial admin password (minimum 8 characters, required for security)
+      default: ""
+    - name: PUID
+      description: User ID to run PhotoPrism as
+      default: "1000"
+    - name: PGID
+      description: Group ID for PhotoPrism
+      default: "1000"
+    - name: ORIGINALS_PATH
+      description: Host path for /photoprism/originals (where photos are imported from)
+      default: "./originals"
+    - name: STORAGE_PATH
+      description: Host path for /photoprism/storage (thumbnails, database, config)
+      default: "./storage"
+    - name: DB_USER
+      description: PostgreSQL username
+      default: "photoprism"
+    - name: DB_PASSWORD
+      description: PostgreSQL password (use only A-Za-z0-9 characters)
+      default: "photoprism"
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "photoprism"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /photoprism/originals
+      purpose: Source directory for photo import (read-write)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /photoprism/storage
+      purpose: Thumbnails, database files, and configuration
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  PhotoPrism is an AI-powered photo management application with optional PostgreSQL backend for multi-user deployments.
+
+  Critical Security Note: PHOTOPRISM_ADMIN_PASSWORD must be set explicitly and changed from any defaults. The password is only settable during initial startup via environment variable. After first launch, use `docker exec -ti photoprism photoprism passwd username` to change passwords.
+
+  PostgreSQL Configuration: By default, PhotoPrism uses SQLite. For production or multi-user setups, configure PostgreSQL as shown in the compose template. The database initialization on first run may take several minutes.
+
+  Storage Paths: Keep originals and storage directories separate:
+  - originals: Source photos for import (can be large)
+  - storage: Thumbnails and metadata (should be on faster disk if possible)
+
+  Import Process: PhotoPrism scans originals directory on startup and periodically. Import speed depends on CPU cores (PHOTOPRISM_WORKERS) and disk I/O performance. Thumbnail generation is CPU-intensive.
+
+  WebDAV: Enabled by default for mobile syncing. Can be disabled with PHOTOPRISM_DISABLE_WEBDAV=true if not needed.
+
+  Common gotchas:
+  - Permission denied during import: Verify UID/GID match between host and container
+  - Password-less startup: Always set PHOTOPRISM_ADMIN_PASSWORD to secure initial access
+  - Slow indexing: Reduce PHOTOPRISM_WORKERS or schedule during off-peak hours
+  - Database connection errors: Ensure PostgreSQL container is running and healthy before PhotoPrism starts

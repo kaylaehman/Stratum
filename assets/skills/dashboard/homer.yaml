@@ -1,0 +1,211 @@
+id: homer
+name: Homer Static Dashboard
+version: "1.0"
+container_match:
+  image_patterns:
+    - "b4bz/homer"
+    - "bastienwirtz/homer"
+  port_hints: [8080]
+category: dashboard
+description: A very simple static homepage for your homelab server with bookmark management
+docs_url: https://github.com/bastienwirtz/homer
+
+common_issues:
+  - id: config-file-missing
+    name: Configuration file missing or not mounted
+    symptoms:
+      - "blank page"
+      - "no services displayed"
+      - "default page shown"
+      - "configuration not loading"
+    trigger_conditions:
+      - log_pattern: "config.*not found"
+      - log_pattern: "unable to load"
+    steps:
+      - id: step-1
+        description: Check if config directory is mounted in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "/config"
+        on_fail: step-2
+      - id: step-2
+        description: Display current mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if config.yml exists
+        type: check
+        command: "ls -la {config_path}/config.yml"
+        expected_output: "config.yml"
+        on_fail: step-4
+      - id: step-4
+        description: Create a minimal default config.yml
+        type: fix
+        command: "cat > {config_path}/config.yml << 'EOF'\nheader: true\ntitle: Homer\nsubtitle: \nlogo: logo.png\nfooter: <p>Created with <span class=\"heart\">❤️</span> with Homer</p>\ncolumns: 4\nconnectTimeout: 5000\ntimeout: 5000\nservices: []\nEOF"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify config file was created
+        type: check
+        command: "ls -la {config_path}/config.yml && wc -l {config_path}/config.yml"
+    resolution: |
+      A minimal configuration file has been created. Homer will now display with default settings. Edit the config.yml file to add your services and customize the dashboard appearance.
+
+  - id: permission-denied-config
+    name: Permission denied on config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot read config"
+      - "read-only filesystem"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check config directory ownership and permissions
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Access:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Fix directory permissions to be world-readable
+        type: fix
+        command: "chmod 755 {config_path} && chmod 644 {config_path}/*.yml {config_path}/*.yaml 2>/dev/null || true"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify permissions are corrected
+        type: check
+        command: "stat {config_path} | grep Access"
+    resolution: |
+      Configuration directory permissions have been corrected. Homer can now read the configuration files. Ensure the directory is readable by the container process (typically mode 755 for directories, 644 for files).
+
+  - id: port-already-in-use
+    name: Port 8080 already in use
+    symptoms:
+      - "port already in use"
+      - "Address already in use"
+      - "cannot bind to 8080"
+      - "container exits immediately"
+    trigger_conditions:
+      - log_pattern: "port.*in use"
+      - log_pattern: "Address already in use"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check what is using port 8080
+        type: check
+        command: "ss -tlnp | grep ':8080 '"
+        expected_output: ""
+      - id: step-2
+        description: Display current port usage
+        type: inform
+        command: ""
+      - id: step-3
+        description: Provide recommendation for port remapping
+        type: inform
+        command: ""
+    resolution: |
+      Port 8080 is already in use. Remap Homer to a different port in docker-compose.yml. For example: ports: ["8081:8080"] to access Homer on port 8081. You can use any available port on your host system.
+
+  - id: static-assets-not-loading
+    name: Static assets (CSS, images) not loading
+    symptoms:
+      - "unstyled page"
+      - "broken layout"
+      - "404 on assets"
+      - "images not showing"
+    trigger_conditions:
+      - log_pattern: "404.*css"
+      - log_pattern: "404.*png"
+      - log_pattern: "static.*not found"
+    steps:
+      - id: step-1
+        description: Check if assets directory exists
+        type: check
+        command: "ls -la {config_path}/ | grep -E 'public|assets|images|css'"
+        expected_output: ""
+      - id: step-2
+        description: Display directory contents
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify Homer is serving from correct path
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:8080/assets/ 2>&1 | head -5"
+        expected_output: ""
+      - id: step-4
+        description: Restart Homer container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait and verify assets are loaded
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/"
+    resolution: |
+      Homer has been restarted. Static assets should now load properly. If the issue persists, verify that the config directory contains all necessary files. You can download a fresh copy of Homer from the official repository to ensure all assets are present.
+
+default_config:
+  compose_template: |
+    services:
+      homer:
+        image: b4bz/homer:latest
+        container_name: homer
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/www/assets
+        ports:
+          - "8080:8080"
+
+  required_vars:
+    - name: PUID
+      description: User ID to run Homer as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Homer
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for Homer configuration and assets
+      default: "./config"
+
+  known_mounts:
+    - container_path: /www/assets
+      purpose: Homer configuration file (config.yml) and custom assets
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Homer is a static, file-based dashboard ideal for homelabs that want simplicity and speed. It requires no database and renders client-side, making it extremely lightweight.
+
+  Configuration: All settings are in a single config.yml YAML file. Changes require editing this file and restarting the container or refreshing the browser (with cache clear).
+
+  Static design: Homer is pure HTML/CSS/JavaScript that runs entirely in the browser. This makes it fast, private, and suitable for offline use (after initial load).
+
+  Default port: Homer listens on port 8080 by default. You can change this in docker-compose.yml if needed (e.g., ports: ["3001:8080"]).
+
+  Custom assets: You can add custom logos, images, and CSS by mounting additional files to /www/assets. Icons for services are typically included in the config.
+
+  Service definitions: Services are defined in config.yml with name, URL, icon, and optional tags. Multiple groups and columns are supported for organization.
+
+  Performance: Extremely fast and lightweight, suitable for low-power systems and edge devices. Ideal for low-bandwidth or high-latency environments due to client-side rendering.
+
+  No backend: Unlike other dashboards, Homer has no server-side logic. It's a pure static site that loads a config file and renders bookmarks. This eliminates database requirements and simplifies deployment.
+
+  Customization: Full control over appearance through CSS and config.yml. No graphical interface — all changes are file-based, which makes it ideal for version control and infrastructure-as-code workflows.

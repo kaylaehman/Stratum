@@ -1,0 +1,324 @@
+id: meteobridge
+name: Meteobridge Weather Station Integration
+version: "1.0"
+container_match:
+  image_patterns:
+    - "weatherflow/weatherflow-mqtt"
+    - "weather-station-mqtt"
+  port_hints: [1883, 8080]
+category: weather
+description: Docker-based weather station data integration and MQTT publishing for multi-source weather networks
+docs_url: https://hub.docker.com/r/weatherflow/weatherflow-mqtt
+
+common_issues:
+  - id: mqtt-connection-failure
+    name: MQTT broker connection failed
+    symptoms:
+      - "Cannot connect to MQTT broker"
+      - "Connection refused on port 1883"
+      - "MQTT_BROKER environment variable incorrect"
+      - "Weather data not publishing to MQTT"
+      - "Container exits immediately with connection error"
+    trigger_conditions:
+      - log_pattern: "mqtt.*connection.*refused"
+      - log_pattern: "broker.*not.*found"
+      - log_pattern: "ECONNREFUSED.*1883"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if MQTT broker container is running
+        type: check
+        command: "docker ps | grep -i mqtt"
+        expected_output: "mqtt|mosquitto"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify container can reach MQTT broker host
+        type: check
+        command: "docker exec {container_name} nc -zv {mqtt_host:-mqtt} {mqtt_port:-1883} 2>&1"
+        expected_output: "open"
+        on_fail: step-4
+      - id: step-4
+        description: Display MQTT connection configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check MQTT broker logs for connection errors
+        type: check
+        command: "docker logs {mqtt_container:-mqtt} | grep -i 'error\\|refused' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Restart weather integration container to retry connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify MQTT connection succeeded
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'connected\\|published' | tail -5"
+    resolution: |
+      Weather station integration container has been restarted to retry MQTT broker connection. The container requires a running MQTT broker (mosquitto or similar) configured via MQTT_HOST, MQTT_PORT, MQTT_USER, and MQTT_PASSWORD environment variables. Verify the MQTT broker is running on the specified host and port. If using a linked container, ensure the service name matches (default: `mqtt`). Check MQTT broker logs for any connection errors or authentication failures.
+
+  - id: weather-data-not-publishing
+    name: Weather data collected but not published to MQTT
+    symptoms:
+      - "Container running but no MQTT messages appear"
+      - "Weather data received from station but not in MQTT topics"
+      - "MQTT connection successful but no payload published"
+      - "Topics not appearing in MQTT broker"
+      - "Data published to wrong topics"
+    trigger_conditions:
+      - log_pattern: "data.*received"
+      - log_pattern: "publish.*failed"
+      - log_pattern: "topic.*not.*found"
+    steps:
+      - id: step-1
+        description: Check if weather station device is connected and sending data
+        type: check
+        command: "docker logs {container_name} | grep -i 'received\\|station\\|data' | head -10"
+        expected_output: ""
+      - id: step-2
+        description: Verify MQTT connection is active
+        type: check
+        command: "docker logs {container_name} | grep -i 'connected\\|subscribed' | tail -5"
+        expected_output: "connected"
+        on_fail: step-3
+      - id: step-3
+        description: Check MQTT publish errors in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'publish\\|error\\|failed' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Display expected MQTT topic structure
+        type: inform
+        command: ""
+      - id: step-5
+        description: Subscribe to MQTT topic to verify publishing
+        type: check
+        command: "docker exec {mqtt_container:-mqtt} mosquitto_sub -h localhost -t 'weather/#' -C 1 2>&1 | head -1"
+        expected_output: ""
+      - id: step-6
+        description: Restart weather integration to force data collection and publish
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor MQTT publish activity
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'publish' | tail -5"
+    resolution: |
+      Weather station integration has been restarted to resume data collection and MQTT publishing. Data publishing requires: 1) Weather station actively sending data (verify USB connection or network integration), 2) MQTT broker connection established, 3) correct MQTT topic configuration in environment or config file. Check MQTT broker logs for publish attempts and verify topics appear in the broker. If using a custom topic prefix, ensure the environment variable MQTT_TOPIC_PREFIX matches the expected subscription path.
+
+  - id: device-connection-lost
+    name: Weather station hardware loses connection intermittently
+    symptoms:
+      - "Connection to weather station drops frequently"
+      - "USB device disconnects and reconnects"
+      - "Serial port /dev/ttyUSB0 not found after disconnect"
+      - "Weather data collection pauses intermittently"
+      - "Container restarts after losing device connection"
+    trigger_conditions:
+      - log_pattern: "device.*disconnected"
+      - log_pattern: "serial port.*not found"
+      - log_pattern: "connection.*lost"
+    steps:
+      - id: step-1
+        description: Check if weather station USB device is present on host
+        type: check
+        command: "ls -la /dev/ttyUSB* 2>&1"
+        expected_output: "ttyUSB"
+        on_fail: step-2
+      - id: step-2
+        description: List all USB devices connected to host
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if device is properly mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .HostConfig.Devices}}{{.PathOnHost}}{{end}}'"
+        expected_output: "ttyUSB"
+        on_fail: step-4
+      - id: step-4
+        description: Display current device mounts in container
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check for USB device permission issues on host
+        type: check
+        command: "stat /dev/ttyUSB* | grep -E 'Access|Uid|Gid'"
+        expected_output: ""
+      - id: step-6
+        description: Verify weather station hardware is powered and cable is secure
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart weather integration container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor for stable device connection
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'connected\\|station' | tail -10"
+    resolution: |
+      Weather station integration has been restarted. Intermittent USB disconnections are often caused by: 1) loose or damaged USB cable, 2) underpowered USB hub, 3) device permissions changing after disconnect/reconnect, 4) host system sleep/suspend disabling USB ports. Verify the USB cable is securely connected and use a powered USB hub if connecting multiple devices. Check that your docker-compose.yml includes the device mount: `devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]` (adjust for your actual serial port). If disconnections persist, monitor kernel USB logs with `dmesg | grep -i usb | tail -20` to identify hardware issues.
+
+  - id: configuration-persistence
+    name: Weather integration configuration lost after container restart
+    symptoms:
+      - "Custom MQTT topics reset to defaults"
+      - "Data format configuration reverted"
+      - "Sensor mapping lost after restart"
+      - "Setup wizard appears repeatedly"
+      - "Custom field names forgotten"
+    trigger_conditions:
+      - log_pattern: "config.*not.*found"
+      - log_pattern: "using.*default"
+    steps:
+      - id: step-1
+        description: Check if config directory is mounted from host
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if eq .Destination \"/config\"}}{{.Source}}{{end}}{{end}}'"
+        expected_output: "/"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check for config file on host
+        type: check
+        command: "ls -la {config_path}/config.json 2>&1"
+        expected_output: "config.json"
+        on_fail: step-4
+      - id: step-4
+        description: Show config directory contents on host
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart container to load persisted configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify configuration is loaded
+        type: check
+        command: "sleep 3 && docker logs {container_name} | grep -i 'config.*loaded\\|initialization' | tail -5"
+    resolution: |
+      Weather station integration configuration persistence requires binding the /config directory from the host. The container has been restarted to reload persisted configuration. Ensure your docker-compose.yml includes: `volumes: ["./weather-config:/config"]`. The config.json file stores MQTT topic mappings, sensor definitions, data format settings, and custom field names. Without the host mount, all configuration is lost on container restart. After adding the volume mount, copy any existing configuration from the container to the host directory.
+
+default_config:
+  compose_template: |
+    services:
+      weather-integration:
+        image: weatherflow/weatherflow-mqtt:latest
+        container_name: weather-integration
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+          MQTT_HOST: ${MQTT_HOST:-mqtt}
+          MQTT_PORT: ${MQTT_PORT:-1883}
+          MQTT_USER: ${MQTT_USER}
+          MQTT_PASSWORD: ${MQTT_PASSWORD}
+          MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-weather}
+          WEATHER_STATION_TYPE: ${WEATHER_STATION_TYPE:-weatherflow}
+          WEATHER_API_TOKEN: ${WEATHER_API_TOKEN}
+        volumes:
+          - ${CONFIG_PATH:-./weather-config}:/config
+          - ${LOG_PATH:-./weather-logs}:/logs
+        devices:
+          - /dev/ttyUSB0:/dev/ttyUSB0
+        ports:
+          - "8080:8080/tcp"
+        depends_on:
+          - mqtt
+
+      mqtt:
+        image: eclipse-mosquitto:latest
+        container_name: mqtt
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${MQTT_CONFIG_PATH:-./mqtt}:/mosquitto
+        ports:
+          - "1883:1883/tcp"
+          - "9001:9001/tcp"
+
+  required_vars:
+    - name: TZ
+      description: Timezone for weather data timestamps (e.g., America/New_York)
+      default: "UTC"
+    - name: MQTT_HOST
+      description: MQTT broker hostname
+      default: "mqtt"
+    - name: MQTT_PORT
+      description: MQTT broker port
+      default: "1883"
+    - name: MQTT_USER
+      description: MQTT username (optional)
+      default: ""
+    - name: MQTT_PASSWORD
+      description: MQTT password (optional)
+      default: ""
+    - name: MQTT_TOPIC_PREFIX
+      description: MQTT topic prefix for publishing weather data
+      default: "weather"
+    - name: WEATHER_STATION_TYPE
+      description: Weather station type (weatherflow, ambient, davis, etc.)
+      default: "weatherflow"
+    - name: WEATHER_API_TOKEN
+      description: API token for cloud-based weather stations (optional)
+      default: ""
+    - name: CONFIG_PATH
+      description: Host path for /config (configuration and mapping files)
+      default: "./weather-config"
+    - name: LOG_PATH
+      description: Host path for /logs (activity and debug logs)
+      default: "./weather-logs"
+    - name: MQTT_CONFIG_PATH
+      description: Host path for MQTT broker configuration and persistence
+      default: "./mqtt"
+
+  known_mounts:
+    - container_path: /config
+      purpose: Weather integration configuration, sensor mappings, MQTT topic definitions
+      recommended_permissions: "755"
+      owner: "nobody:nogroup"
+    - container_path: /logs
+      purpose: Integration logs, data collection activity, debug information
+      recommended_permissions: "755"
+      owner: "nobody:nogroup"
+    - container_path: /mosquitto
+      purpose: MQTT broker configuration and message persistence
+      recommended_permissions: "755"
+      owner: "mosquitto:mosquitto"
+
+notes: |
+  Meteobridge is primarily a hardware-based weather station solution. This skill describes a Docker-based weather data integration container (using weatherflow-mqtt as a placeholder example) that collects weather data from various sources and publishes to MQTT for integration with other home automation systems.
+
+  Weather station support: The container integrates with multiple weather station types including WeatherFlow, Ambient Weather, Davis Vantage Pro, and others. Specify the station type via WEATHER_STATION_TYPE environment variable.
+
+  Hardware integration: Many weather stations communicate via USB serial port (/dev/ttyUSB0). Ensure your docker-compose.yml includes the device mount. Some stations use network-based APIs instead of USB; see docs for your specific hardware model.
+
+  MQTT broker: The compose template includes a local Mosquitto broker for development. For production, point MQTT_HOST to an external broker or managed service. Topic structure defaults to "weather/temperature", "weather/humidity", "weather/pressure", etc., but is customizable via MQTT_TOPIC_PREFIX.
+
+  Data formats: Configuration file at /config/config.json defines sensor mapping, custom field names, unit conversions, and MQTT publishing behavior. This must be persisted on the host.
+
+  Logging: Integration logs appear in /logs/ and can be streamed via container logs. Enable debug mode in config.json for verbose output during troubleshooting.
+
+  Cloud API tokens: Some weather stations (e.g., WeatherFlow Sky) offer cloud-based APIs as an alternative to local USB. If using cloud integration, provide WEATHER_API_TOKEN and omit USB device passthrough.
+
+  Common gotchas:
+  - MQTT connection refused: Verify MQTT broker is running and accessible; check firewall/network rules.
+  - Weather data not published: Confirm station is actively sending data (check logs for "received"); verify MQTT topic configuration matches subscription.
+  - USB device disconnects: Check cable security, USB hub power supply, and host USB power management; avoid sleep modes.
+  - Configuration lost after restart: Always mount /config from host to persist mappings and custom settings.
+  - No data from station: Verify correct station type is configured; check for API rate limiting if using cloud API; ensure API token is valid.

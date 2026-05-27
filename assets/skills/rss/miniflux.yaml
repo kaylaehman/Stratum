@@ -1,0 +1,279 @@
+id: miniflux
+name: Miniflux RSS Reader
+version: "1.0"
+container_match:
+  image_patterns:
+    - "miniflux/miniflux"
+  port_hints: [8080]
+category: rss
+description: Minimalist and opinionated RSS reader with PostgreSQL backend
+docs_url: https://hub.docker.com/r/miniflux/miniflux
+
+common_issues:
+  - id: database-connection-failed
+    name: Cannot connect to PostgreSQL database
+    symptoms:
+      - "connection refused"
+      - "unable to connect to postgres"
+      - "FATAL: password authentication failed"
+      - "psql: error: connection to server failed"
+      - "Application will not start"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+      - log_pattern: "FATAL.*password"
+      - log_pattern: "cannot connect"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test PostgreSQL connectivity from Miniflux container
+        type: check
+        command: "docker exec {container_name} psql -h {db_host} -U {db_user} -d {db_name} -c 'SELECT 1;' 2>&1"
+        expected_output: "1"
+        on_fail: step-4
+      - id: step-4
+        description: Check PostgreSQL environment variables in Miniflux
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep DATABASE"
+        expected_output: "DATABASE"
+      - id: step-5
+        description: Display database connection string
+        type: inform
+        command: ""
+      - id: step-6
+        description: Verify PostgreSQL database and user exist
+        type: check
+        command: "docker exec {db_container} psql -U postgres -l | grep {db_name}"
+        expected_output: "{db_name}"
+    resolution: |
+      Miniflux requires a running PostgreSQL database for all data storage. Verify that PostgreSQL is running, the database and user exist, and credentials are correct in the DATABASE_URL environment variable. The connection string should be in the format: postgres://username:password@hostname:5432/database. Both containers must be on the same Docker network for connectivity.
+
+  - id: initial-setup-incomplete
+    name: Admin user not created or login fails
+    symptoms:
+      - "Cannot log in"
+      - "Username or password invalid"
+      - "No users found"
+      - "Redirect loop at login"
+      - "ADMIN_USERNAME/ADMIN_PASSWORD not applied"
+    trigger_conditions:
+      - log_pattern: "login.*failed"
+      - log_pattern: "user.*not found"
+    steps:
+      - id: step-1
+        description: Check if initial setup has completed
+        type: check
+        command: "docker logs {container_name} | grep -i 'admin\\|setup\\|created' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Verify ADMIN_USERNAME and ADMIN_PASSWORD are set
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep -E 'ADMIN_USERNAME|ADMIN_PASSWORD'"
+        expected_output: "ADMIN_USERNAME"
+        on_fail: step-3
+      - id: step-3
+        description: Display environment variable status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Query database for existing users
+        type: check
+        command: "docker exec {db_container} psql -U {db_user} -d {db_name} -c \"SELECT username FROM users;\" 2>&1"
+        expected_output: ""
+      - id: step-5
+        description: Stop Miniflux container
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart with forced admin user creation
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for initialization and check logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -20"
+    resolution: |
+      Miniflux initializes the admin user during first startup using ADMIN_USERNAME and ADMIN_PASSWORD environment variables. If the admin user was not created, ensure these variables are set before starting the container. Restarting the container may trigger re-initialization. If users still exist but login fails, verify credentials are exactly as set in the environment variables (case-sensitive).
+
+  - id: feed-fetch-timeout
+    name: Feeds not updating or timing out during refresh
+    symptoms:
+      - "Feed refresh failed"
+      - "context deadline exceeded"
+      - "timeout during fetch"
+      - "Feed status shows error"
+      - "No new articles appear"
+    trigger_conditions:
+      - log_pattern: "deadline exceeded"
+      - log_pattern: "timeout"
+      - log_pattern: "fetch.*failed"
+    steps:
+      - id: step-1
+        description: Test container outbound connectivity
+        type: check
+        command: "docker exec {container_name} wget -q -O- https://www.example.com | head -5"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Test DNS resolution from container
+        type: check
+        command: "docker exec {container_name} nslookup google.com"
+        expected_output: "Address:"
+        on_fail: step-3
+      - id: step-3
+        description: Display network diagnostic results
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Miniflux configuration for request timeout
+        type: check
+        command: "docker exec {container_name} env | grep -i timeout"
+        expected_output: ""
+      - id: step-5
+        description: Review feed error logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'feed\\|error' | tail -20"
+        expected_output: ""
+    resolution: |
+      Feed fetch timeouts indicate network issues or slow feed sources. Verify the container can reach the internet (DNS, routing). Some feeds are intentionally slow or have rate limiting. Miniflux's default timeout is 20 seconds per feed; very slow sources may require longer timeouts configured via FETCH_TIMEOUT environment variable. Consider increasing it to 30-60 seconds for problematic feeds, or set READ_TIMEOUT for the entire application.
+
+  - id: web-ui-unreachable
+    name: Cannot access Miniflux web interface
+    symptoms:
+      - "Connection refused"
+      - "Cannot GET / localhost:8080"
+      - "No route to host"
+      - "Timeout connecting to port 8080"
+    trigger_conditions:
+      - log_pattern: "bind.*error"
+      - log_pattern: "listen.*error"
+    steps:
+      - id: step-1
+        description: Verify Miniflux container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check container status and logs
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Verify port 8080 is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 '8080'"
+        expected_output: "8080"
+        on_fail: step-4
+      - id: step-4
+        description: Display port mapping information
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test connectivity on localhost from host
+        type: check
+        command: "curl -s http://localhost:8080/healthcheck"
+        expected_output: "OK"
+        on_fail: step-6
+      - id: step-6
+        description: Check if another application is using port 8080
+        type: check
+        command: "ss -tlnp | grep 8080"
+        expected_output: ""
+    resolution: |
+      The Miniflux web interface is not accessible, likely due to the container not running, port not being exposed, or the port being in use by another application. Verify the container is running with `docker ps`, that port 8080 is mapped in docker-compose or docker run, and that no other service is listening on that port. Restart the container if needed.
+
+default_config:
+  compose_template: |
+    services:
+      miniflux:
+        image: miniflux/miniflux:latest
+        container_name: miniflux
+        restart: unless-stopped
+        depends_on:
+          - postgres
+        environment:
+          DATABASE_URL: postgres://${DB_USER:-miniflux}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-miniflux}
+          RUN_MIGRATIONS: "1"
+          ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+          ADMIN_PASSWORD: ${ADMIN_PASSWORD:-miniflux123}
+          WORKER_POOL_SIZE: "10"
+          POLLING_FREQUENCY: "60"
+          FETCH_TIMEOUT: "20"
+        ports:
+          - "8080:8080/tcp"
+      postgres:
+        image: postgres:latest
+        container_name: miniflux_postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${DB_USER:-miniflux}
+          POSTGRES_PASSWORD: ${DB_PASSWORD}
+          POSTGRES_DB: ${DB_NAME:-miniflux}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./postgres_data}:/var/lib/postgresql/data
+  required_vars:
+    - name: ADMIN_USERNAME
+      description: Initial admin username for Miniflux
+      default: "admin"
+    - name: ADMIN_PASSWORD
+      description: Initial admin password (must be set on first run)
+      default: "miniflux123"
+    - name: DB_USER
+      description: PostgreSQL database user
+      default: "miniflux"
+    - name: DB_PASSWORD
+      description: PostgreSQL password (strong password recommended)
+      default: ""
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "miniflux"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for PostgreSQL data persistence
+      default: "./postgres_data"
+  known_mounts:
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL data files and database storage
+      recommended_permissions: "700"
+      owner: "70:70"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Miniflux is a minimalist, opinionated RSS reader focused on simplicity and speed. Unlike other RSS readers, Miniflux uses PostgreSQL as its primary (required) backend — SQLite is not supported.
+
+  Database requirement: PostgreSQL 12+ is mandatory. Miniflux will not function without it. The compose template includes a PostgreSQL service; alternatively, point DATABASE_URL to an external PostgreSQL instance.
+
+  Initial setup: On first run, set ADMIN_USERNAME and ADMIN_PASSWORD. The admin user is created automatically during container startup. After successful login, you can create additional user accounts.
+
+  Performance tuning:
+  - WORKER_POOL_SIZE: Number of concurrent feed fetchers (default 10)
+  - POLLING_FREQUENCY: Minutes between feed refresh cycles (default 60)
+  - FETCH_TIMEOUT: Seconds to wait for a single feed (default 20)
+
+  Backup strategy: Back up the PostgreSQL database and volumes. A simple approach is periodic `pg_dump` exports of the miniflux database.
+
+  Architecture: Miniflux is intentionally minimal by design. It does not include advanced plugin systems, custom themes, or complex UI customization. If you need these features, consider tt-rss or FreshRSS instead.
+
+  Feed updates: Miniflux uses a background polling daemon to refresh subscribed feeds. The interval is controlled by POLLING_FREQUENCY.
+
+  HTTPS: Miniflux serves on HTTP (port 8080) by default. For HTTPS, place it behind a reverse proxy like Nginx with valid certificates.
+
+  Common gotchas:
+  - PostgreSQL not running: Miniflux will immediately fail to start if the database is unavailable.
+  - Credentials not set: ADMIN_USERNAME and ADMIN_PASSWORD must be set before first run. They are applied only on initialization.
+  - Feed timeouts: Very slow feeds or rate-limited sources may exceed FETCH_TIMEOUT. Increase the value for problematic feeds.
+  - Database growth: Over time, the PostgreSQL database grows as articles accumulate. Consider setting article retention policies in Miniflux settings.

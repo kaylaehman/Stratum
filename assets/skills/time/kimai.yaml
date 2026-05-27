@@ -1,0 +1,188 @@
+id: kimai
+name: Kimai Time Tracking
+version: "1.0"
+container_match:
+  image_patterns:
+    - "kimai/kimai2"
+  port_hints: [8001]
+category: time
+description: Web-based time tracking and project management for teams and freelancers
+docs_url: https://hub.docker.com/r/kimai/kimai2
+
+common_issues:
+  - id: database-connection-error
+    name: Database connection failed
+    symptoms:
+      - "Connection refused"
+      - "SQLSTATE[HY000]"
+      - "database error"
+      - "Unable to connect to database"
+    trigger_conditions:
+      - log_pattern: "Connection refused"
+      - log_pattern: "SQLSTATE"
+    steps:
+      - id: step-1
+        description: Check if database container is running
+        type: check
+        command: "docker ps | grep -E 'mysql|mariadb'"
+        expected_output: "mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers to verify database status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database environment variables are set correctly
+        type: check
+        command: "docker inspect {container_name} | grep -A 20 'Env'"
+        expected_output: "DATABASE_URL"
+        on_fail: step-4
+      - id: step-4
+        description: Display current environment configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Kimai to re-establish database connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check logs for successful database connection
+        type: check
+        command: "docker logs {container_name} | grep -i 'database.*connected' | tail -3"
+
+  - id: permission-denied-config
+    name: Permission denied on data directory
+    symptoms:
+      - "permission denied"
+      - "Cannot create directory in /var/www/html/var"
+      - "Failed to write cache"
+      - "EACCES"
+    trigger_conditions:
+      - log_pattern: "permission denied.*var"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host data path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the data directory to www-data:www-data (33:33)
+        type: fix
+        command: "chown -R 33:33 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid:"
+    resolution: |
+      Kimai stores configuration, cache, and uploaded files in /var/www/html/var. The directory ownership was mismatched with the www-data user (UID 33). The fix changed ownership to match the container process. Kimai should now be able to read and write files.
+
+  - id: ui-not-loading
+    name: Web interface not loading or timing out
+    symptoms:
+      - "Connection refused"
+      - "502 Bad Gateway"
+      - "Page takes very long to load"
+      - "Blank white page"
+    trigger_conditions:
+      - log_pattern: "timeout"
+      - log_pattern: "502"
+    steps:
+      - id: step-1
+        description: Verify Kimai is listening on port 8001
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8001"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check if the container is still running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+        on_fail: step-3
+      - id: step-3
+        description: Display container status and recent logs
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Kimai to recover from stalled state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait for container to fully start and check logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+
+default_config:
+  compose_template: |
+    services:
+      kimai:
+        image: kimai/kimai2:latest
+        container_name: kimai
+        restart: unless-stopped
+        environment:
+          DATABASE_URL: "mysql://kimai:${DB_PASSWORD:-kimai}@db:3306/kimai"
+          KIMAI_SECRET: ${KIMAI_SECRET:-change-me-for-production}
+          KIMAI_DATA: /var/www/html/var
+        volumes:
+          - ${CONFIG_PATH:-./var}:/var/www/html/var
+        ports:
+          - "8001:8001/tcp"
+        depends_on:
+          - db
+      db:
+        image: mariadb:latest
+        container_name: kimai-db
+        restart: unless-stopped
+        environment:
+          MYSQL_DATABASE: kimai
+          MYSQL_USER: kimai
+          MYSQL_PASSWORD: ${DB_PASSWORD:-kimai}
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+  required_vars:
+    - name: DB_PASSWORD
+      description: MariaDB password for Kimai user
+      default: "kimai"
+    - name: DB_ROOT_PASSWORD
+      description: MariaDB root password
+      default: "root"
+    - name: KIMAI_SECRET
+      description: Secret key for Kimai (change for production)
+      default: "change-me-for-production"
+    - name: CONFIG_PATH
+      description: Host path for /var/www/html/var (configuration, cache, uploads)
+      default: "./var"
+    - name: DB_PATH
+      description: Host path for MariaDB data
+      default: "./db"
+  known_mounts:
+    - container_path: /var/www/html/var
+      purpose: Kimai configuration, cache, and uploaded files
+      recommended_permissions: "755"
+      owner: "33:33"
+
+notes: |
+  Kimai requires a MariaDB or MySQL database. The included compose template sets up both Kimai and MariaDB.
+
+  Database: MariaDB is the recommended database for Kimai. Ensure the database is initialized before starting Kimai.
+
+  Secret key: The KIMAI_SECRET should be changed to a random value in production. This is used for session handling and encryption.
+
+  Ownership: The /var/www/html/var directory must be owned by www-data (UID 33) to allow Kimai to write files.
+
+  First run: On first launch, Kimai performs database initialization. This may take a few moments. Check logs with "docker logs kimai" to monitor progress.
+
+  Default credentials: After deployment, log in with admin/admin and change the password immediately.

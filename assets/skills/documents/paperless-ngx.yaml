@@ -1,0 +1,330 @@
+id: paperless-ngx
+name: Paperless-NGX Document Management
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/paperless-ngx/paperless-ngx"
+    - "paperlessngx/paperless-ngx"
+    - "linuxserver/paperless-ngx"
+  port_hints: [8000]
+category: documents
+description: Open-source document management system that transforms scanned documents and PDFs into searchable archives
+docs_url: https://docs.paperless-ngx.com/
+
+common_issues:
+  - id: permission-denied-consume
+    name: Permission denied on consume directory
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to consume folder"
+      - "Files not being processed from consume directory"
+    trigger_conditions:
+      - log_pattern: "permission denied.*consume"
+      - log_pattern: "EACCES.*consume"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host consume directory
+        type: check
+        command: "stat {consume_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the consume directory to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {consume_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {consume_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The consume directory ownership was mismatched with the container's running UID/GID. This prevents Paperless-NGX from processing documents. The fix changed ownership to match the container process. Document processing should now work correctly.
+
+  - id: redis-connection-failed
+    name: Cannot connect to Redis broker
+    symptoms:
+      - "Connection refused"
+      - "redis broker error"
+      - "Failed to connect to broker"
+      - "Background tasks not running"
+    trigger_conditions:
+      - log_pattern: "redis.*refused"
+      - log_pattern: "broker.*error"
+      - log_pattern: "tasks.*failed"
+    steps:
+      - id: step-1
+        description: Check if Redis container is running
+        type: check
+        command: "docker ps | grep redis"
+        expected_output: "redis"
+        on_fail: step-2
+      - id: step-2
+        description: Display container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check network connectivity between containers
+        type: check
+        command: "docker exec {container_name} ping redis -c 1"
+        expected_output: "bytes from"
+        on_fail: step-4
+      - id: step-4
+        description: Verify Redis is listening on expected port
+        type: check
+        command: "docker exec redis ss -tlnp | grep 6379"
+        expected_output: "LISTEN.*6379"
+      - id: step-5
+        description: Restart both Redis and Paperless-NGX
+        type: fix
+        command: "docker restart redis {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait and check connection status in logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'redis.*ok' | tail -3"
+    resolution: |
+      Redis broker connection has been restored. Paperless-NGX background tasks (document processing, OCR, indexing) can now run properly. If issues persist, verify Docker Compose network configuration and that both services are properly defined.
+
+  - id: database-migration-failed
+    name: Database migration failed on startup
+    symptoms:
+      - "Migration error"
+      - "Database schema mismatch"
+      - "Failed to apply migrations"
+      - "Container exits immediately after start"
+    trigger_conditions:
+      - log_pattern: "migration.*failed"
+      - log_pattern: "schema.*mismatch"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check recent container logs for migration error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'migration\\|error' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display migration error context
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database directory ownership matches container UID
+        type: check
+        command: "stat {db_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+        on_fail: step-4
+      - id: step-4
+        description: Fix database directory ownership
+        type: fix
+        command: "chown -R {puid}:{pgid} {db_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart container to retry migrations
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor container startup and logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -20"
+    resolution: |
+      Database migrations have been retried. Paperless-NGX should now start successfully. If this error recurs, it may indicate a corrupted database file or version conflict. Consider backing up the database volume and verifying adequate disk space is available.
+
+  - id: ocr-language-download-timeout
+    name: OCR language pack download timeout
+    symptoms:
+      - "OCR language download timeout"
+      - "OCR initialization stalled"
+      - "Tesseract data not available"
+      - "Document OCR fails with language error"
+    trigger_conditions:
+      - log_pattern: "OCR.*timeout"
+      - log_pattern: "tesseract.*not found"
+      - log_pattern: "language.*download"
+    steps:
+      - id: step-1
+        description: Check current OCR language packs installed
+        type: check
+        command: "docker exec {container_name} ls -la /usr/share/tesseract-ocr-4.1.1/tessdata/ | head -10"
+        expected_output: ""
+      - id: step-2
+        description: Display available language packs
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check configured OCR languages
+        type: check
+        command: "docker exec {container_name} echo $PAPERLESS_OCR_LANGUAGES"
+        expected_output: ""
+      - id: step-4
+        description: Provide recommendation for OCR language configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart container to re-attempt language pack download
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor OCR initialization in logs
+        type: check
+        command: "sleep 30 && docker logs {container_name} | grep -i 'ocr\\|tesseract' | tail -5"
+    resolution: |
+      OCR language pack initialization has been retried. Large language packs may take several minutes to download on first startup. If download continues to timeout, check network connectivity and consider pre-downloading language packs or reducing the number of OCR languages configured via PAPERLESS_OCR_LANGUAGES environment variable.
+
+default_config:
+  compose_template: |
+    services:
+      postgres:
+        image: postgres:15-alpine
+        container_name: paperless-db
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: paperless
+          POSTGRES_USER: paperless
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-changemedatapassword}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U paperless"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      redis:
+        image: redis:7-alpine
+        container_name: paperless-redis
+        restart: unless-stopped
+        volumes:
+          - ${REDIS_PATH:-./redis}:/data
+        healthcheck:
+          test: ["CMD", "redis-cli", "ping"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+      paperless:
+        image: ghcr.io/paperless-ngx/paperless-ngx:latest
+        container_name: paperless
+        restart: unless-stopped
+        depends_on:
+          postgres:
+            condition: service_healthy
+          redis:
+            condition: service_healthy
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          PAPERLESS_REDIS: redis://redis:6379
+          PAPERLESS_DBHOST: postgres
+          PAPERLESS_DBNAME: paperless
+          PAPERLESS_DBUSER: paperless
+          PAPERLESS_DBPASS: ${DB_PASSWORD:-changemedatapassword}
+          PAPERLESS_SECRET_KEY: ${SECRET_KEY:-changemedatakey}
+          PAPERLESS_OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}
+          PAPERLESS_URL: ${PAPERLESS_URL:-http://localhost:8000}
+        volumes:
+          - ${CONSUME_PATH:-./consume}:/home/paperless/consume
+          - ${MEDIA_PATH:-./media}:/home/paperless/media
+          - ${DATA_PATH:-./data}:/home/paperless/data
+          - ${LOG_PATH:-./logs}:/home/paperless/log
+        ports:
+          - "8000:8000"
+
+  required_vars:
+    - name: PUID
+      description: User ID to run Paperless-NGX as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Paperless-NGX
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: DB_PASSWORD
+      description: PostgreSQL database password (for security, use a strong password)
+      default: "changemedatapassword"
+    - name: SECRET_KEY
+      description: Django secret key for Paperless-NGX (use a random string)
+      default: "changemedatakey"
+    - name: OCR_LANGUAGES
+      description: OCR language codes (space-separated, e.g. 'eng deu fra')
+      default: "eng"
+    - name: CONSUME_PATH
+      description: Host path for document consume directory
+      default: "./consume"
+    - name: MEDIA_PATH
+      description: Host path for processed media files
+      default: "./media"
+    - name: DATA_PATH
+      description: Host path for Paperless data files
+      default: "./data"
+    - name: LOG_PATH
+      description: Host path for application logs
+      default: "./logs"
+    - name: DB_PATH
+      description: Host path for PostgreSQL database
+      default: "./db"
+    - name: REDIS_PATH
+      description: Host path for Redis data
+      default: "./redis"
+
+  known_mounts:
+    - container_path: /home/paperless/consume
+      purpose: Directory where documents are placed for import and processing
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /home/paperless/media
+      purpose: Processed documents and generated OCR files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /home/paperless/data
+      purpose: Application data and configuration files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /home/paperless/log
+      purpose: Application log files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database files
+      recommended_permissions: "700"
+      owner: "70:70"
+    - container_path: /data
+      purpose: Redis data persistence
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Paperless-NGX is a document management system that converts scanned documents into searchable archives. It requires three components:
+  - PostgreSQL database (document metadata and search index)
+  - Redis broker (background task queue for OCR and processing)
+  - Paperless application (web interface and document processing)
+
+  Multi-container setup: This is a production-grade stack using PostgreSQL instead of SQLite for better concurrent access. All three services must be healthy for documents to process correctly.
+
+  Consume folder: Documents placed in the consume directory are automatically imported on the next background task run. This process can take minutes for large files or high-resolution scans depending on OCR language pack size.
+
+  OCR languages: Paperless-NGX uses Tesseract OCR. Additional language packs are downloaded on first startup if configured via PAPERLESS_OCR_LANGUAGES. Common values: 'eng' (English), 'deu' (German), 'fra' (French), 'spa' (Spanish). Use space-separated codes for multiple languages.
+
+  Permission management: The consume, media, and data directories must be writable by the container process. UID/GID mismatch is the most common cause of document processing failures.
+
+  Health checks: All services include health checks in the compose template. Paperless will not start processing documents until both Redis and PostgreSQL report healthy status.
+
+  Security: Change PAPERLESS_SECRET_KEY and DB_PASSWORD to strong, unique values in production. Never commit these to version control.
+
+  Database backup: Regularly backup the PostgreSQL data directory. The media directory contains generated files that can be regenerated, but the database is irreplaceable.

@@ -1,0 +1,265 @@
+id: ttyrss
+name: Tiny Tiny RSS (LinuxServer)
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/tt-rss"
+  port_hints: [80]
+category: rss
+description: Feature-rich RSS reader with plugin system and comprehensive feed management
+docs_url: https://hub.docker.com/r/linuxserver/tt-rss
+
+common_issues:
+  - id: puid-pgid-mismatch
+    name: Permission denied or unable to write to config directory
+    symptoms:
+      - "Permission denied"
+      - "EACCES"
+      - "Cannot create directory in /config"
+      - "Failed to write to cache"
+      - "Database locked"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current PUID and PGID configured in container
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep -E 'PUID|PGID'"
+        expected_output: "PUID"
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check actual ownership of the host config directory
+        type: check
+        command: "stat {config_path} | grep -E 'Uid|Gid'"
+        expected_output: "Uid:"
+        on_fail: step-4
+      - id: step-4
+        description: Display permission and ownership details
+        type: inform
+        command: ""
+      - id: step-5
+        description: Fix ownership to match configured PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Set appropriate permissions on config directory
+        type: fix
+        command: "chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify ownership was corrected
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: *{puid}"
+    resolution: |
+      Tiny Tiny RSS runs as the UID/GID specified by PUID and PGID environment variables (default 1000:1000). The config directory ownership was mismatched, preventing the application from writing configuration files and database. Ownership has been corrected to match the configured PUID:PGID. Restart the container if needed for the changes to take effect.
+
+  - id: feed-update-failure
+    name: Feeds not updating or stuck on zero articles
+    symptoms:
+      - "No articles appear in feeds"
+      - "Feed update stuck"
+      - "cURL error or timeout"
+      - "Cannot fetch from feed URL"
+      - "Database error during update"
+    trigger_conditions:
+      - log_pattern: "curl.*error"
+      - log_pattern: "update.*failed"
+      - log_pattern: "timeout"
+    steps:
+      - id: step-1
+        description: Test outbound connectivity from the container
+        type: check
+        command: "docker exec {container_name} ping -c 4 8.8.8.8"
+        expected_output: "4 received"
+        on_fail: step-2
+      - id: step-2
+        description: Verify DNS resolution is working
+        type: check
+        command: "docker exec {container_name} nslookup google.com"
+        expected_output: "Address:"
+        on_fail: step-3
+      - id: step-3
+        description: Display network diagnostic information
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test feed fetching capability with sample URL
+        type: check
+        command: "docker exec {container_name} curl -I https://example.com"
+        expected_output: ""
+      - id: step-5
+        description: Check Tiny Tiny RSS update logs
+        type: check
+        command: "docker logs {container_name} | grep -i update | tail -10"
+        expected_output: ""
+    resolution: |
+      Feed updates in Tiny Tiny RSS depend on network connectivity and the daemon process running. Verify that the container can reach the internet and that feed URLs are correct and accessible. The update daemon runs automatically; if feeds are still not updating, check the web interface Settings for any configured update restrictions or API issues. Some feeds may be slow or have rate limiting; consider adjusting timeout values in settings.
+
+  - id: database-corruption
+    name: Database error or corrupted data
+    symptoms:
+      - "General error: 1030"
+      - "database disk image is malformed"
+      - "Cannot write to database"
+      - "Feeds disappearing randomly"
+      - "Application won't start"
+    trigger_conditions:
+      - log_pattern: "database.*corrupt"
+      - log_pattern: "disk image"
+      - log_pattern: "General error"
+    steps:
+      - id: step-1
+        description: Check container logs for database errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'database\\|error' | tail -20"
+        expected_output: ""
+      - id: step-2
+        description: Check filesystem space available in config mount
+        type: check
+        command: "df -h {config_path} | tail -1"
+        expected_output: ""
+      - id: step-3
+        description: Verify database file is accessible
+        type: check
+        command: "ls -lah {config_path}/db/ | head -10"
+        expected_output: ""
+      - id: step-4
+        description: Backup current database before attempting repair
+        type: inform
+        command: ""
+      - id: step-5
+        description: Stop the container to safely access database
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Attempt to vacuum and repair the database
+        type: fix
+        command: "docker exec {container_name} sqlite3 {config_path}/db/ttrss.db 'PRAGMA integrity_check;'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart the container
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+    resolution: |
+      Database corruption can occur due to unclean shutdowns, disk full errors, or hardware issues. A database integrity check has been performed. If corruption is found, consider restoring from a backup or reinitializing the database. Regular backups of the /config directory are strongly recommended to prevent feed loss.
+
+  - id: web-interface-not-responsive
+    name: Web interface is slow, unresponsive, or shows errors
+    symptoms:
+      - "Page takes 30+ seconds to load"
+      - "HTTP 503 Service Unavailable"
+      - "Internal server error (500)"
+      - "Cannot log in"
+      - "Partial page loads"
+    trigger_conditions:
+      - log_pattern: "503"
+      - log_pattern: "500.*error"
+    steps:
+      - id: step-1
+        description: Check container resource usage
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Review recent application logs
+        type: check
+        command: "docker logs {container_name} | tail -30"
+        expected_output: ""
+      - id: step-3
+        description: Check available disk space on config mount
+        type: check
+        command: "df -h {config_path} | awk 'NR==2 {print $5}' | grep -v '100%'"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Warn about low disk space
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart the application
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait for application to stabilize and retest
+        type: check
+        command: "sleep 10 && docker exec {container_name} curl -s http://localhost/ | head -20"
+    resolution: |
+      Tiny Tiny RSS performance issues are often due to resource constraints (high CPU/memory), full disk, or database contention during large update cycles. Restarting the container clears temporary cache and connections. Monitor resource usage and consider increasing PHP memory limits if the application frequently experiences timeouts. Ensure sufficient disk space is available for feed cache.
+
+default_config:
+  compose_template: |
+    services:
+      ttyrss:
+        image: linuxserver/tt-rss:latest
+        container_name: ttyrss
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "80:80/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run Tiny Tiny RSS as (LinuxServer convention)
+      default: "1000"
+    - name: PGID
+      description: Group ID for Tiny Tiny RSS (LinuxServer convention)
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (application and database)
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: Tiny Tiny RSS application, database, plugins, and feed cache
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Tiny Tiny RSS (tt-rss) is a feature-rich self-hosted RSS/Atom reader with plugin support and advanced feed management. This is the LinuxServer.io maintained image, which simplifies deployment with PUID/PGID support for proper file ownership.
+
+  LinuxServer conventions: PUID and PGID environment variables control which user/group the application runs as. This ensures all files in /config are writable by the container. Default is 1000:1000 (typical first non-root user).
+
+  Database: Uses SQLite by default, stored in /config. Large installations may benefit from external MySQL/PostgreSQL.
+
+  Plugins: Tt-rss supports a plugin system for extending functionality. Plugins are stored in /config/plugins.
+
+  Update daemon: The application can automatically fetch feed updates via an internal daemon or cron job. Configure in Settings → Preferences.
+
+  Reverse proxy: For HTTPS, place behind Nginx or another reverse proxy with valid certificates.
+
+  Backup strategy:
+  - Regular backups of ./config preserve all feeds, articles, and user settings.
+  - Database file is typically stored in /config/db/ or within the application directory.
+
+  Common gotchas:
+  - Permission denied errors: PUID/PGID mismatch is the most common issue. Verify both environment variables and host directory ownership match.
+  - Feeds not updating: Check network connectivity and update daemon is running (visible in logs).
+  - Database corruption: Rare but can occur on unclean shutdown. Keep backups; SQLite repair is possible but fragile.
+  - Memory usage: Large feed subscriptions (1000+) can consume significant RAM. Monitor with `docker stats`.

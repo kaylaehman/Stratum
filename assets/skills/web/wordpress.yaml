@@ -1,0 +1,296 @@
+id: wordpress
+name: WordPress CMS
+version: "1.0"
+container_match:
+  image_patterns:
+    - "wordpress"
+    - "wordpress:latest"
+  port_hints: [80]
+category: web
+description: Open-source content management system for blogs and websites
+docs_url: https://hub.docker.com/_/wordpress
+
+common_issues:
+  - id: database-connection-failure
+    name: Database connection failed on first run
+    symptoms:
+      - "Error establishing a database connection"
+      - "Unable to select database"
+      - "Connection refused on port 3306"
+      - "MySQL server is not responding"
+    trigger_conditions:
+      - log_pattern: "database connection"
+      - log_pattern: "SQLSTATE"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if database container is running
+        type: check
+        command: "docker ps | grep -E '(mysql|mariadb)'"
+        expected_output: "mysql|mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display database service status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify WordPress can reach the database host
+        type: check
+        command: "docker exec {container_name} nc -zv {WORDPRESS_DB_HOST} {WORDPRESS_DB_PORT:-3306} 2>&1 | head -5"
+        expected_output: "open"
+        on_fail: step-4
+      - id: step-4
+        description: Show environment variables in WordPress container
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check database credentials are correct
+        type: check
+        command: "docker logs {container_name} | grep -i 'wordpress\\|database\\|error' | tail -10"
+        expected_output: ""
+      - id: step-6
+        description: Restart WordPress container to retry connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify database connection after restart
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'success\\|ready\\|database' | tail -5"
+    resolution: |
+      WordPress was unable to connect to the database on the first run. This commonly happens when the database service is not yet ready or credentials are incorrect. The container has been restarted to retry the connection. Ensure WORDPRESS_DB_HOST, WORDPRESS_DB_USER, WORDPRESS_DB_PASSWORD, and WORDPRESS_DB_NAME environment variables match your database configuration. Allow 10-15 seconds for the database service to be fully initialized before WordPress attempts connection.
+
+  - id: file-upload-permission-denied
+    name: File uploads fail with permission denied
+    symptoms:
+      - "Unable to upload files to media library"
+      - "Failed to move uploaded file"
+      - "Permission denied on /var/www/html/wp-content/uploads"
+      - "EACCES error when uploading images"
+    trigger_conditions:
+      - log_pattern: "permission denied.*uploads"
+      - log_pattern: "move_uploaded_file"
+    steps:
+      - id: step-1
+        description: Check current ownership and permissions of wp-content directory
+        type: check
+        command: "stat {config_path}/wp-content"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display wp-content permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check which user WordPress runs as inside container
+        type: check
+        command: "docker exec {container_name} whoami"
+        expected_output: "www-data|www"
+        on_fail: step-4
+      - id: step-4
+        description: Get WordPress container's UID
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.ExecUser}}{{.}}{{end}}' || echo 'www-data'"
+        expected_output: ""
+      - id: step-5
+        description: Inform fix for wp-content permissions
+        type: inform
+        command: ""
+      - id: step-6
+        description: Recursively set wp-content and wp-uploads permissions
+        type: fix
+        command: "find {config_path}/wp-content -type d -exec chmod 755 {} + && find {config_path}/wp-content -type f -exec chmod 644 {} +"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify permissions were updated
+        type: check
+        command: "stat {config_path}/wp-content"
+        expected_output: "Access: (0755"
+    resolution: |
+      WordPress file upload permissions were corrected. The wp-content directory and uploads folder now have proper permissions (directories 755, files 644) allowing the www-data process inside the container to write new media files. Test uploads via the WordPress admin panel — the media library should now accept files.
+
+  - id: wp-config-not-persisted
+    name: WordPress configuration lost after container restart
+    symptoms:
+      - "wp-config.php not found"
+      - "Settings reset to default after restart"
+      - "Database configuration lost"
+      - "Blank WordPress install appears after every restart"
+    trigger_conditions:
+      - log_pattern: "wp-config"
+      - log_pattern: "setup-config"
+    steps:
+      - id: step-1
+        description: Check if wp-config.php exists on host
+        type: check
+        command: "ls -la {config_path}/wp-config.php"
+        expected_output: "wp-config.php"
+        on_fail: step-2
+      - id: step-2
+        description: Display host directory contents
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Docker volumes for WordPress
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep -i 'html\\|www'"
+        expected_output: "/var/www/html"
+        on_fail: step-4
+      - id: step-4
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify config volume is mounted as read-write
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if eq .Destination \"/var/www/html\"}}{{.RW}}{{end}}{{end}}' | grep true"
+        expected_output: "true"
+      - id: step-6
+        description: Restart container to reload wp-config.php from host
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify wp-config.php is loaded
+        type: check
+        command: "sleep 3 && docker exec {container_name} test -f /var/www/html/wp-config.php && echo 'Found' || echo 'Missing'"
+        expected_output: "Found"
+    resolution: |
+      WordPress configuration persistence requires mounting the /var/www/html directory from the host into the container. The container has been restarted to reload wp-config.php from the persistent host volume. Ensure your docker-compose.yml includes a volume mapping for /var/www/html (e.g., `./wordpress:/var/www/html`). Without this mount, WordPress configuration and media are lost on every container restart.
+
+  - id: slow-admin-dashboard
+    name: WordPress admin dashboard is slow or unresponsive
+    symptoms:
+      - "Admin panel loads slowly or times out"
+      - "Dashboard queries taking > 5 seconds"
+      - "Saving posts or pages hangs"
+      - "High database query count shown at bottom of admin pages"
+    trigger_conditions:
+      - log_pattern: "slow query"
+      - log_pattern: "timeout"
+    steps:
+      - id: step-1
+        description: Check WordPress container resource usage
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Verify database container is responsive
+        type: check
+        command: "docker exec {database_container} mysql -u{WORDPRESS_DB_USER} -p{WORDPRESS_DB_PASSWORD} -h{WORDPRESS_DB_HOST} {WORDPRESS_DB_NAME} -e 'SELECT 1;' 2>&1"
+        expected_output: "1"
+        on_fail: step-3
+      - id: step-3
+        description: Display database status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check for missing WordPress table indexes
+        type: check
+        command: "docker exec {database_container} mysql -u{WORDPRESS_DB_USER} -p{WORDPRESS_DB_PASSWORD} -h{WORDPRESS_DB_HOST} {WORDPRESS_DB_NAME} -e 'SHOW TABLES;' 2>&1 | grep -c wp_"
+        expected_output: "10"
+      - id: step-5
+        description: Display recommendation for optimization
+        type: inform
+        command: ""
+      - id: step-6
+        description: Run WordPress database optimization
+        type: fix
+        command: "docker exec {container_name} wp db optimize --allow-root"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Check admin dashboard performance after optimization
+        type: check
+        command: "docker logs {container_name} | tail -10"
+    resolution: |
+      WordPress database has been optimized. Slow admin dashboards are often caused by fragmented database tables or missing indexes. The optimization routine has been executed to reclaim space and improve query performance. For sustained improvement, consider installing a caching plugin (e.g., W3 Total Cache or WP Super Cache) to reduce database queries. If slowness persists, check MySQL slow query logs or upgrade database container resources (CPU, RAM).
+
+default_config:
+  compose_template: |
+    services:
+      wordpress:
+        image: wordpress:latest
+        container_name: wordpress
+        restart: unless-stopped
+        environment:
+          WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST:-db}
+          WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wordpress}
+          WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-changeme}
+          WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
+          WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}
+        volumes:
+          - ${CONFIG_PATH:-./wordpress}:/var/www/html
+        ports:
+          - "80:80/tcp"
+        depends_on:
+          - db
+
+      db:
+        image: mariadb:latest
+        container_name: wordpress-db
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+          MYSQL_DATABASE: ${WORDPRESS_DB_NAME:-wordpress}
+          MYSQL_USER: ${WORDPRESS_DB_USER:-wordpress}
+          MYSQL_PASSWORD: ${WORDPRESS_DB_PASSWORD:-changeme}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+        ports:
+          - "3306:3306/tcp"
+
+  required_vars:
+    - name: WORDPRESS_DB_HOST
+      description: Database host (e.g., db for linked container)
+      default: "db"
+    - name: WORDPRESS_DB_USER
+      description: WordPress database user
+      default: "wordpress"
+    - name: WORDPRESS_DB_PASSWORD
+      description: WordPress database password
+      default: "changeme"
+    - name: WORDPRESS_DB_NAME
+      description: WordPress database name
+      default: "wordpress"
+    - name: MYSQL_ROOT_PASSWORD
+      description: MariaDB root password
+      default: "rootpass"
+    - name: CONFIG_PATH
+      description: Host path for WordPress /var/www/html
+      default: "./wordpress"
+    - name: DB_PATH
+      description: Host path for MariaDB /var/lib/mysql
+      default: "./db"
+
+  known_mounts:
+    - container_path: /var/www/html
+      purpose: WordPress application files, themes, plugins, uploads
+      recommended_permissions: "755"
+      owner: "www-data:www-data"
+    - container_path: /var/lib/mysql
+      purpose: MariaDB database files
+      recommended_permissions: "755"
+      owner: "mysql:mysql"
+
+notes: |
+  WordPress is a widely-used open-source CMS. The default config uses MariaDB as the database backend; MySQL can be substituted by changing the `db` service image to `mysql:8.0` or similar.
+
+  Multi-container setup: WordPress requires a separate database service. The compose template includes a MariaDB container pre-configured to work with WordPress.
+
+  Database initialization: On first run, allow 10-15 seconds for MariaDB to initialize before WordPress attempts connection. The depends_on directive ensures startup order, but does not guarantee readiness.
+
+  File uploads: Must run with correct UID/GID or file upload permissions will fail. Ensure /var/www/html is owned by www-data:www-data (typically UID 33 on Linux).
+
+  wp-config.php: This file is generated by WordPress during initial setup and must be persisted on the host. Bind mount /var/www/html to preserve it.
+
+  Plugins and themes: Updates and installations within WordPress admin panel write to /var/www/html. Ensure host mount has sufficient space and write permissions.
+
+  Common gotchas:
+  - Database not ready on startup: Wait before accessing WordPress; check db service logs.
+  - File upload failures: Check /var/www/html ownership (should be www-data:www-data).
+  - Lost configuration after restart: Ensure /var/www/html is mounted as a host volume, not ephemeral.
+  - Slow admin dashboard: Run database optimization or install caching plugin.

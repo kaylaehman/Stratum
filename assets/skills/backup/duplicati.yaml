@@ -1,0 +1,255 @@
+id: duplicati
+name: Duplicati Backup
+version: "1.0"
+container_match:
+  image_patterns:
+    - "lscr.io/linuxserver/duplicati"
+    - "linuxserver/duplicati"
+  port_hints: [8200]
+category: backup
+description: Encrypted, incremental backup tool with web UI and cloud storage support
+docs_url: https://hub.docker.com/r/linuxserver/duplicati
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to config directory"
+      - "Failed to save backup configuration"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents Duplicati from reading and writing configuration files and backup metadata. The fix changed ownership to match the container process. Duplicati should now be able to access and persist its configuration.
+
+  - id: backup-source-not-accessible
+    name: Backup source path not accessible or not mounted
+    symptoms:
+      - "Source path not found"
+      - "Permission denied reading source"
+      - "No files to backup in specified path"
+      - "Backup job fails with path error"
+    trigger_conditions:
+      - log_pattern: "path.*not found"
+      - log_pattern: "source.*cannot access"
+    steps:
+      - id: step-1
+        description: Verify backup source directories are mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display mounted volumes in container
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if source path exists on host
+        type: check
+        command: "test -d {source_path} && echo 'Path exists' || echo 'Path missing'"
+        expected_output: "Path exists"
+        on_fail: step-4
+      - id: step-4
+        description: Display host filesystem and available backup sources
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check permissions on source path
+        type: check
+        command: "stat {source_path}"
+        expected_output: "Access:"
+      - id: step-6
+        description: Verify container can read the source path
+        type: check
+        command: "docker exec {container_name} ls -la {source_path} | head -5"
+        expected_output: ""
+    resolution: |
+      Backup source paths must be mounted as volumes into the Duplicati container and must be readable by the container process. Verify in your docker-compose.yml that the source directory is correctly bound. If paths are missing or permissions are restrictive (owned by different UID/GID than the container runs as), adjust mount configuration or ownership accordingly.
+
+  - id: web-ui-not-accessible
+    name: Web UI not accessible on port 8200
+    symptoms:
+      - "Cannot connect to Duplicati web interface"
+      - "Port 8200 connection refused"
+      - "Timeout accessing localhost:8200"
+      - "404 or blank page at http://host:8200"
+    trigger_conditions:
+      - log_pattern: "cannot.*bind.*8200"
+      - log_pattern: "address already in use"
+    steps:
+      - id: step-1
+        description: Verify Duplicati is listening on port 8200
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8200"
+        expected_output: "LISTEN.*8200"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 8200 is published in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '8200'"
+        expected_output: "8200"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping and network configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check for port conflicts on host
+        type: check
+        command: "ss -tlnp | grep 8200"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Display processes bound to port 8200
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Duplicati container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify web interface is accessible
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'listening\\|webserver' | tail -3"
+    resolution: |
+      The Duplicati web interface requires port 8200 to be exposed and the service to be fully started. The container has been restarted. If the issue persists, check that no other service is bound to port 8200 on your host, and verify the container's port mapping in docker inspect. If using a reverse proxy, ensure it is configured to forward requests to localhost:8200 inside the container.
+
+  - id: backup-storage-auth-failed
+    name: Backup storage authentication failed
+    symptoms:
+      - "Authentication failed"
+      - "Invalid credentials for storage backend"
+      - "Permission denied uploading to storage"
+      - "Backup job fails during upload phase"
+    trigger_conditions:
+      - log_pattern: "auth.*failed"
+      - log_pattern: "credential.*invalid"
+    steps:
+      - id: step-1
+        description: Check backup job logs for storage error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|credential\\|upload' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display storage backend configuration summary
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify storage backend connectivity (network accessible)
+        type: check
+        command: "docker exec {container_name} ping -c 1 {storage_host} 2>&1 | head -3"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display network connectivity diagnostics
+        type: inform
+        command: ""
+      - id: step-5
+        description: Confirm storage credentials are correctly set in Duplicati config
+        type: check
+        command: "docker exec {container_name} test -f {config_path}/config.sqlite && echo 'Config found' || echo 'Config missing'"
+        expected_output: "Config found"
+      - id: step-6
+        description: Recommend credential re-entry in Duplicati web UI
+        type: inform
+        command: ""
+    resolution: |
+      Storage backend authentication failures are typically caused by expired credentials, incorrect configuration, or network connectivity issues. Review the storage backend settings in the Duplicati web UI at port 8200, re-enter credentials if needed, and test the connection. Duplicati supports S3, Google Drive, OneDrive, Backblaze B2, SFTP, and many other backends — consult the backend provider's documentation for current authentication requirements.
+
+default_config:
+  compose_template: |
+    services:
+      duplicati:
+        image: lscr.io/linuxserver/duplicati:latest
+        container_name: duplicati
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${BACKUP_SOURCE_PATH:-./data}:/source:ro
+          - ${TEMP_PATH:-./tmp}:/tmp
+        ports:
+          - "8200:8200/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run Duplicati as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Duplicati
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (Duplicati settings and database)
+      default: "./config"
+    - name: BACKUP_SOURCE_PATH
+      description: Host path to backup (mounted read-only into container)
+      default: "./data"
+    - name: TEMP_PATH
+      description: Host path for temporary files during backup operations
+      default: "./tmp"
+  known_mounts:
+    - container_path: /config
+      purpose: Duplicati configuration, backup metadata, and job database
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /source
+      purpose: Data to be backed up (read-only)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /tmp
+      purpose: Temporary files and staging area during backup operations
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Duplicati is an open-source encrypted backup tool with a web-based UI. It supports multiple storage backends including cloud storage (S3, Google Drive, OneDrive, Backblaze B2), SFTP, and local network shares.
+
+  Storage backend setup: After deploying, configure backup jobs and storage backends via the web UI at port 8200. Duplicati encrypts all data before transmission, so encryption keys are essential for restoring backups.
+
+  Incremental backups: Duplicati performs incremental backups to save storage space and bandwidth. Full backups can be scheduled periodically.
+
+  Temp directory: Should have sufficient free space for staging backups during upload operations. For large backups, ensure /tmp has at least as much free space as the largest backup job.
+
+  Backup source: Mount the directory to backup as read-only (/source:ro in compose) to prevent accidental modifications during backup operations.
+
+  Common gotchas:
+  - Permission denied on /config: Check PUID/PGID match and ownership of host config directory.
+  - Backup source not found: Verify source paths are mounted and exist on the host.
+  - Storage authentication failed: Re-enter credentials in the web UI; cloud storage provider credentials may have expired.
+  - Web UI not accessible: Verify port 8200 is exposed and no other service is bound to that port.

@@ -1,0 +1,207 @@
+id: organizr
+name: Organizr Dashboard and Organizer
+version: "1.0"
+container_match:
+  image_patterns:
+    - "organizr/organizr"
+    - "lsiocommunity/organizr"
+  port_hints: [80]
+category: dashboard
+description: Tab-based dashboard and organizer for managing and accessing multiple services
+docs_url: https://docs.organizr.app/
+
+common_issues:
+  - id: port-remapping-required
+    name: Port 80 already in use or needs remapping
+    symptoms:
+      - "port already in use"
+      - "Address already in use"
+      - "cannot bind to port 80"
+      - "container exits on startup"
+    trigger_conditions:
+      - log_pattern: "port.*in use"
+      - log_pattern: "bind.*refused"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check what is using port 80 on the host
+        type: check
+        command: "ss -tlnp | grep ':80 '"
+        expected_output: ""
+      - id: step-2
+        description: Display current port usage
+        type: inform
+        command: ""
+      - id: step-3
+        description: Provide recommendation for port remapping
+        type: inform
+        command: ""
+    resolution: |
+      Port 80 is already in use by another service. You can remap Organizr to a different port in your docker-compose.yml. For example, change ports: ["80:80"] to ports: ["8080:80"] to access Organizr on port 8080. Alternatively, stop the conflicting service or use a reverse proxy.
+
+  - id: permission-denied-config
+    name: Permission denied accessing config directory
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to /config"
+      - "Settings not saved"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check config directory ownership
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Fix config directory ownership and permissions
+        type: fix
+        command: "chown -R 0:0 {config_path} && chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify permissions are corrected
+        type: check
+        command: "stat {config_path} | grep -E 'Uid|Gid'"
+    resolution: |
+      Configuration directory permissions have been corrected. Organizr should now be able to read and write settings properly. Changes made in the Organizr interface will now be saved successfully.
+
+  - id: database-init-failure
+    name: Database initialization failed
+    symptoms:
+      - "database error"
+      - "failed to initialize database"
+      - "SQL error"
+      - "blank/white screen on load"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "SQL.*error"
+      - log_pattern: "init.*failed"
+    steps:
+      - id: step-1
+        description: Check Organizr logs for database errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'database\\|sql\\|error' | tail -15"
+        expected_output: ""
+      - id: step-2
+        description: Display error context
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if database file exists
+        type: check
+        command: "ls -la {config_path}/ | grep -E 'db|database|sql'"
+        expected_output: ""
+      - id: step-4
+        description: Restart container to trigger fresh database initialization
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Monitor initialization and verify web interface loads
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -20"
+    resolution: |
+      Organizr has been restarted and the database will be re-initialized. If the application loads successfully, the database issue has been resolved. If problems persist, try clearing the browser cache and cookies. For persistent database issues, backup and delete the database file to force recreation from scratch.
+
+  - id: service-integration-not-working
+    name: Service integration or tabs not loading
+    symptoms:
+      - "tabs not showing"
+      - "service integration broken"
+      - "external site not loading in tab"
+      - "iframe blocked"
+    trigger_conditions:
+      - log_pattern: "integration.*error"
+      - log_pattern: "iframe.*blocked"
+    steps:
+      - id: step-1
+        description: Check Organizr logs for integration errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'integration\\|error\\|blocked' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display integration configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify network connectivity to integrated services
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:3000 || echo 'Unable to connect'"
+        expected_output: ""
+      - id: step-4
+        description: Provide recommendation for service integration setup
+        type: inform
+        command: ""
+      - id: step-5
+        description: Clear browser cache and reload Organizr
+        type: inform
+        command: ""
+    resolution: |
+      Service integrations require proper network connectivity and configuration. Ensure services are reachable from the Organizr container. Browser security features (CORS, X-Frame-Options) may prevent external services from loading in iframes. For services on the same Docker network, use container names. For external services, ensure proper DNS resolution and firewall rules.
+
+default_config:
+  compose_template: |
+    services:
+      organizr:
+        image: organizr/organizr:latest
+        container_name: organizr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          fpm: "true"
+          branch: v2-master
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "80:80"
+
+  required_vars:
+    - name: PUID
+      description: User ID to run Organizr as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Organizr
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for Organizr configuration and database
+      default: "./config"
+
+  known_mounts:
+    - container_path: /config
+      purpose: Organizr configuration, database, and settings files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Organizr is a tab-based dashboard for organizing and accessing your self-hosted services. It provides a unified interface with customizable tabs and service integrations.
+
+  Port configuration: By default, Organizr listens on port 80 (HTTP). If port 80 is in use, remap it in docker-compose.yml. For example: ports: ["8080:80"]
+
+  Service integrations: Organizr supports integrations with many popular services. Services can be displayed in iframes within tabs or as direct links. Ensure network connectivity between Organizr and integrated services.
+
+  Browser security: Some browsers block iframes for external sites due to CORS or X-Frame-Options headers. You may need to use a reverse proxy (nginx, Traefik) to rewrite headers and allow embedded services.
+
+  Database: Organizr uses a SQLite database stored in /config. All settings, tabs, and integrations are persisted here. Regular backups are recommended.
+
+  Authentication: Organizr supports user authentication and LDAP integration. Configure users and roles through the web interface.
+
+  Performance: Organizr is lightweight and suitable for low-resource systems. Performance depends on the number of integrated services and their responsiveness.
+
+  Version note: The v2-master branch is the active development version. For stability, consider pinning to a specific release tag instead of latest.

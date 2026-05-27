@@ -1,0 +1,209 @@
+id: asterisk
+name: Asterisk SIP PBX
+version: "1.0"
+container_match:
+  image_patterns:
+    - "andrius/asterisk"
+  port_hints: [5060, 5061]
+category: voip
+description: Open-source SIP PBX telephony server for voice communications
+docs_url: https://hub.docker.com/r/andrius/asterisk
+
+common_issues:
+  - id: sip-registration-failed
+    name: SIP endpoints cannot register or connect
+    symptoms:
+      - "SIP registration timeout"
+      - "No registrations found"
+      - "Peer not found"
+      - "REGISTER failed"
+    trigger_conditions:
+      - log_pattern: "registration.*failed"
+      - log_pattern: "peer.*not found"
+    steps:
+      - id: step-1
+        description: Inform user about SIP NAT traversal requirements
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if Asterisk is listening on SIP port 5060
+        type: check
+        command: "docker exec {container_name} ss -ulnp | grep 5060"
+        expected_output: "LISTEN"
+        on_fail: step-3
+      - id: step-3
+        description: Display SIP listening status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify SIP configuration file exists
+        type: check
+        command: "docker exec {container_name} test -f /etc/asterisk/sip.conf && echo 'exists'"
+        expected_output: "exists"
+        on_fail: step-5
+      - id: step-5
+        description: Check Asterisk SIP module load status
+        type: check
+        command: "docker logs {container_name} | grep -i 'chan_sip\\|sip.*load' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Restart Asterisk to reload SIP configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Check for SIP registrations after restart
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'register' | tail -5"
+    resolution: |
+      SIP endpoints register to Asterisk by sending REGISTER messages to port 5060 (UDP). If registration fails, the endpoint cannot reach the Asterisk server. Verify that port 5060/UDP is exposed on the host and reachable from the endpoint's network. If behind NAT, configure the endpoint with the external IP/hostname and port of Asterisk, and ensure Asterisk is configured with externip or externhost in sip.conf. The container restart triggers SIP module reload and configuration re-parse.
+
+  - id: no-rtp-audio
+    name: Audio not working; RTP stream issues
+    symptoms:
+      - "One-way audio"
+      - "No audio after call connects"
+      - "RTP timeout"
+      - "Codec negotiation failed"
+    trigger_conditions:
+      - log_pattern: "rtp.*timeout"
+      - log_pattern: "audio.*not working"
+    steps:
+      - id: step-1
+        description: Inform user about RTP port range exposure
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if RTP port range is open (default 10000-20000)
+        type: check
+        command: "docker exec {container_name} ss -ulnp | grep -E '1[0-9]{4}'"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display RTP listening ports
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify Asterisk RTP configuration (rtp.conf)
+        type: check
+        command: "docker exec {container_name} grep -E 'rtpstart|rtpend' /etc/asterisk/rtp.conf"
+        expected_output: "rtpstart"
+        on_fail: step-5
+      - id: step-5
+        description: Display RTP configuration
+        type: inform
+        command: ""
+      - id: step-6
+        description: Check for codec mismatch in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'codec' | tail -5"
+        expected_output: ""
+      - id: step-7
+        description: Restart Asterisk to clear any stalled RTP sessions
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor logs for successful RTP initialization
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'rtp' | tail -3"
+    resolution: |
+      RTP (Real-time Transport Protocol) carries the actual audio stream after SIP negotiates the call. RTP typically uses UDP ports 10000–20000 (configurable in rtp.conf). If audio fails after SIP connection succeeds, the RTP packets cannot reach the endpoint. Verify the RTP port range is exposed on the host firewall and that NAT traversal (STUN/TURN) is configured if endpoints are behind NAT. One-way audio often indicates asymmetric routing — ensure the endpoint can reach the Asterisk RTP port from its network.
+
+  - id: permission-denied-config
+    name: Permission denied on /etc/asterisk or /var/spool/asterisk
+    symptoms:
+      - "permission denied"
+      - "Cannot write to /var/spool/asterisk"
+      - "Cannot read /etc/asterisk"
+      - "EACCES"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config directory to correct owner
+        type: fix
+        command: "chown -R 100:101 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+    resolution: |
+      Asterisk stores configuration files in /etc/asterisk and temporary/spool files in /var/spool/asterisk. The container's Asterisk process runs as a non-root user (typically UID 100). If the host directories are owned by root or a different UID, Asterisk cannot read config or write call records. The fix changes ownership to match the container process user.
+
+default_config:
+  compose_template: |
+    services:
+      asterisk:
+        image: andrius/asterisk:latest
+        container_name: asterisk
+        restart: unless-stopped
+        network_mode: host
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/etc/asterisk
+          - ${SPOOL_PATH:-./spool}:/var/spool/asterisk
+          - ${LOG_PATH:-./logs}:/var/log/asterisk
+        ports:
+          - "5060:5060/udp"
+          - "5061:5061/tcp"
+          - "10000-20000:10000-20000/udp"
+  required_vars:
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /etc/asterisk (configuration)
+      default: "./config"
+    - name: SPOOL_PATH
+      description: Host path for /var/spool/asterisk (call records, voicemail)
+      default: "./spool"
+    - name: LOG_PATH
+      description: Host path for /var/log/asterisk (logs)
+      default: "./logs"
+  known_mounts:
+    - container_path: /etc/asterisk
+      purpose: Asterisk configuration files (sip.conf, extensions.conf, etc.)
+      recommended_permissions: "755"
+      owner: "100:101"
+    - container_path: /var/spool/asterisk
+      purpose: Call records, voicemail, temporary files
+      recommended_permissions: "755"
+      owner: "100:101"
+    - container_path: /var/log/asterisk
+      purpose: Asterisk logs and debug output
+      recommended_permissions: "755"
+      owner: "100:101"
+
+notes: |
+  Asterisk is an open-source SIP PBX telephony server. It handles call routing, voicemail, IVR, and conference calling.
+
+  SIP protocol: Asterisk listens on UDP port 5060 (and optionally TCP 5061 for SIP over TCP). This port must be exposed to the network where SIP endpoints reside.
+
+  RTP (audio): Real-time audio is carried over UDP in the 10000–20000 port range (configurable). All RTP ports must be exposed and reachable from endpoints.
+
+  Network mode: The compose template uses `network_mode: host` to ensure SIP NAT traversal works correctly and RTP ports are directly accessible. This is typical for Asterisk deployments.
+
+  Configuration: Main config files are sip.conf (SIP peer/trunk definitions), extensions.conf (dialplan), and voicemail.conf. Edit these files on the host and restart the container to apply changes.
+
+  SIP NAT: If endpoints are behind NAT, configure them with Asterisk's external IP/hostname and port, and enable STUN or TURN on the endpoint for RTP.
+
+  Voicemail: Voicemail files are stored in /var/spool/asterisk/voicemail and should be backed up regularly.
+
+  First run: Asterisk initialization can take 30 seconds. Monitor logs with "docker logs asterisk" to verify startup completion.

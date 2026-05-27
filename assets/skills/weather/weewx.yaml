@@ -1,0 +1,254 @@
+id: weewx
+name: WeeWX Weather Station Software
+version: "1.0"
+container_match:
+  image_patterns:
+    - "mitct02/weewx"
+  port_hints: [8080]
+category: weather
+description: Personal weather station software for collecting, processing, and displaying weather data
+docs_url: https://hub.docker.com/r/mitct02/weewx
+
+common_issues:
+  - id: usb-device-not-found
+    name: USB weather station device not accessible in container
+    symptoms:
+      - "Cannot find USB weather station device"
+      - "Error: /dev/ttyUSB0 not found"
+      - "No such device error when accessing weather station"
+      - "Driver cannot communicate with hardware"
+      - "Device permission denied on /dev/ttyUSB*"
+    trigger_conditions:
+      - log_pattern: "device.*not found"
+      - log_pattern: "ttyUSB.*permission"
+      - log_pattern: "cannot access.*device"
+    steps:
+      - id: step-1
+        description: Check if USB device is present on host
+        type: check
+        command: "ls -la /dev/ttyUSB* 2>&1"
+        expected_output: "ttyUSB"
+        on_fail: step-2
+      - id: step-2
+        description: List all USB devices connected to host
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify device is mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .HostConfig.Devices}}{{.PathOnHost}}{{end}}'"
+        expected_output: "ttyUSB"
+        on_fail: step-4
+      - id: step-4
+        description: Display current device mounts in container
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check device permissions on host
+        type: check
+        command: "stat /dev/ttyUSB0 | grep -E 'Access|Uid|Gid'"
+        expected_output: ""
+      - id: step-6
+        description: Add container user to dialout group for USB access
+        type: fix
+        command: "docker exec {container_name} usermod -aG dialout weewx 2>/dev/null || true && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify device is now accessible
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'opened\\|connected\\|station' | tail -5"
+    resolution: |
+      WeeWX requires direct access to the USB weather station device. The container user has been added to the dialout group and the container restarted to apply the privilege change. For most USB weather stations (Davis, Vantage, Ambient Weather, etc.), the device appears as /dev/ttyUSB0 on the host. Ensure your docker-compose.yml includes `devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]` or equivalent for your specific device. Some weather stations use different serial ports; check your hardware documentation.
+
+  - id: database-location-permission
+    name: WeeWX database file is not writable
+    symptoms:
+      - "Cannot write to database"
+      - "Permission denied on weewx.sdb"
+      - "Database locked error"
+      - "Archive table cannot be updated"
+      - "Cannot save weather observations"
+    trigger_conditions:
+      - log_pattern: "database.*permission"
+      - log_pattern: "cannot write.*sdb"
+      - log_pattern: "locked"
+    steps:
+      - id: step-1
+        description: Check ownership of WeeWX data directory
+        type: check
+        command: "stat {config_path}/archive"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display data directory ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Get WeeWX process UID inside container
+        type: check
+        command: "docker exec {container_name} id weewx || echo 'uid not found'"
+        expected_output: ""
+      - id: step-4
+        description: Check if database file exists
+        type: check
+        command: "ls -la {config_path}/archive/weewx.sdb 2>&1"
+        expected_output: "weewx.sdb"
+        on_fail: step-5
+      - id: step-5
+        description: Show archive directory contents
+        type: inform
+        command: ""
+      - id: step-6
+        description: Recursively fix archive directory ownership to weewx user
+        type: fix
+        command: "chown -R 998:998 {config_path}/archive && chmod -R 755 {config_path}/archive"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify ownership was corrected
+        type: check
+        command: "stat {config_path}/archive | grep Uid"
+    resolution: |
+      WeeWX database permissions have been corrected. The archive directory (containing weewx.sdb) must be writable by the weewx user (typically UID 998). Without proper permissions, WeeWX cannot record weather observations to the database. The fix changed ownership and permissions to allow WeeWX to write new observation records.
+
+  - id: configuration-not-persisted
+    name: WeeWX configuration lost after container restart
+    symptoms:
+      - "Custom weewx.conf settings lost"
+      - "Station information reset to defaults"
+      - "Selected drivers and sensors forgotten"
+      - "HTML/FTP configuration reverted"
+      - "Setup wizard appears after every restart"
+    trigger_conditions:
+      - log_pattern: "weewx.conf"
+      - log_pattern: "using default.*configuration"
+    steps:
+      - id: step-1
+        description: Check if config directory is mounted from host
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if eq .Destination \"/home/weewx\"}}{{.Source}}{{end}}{{end}}'"
+        expected_output: "/"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check for weewx.conf on host
+        type: check
+        command: "ls -la {config_path}/weewx.conf 2>&1"
+        expected_output: "weewx.conf"
+        on_fail: step-4
+      - id: step-4
+        description: Show config directory contents on host
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart WeeWX to reload persisted config
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify configuration is loaded
+        type: check
+        command: "sleep 3 && docker logs {container_name} | grep -i 'initialization complete\\|configuration loaded' | tail -5"
+    resolution: |
+      WeeWX configuration persistence requires binding the /home/weewx directory from the host. The container has been restarted to reload persisted config files. Ensure your docker-compose.yml includes: `volumes: ["./weewx:/home/weewx"]`. The weewx.conf file, archive database, and custom skins are stored in this directory. Without the host mount, all configuration is lost on container restart.
+
+  - id: no-data-being-collected
+    name: WeeWX is not collecting weather data from station
+    symptoms:
+      - "No observations recorded"
+      - "Archive remains empty"
+      - "No data points shown on dashboard"
+      - "Loop frequency 0 or very low"
+      - "Station driver loaded but no readings"
+    trigger_conditions:
+      - log_pattern: "no data"
+      - log_pattern: "loop.*0"
+      - log_pattern: "driver.*loaded"
+    steps:
+      - id: step-1
+        description: Check WeeWX initialization logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'driver\\|station\\|initialization' | head -20"
+        expected_output: ""
+      - id: step-2
+        description: Verify station driver is configured in weewx.conf
+        type: check
+        command: "docker exec {container_name} grep -i 'station_type\\|driver' /home/weewx/weewx.conf"
+        expected_output: "station_type"
+        on_fail: step-3
+      - id: step-3
+        description: Show station configuration section
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if USB device is accessible
+        type: check
+        command: "docker exec {container_name} ls -la /dev/ttyUSB* 2>&1"
+        expected_output: "ttyUSB"
+        on_fail: step-5
+      - id: step-5
+        description: Display available devices in container
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart WeeWX with debug logging enabled
+        type: fix
+        command: "docker exec {container_name} /home/weewx/bin/weewxd --help > /dev/null && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Check if data collection resumed
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'data\\|reading\\|observation' | tail -10"
+    resolution: |
+      WeeWX data collection has been restarted. Common causes for no data: 1) USB device not mounted or accessible (verify /dev/ttyUSB0 appears in container), 2) wrong station driver selected (check weewx.conf `station_type`), 3) weather station hardware powered off or disconnected, 4) incorrect serial port or baud rate. Verify your station hardware is powered on and connected to the host, then check the WeeWX logs for driver-specific error messages.
+
+default_config:
+  compose_template: |
+    services:
+      weewx:
+        image: mitct02/weewx:latest
+        container_name: weewx
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./weewx}:/home/weewx
+        devices:
+          - /dev/ttyUSB0:/dev/ttyUSB0
+        ports:
+          - "8080:8080/tcp"
+  required_vars:
+    - name: TZ
+      description: Timezone for weather station data (e.g., America/New_York)
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /home/weewx (configuration, database, skins)
+      default: "./weewx"
+  known_mounts:
+    - container_path: /home/weewx
+      purpose: WeeWX configuration, database archive, generated HTML/reports, custom skins
+      recommended_permissions: "755"
+      owner: "weewx:weewx"
+
+notes: |
+  WeeWX is a personal weather station software that collects, processes, and archives weather data. It supports dozens of hardware weather stations including Davis Vantage Pro, Ambient Weather, Fine Offset, and others.
+
+  Hardware integration: WeeWX communicates with weather station hardware via USB serial port. The compose template includes `devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]` for direct device access. If your weather station uses a different port (e.g., /dev/ttyUSB1, /dev/ttyACM0), update the devices list accordingly. Some wireless weather stations may use different paths.
+
+  Configuration: The weewx.conf file must be persisted on the host. On first run, WeeWX generates a default config. Edit this file to select your station driver, set location, and customize reporting options.
+
+  Database: WeeWX stores observations in an SQLite database (weewx.sdb) in the archive/ subdirectory. This must be writable by the weewx process. Ensure proper file ownership.
+
+  Web interface: WeeWX can generate static HTML reports or serve a dynamic web interface. The compose template exposes port 8080 for web access.
+
+  Common gotchas:
+  - USB device not accessible: Verify /dev/ttyUSB0 exists on host and is mounted into container. Check device permissions.
+  - Database locked: Usually caused by permission mismatch; ensure archive/ directory is owned by weewx user.
+  - No data collected: Verify correct station driver is selected in weewx.conf, hardware is powered on, and USB connection is detected.
+  - Configuration lost after restart: Always mount /home/weewx from host to persist weewx.conf and database.

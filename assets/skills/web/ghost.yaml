@@ -1,0 +1,308 @@
+id: ghost
+name: Ghost Publishing Platform
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghost"
+    - "ghost:latest"
+  port_hints: [2368]
+category: web
+description: Lightweight, open-source publishing platform for blogs and newsletters
+docs_url: https://hub.docker.com/_/ghost
+
+common_issues:
+  - id: database-setup-failure
+    name: Database setup fails on first launch
+    symptoms:
+      - "Error: Database connection failed"
+      - "Unable to connect to MySQL/MariaDB"
+      - "ECONNREFUSED on port 3306"
+      - "Knex migration error"
+      - "Failed to create default tables"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "ECONNREFUSED"
+      - log_pattern: "migration"
+    steps:
+      - id: step-1
+        description: Verify database container is running
+        type: check
+        command: "docker ps | grep -E '(mysql|mariadb)'"
+        expected_output: "mysql|mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Ghost can reach database host
+        type: check
+        command: "docker exec {container_name} nc -zv {database_host:-db} 3306 2>&1"
+        expected_output: "open"
+        on_fail: step-4
+      - id: step-4
+        description: Display database connection details
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify database credentials in Ghost config
+        type: check
+        command: "docker logs {container_name} | grep -i 'database\\|mysql\\|connected' | tail -10"
+        expected_output: ""
+      - id: step-6
+        description: Wait for database initialization then restart Ghost
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Check if database initialization succeeded
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'success\\|ready\\|started' | tail -5"
+    resolution: |
+      Ghost container has been restarted to retry database setup. Ghost requires a MySQL 5.7+ or MariaDB database and will run Knex migrations on first launch. Ensure the database service is fully initialized (give it 10-15 seconds) before Ghost attempts connection. Verify that db_host, db_user, db_password, and db_name environment variables match your database configuration.
+
+  - id: content-folder-permission-denied
+    name: Permission denied writing to content folder
+    symptoms:
+      - "Cannot create uploads directory"
+      - "Failed to write file to content folder"
+      - "EACCES on /var/lib/ghost/content"
+      - "Upload folder not accessible"
+      - "Cannot save images or files"
+    trigger_conditions:
+      - log_pattern: "permission denied.*content"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of Ghost content folder
+        type: check
+        command: "stat {config_path}/content"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display content folder permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Get Ghost container's running UID
+        type: check
+        command: "docker inspect {container_name} --format='{{.Config.User}}' || echo 'node'"
+        expected_output: ""
+      - id: step-4
+        description: Correct content folder ownership recursively
+        type: fix
+        command: "chown -R node:node {config_path}/content && chmod -R 755 {config_path}/content"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify permissions were corrected
+        type: check
+        command: "stat {config_path}/content | grep Uid"
+    resolution: |
+      Ghost content folder permissions have been corrected. The /var/lib/ghost/content directory is now owned by the node user (UID 999 typically) with proper permissions. This directory stores uploaded media and Ghost theme files. Ghost should now be able to accept and store uploads. Test by uploading an image via Ghost admin panel.
+
+  - id: config-not-persisted
+    name: Ghost configuration lost after container restart
+    symptoms:
+      - "Site name reset to default"
+      - "Custom settings lost"
+      - "Email configuration forgotten"
+      - "Theme changes reverted"
+      - "Setup wizard appears again after restart"
+    trigger_conditions:
+      - log_pattern: "config"
+      - log_pattern: "setup"
+    steps:
+      - id: step-1
+        description: Check if Ghost config directory is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if eq .Destination \"/var/lib/ghost/content\"}}{{.Source}}{{end}}{{end}}'"
+        expected_output: "/"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check for config.json in host directory
+        type: check
+        command: "ls -la {config_path}/config.json"
+        expected_output: "config.json"
+        on_fail: step-4
+      - id: step-4
+        description: Inform about required mount for persistence
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Ghost to load persisted config
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify configuration is loaded
+        type: check
+        command: "sleep 3 && docker exec {container_name} test -f /var/lib/ghost/config.production.json && echo 'Config loaded' || echo 'Config missing'"
+        expected_output: "loaded"
+    resolution: |
+      Ghost configuration persistence requires binding the /var/lib/ghost/content directory from the host. The container has been restarted to reload persisted config files (config.production.json, database.sqlite, etc.). Ensure your docker-compose.yml includes a volume mapping: `./ghost:/var/lib/ghost/content`. Without this, Ghost configuration, media uploads, and theme changes are lost on every container restart.
+
+  - id: smtp-email-not-sending
+    name: Email notifications not sending (SMTP configuration issue)
+    symptoms:
+      - "Email sending fails silently"
+      - "No error in logs but emails don't arrive"
+      - "SMTP configuration not applied"
+      - "Invite members emails not sent"
+      - "Password reset links not emailed"
+    trigger_conditions:
+      - log_pattern: "mail"
+      - log_pattern: "smtp"
+      - log_pattern: "email"
+    steps:
+      - id: step-1
+        description: Check if mail configuration is set in Ghost config
+        type: check
+        command: "docker exec {container_name} cat /var/lib/ghost/config.production.json | grep -i 'mail\\|smtp' || echo 'No mail config found'"
+        expected_output: "mail|smtp"
+        on_fail: step-2
+      - id: step-2
+        description: Display mail configuration status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify SMTP connection from Ghost container
+        type: check
+        command: "docker exec {container_name} nc -zv {smtp_host} {smtp_port} 2>&1"
+        expected_output: "open"
+        on_fail: step-4
+      - id: step-4
+        description: Show SMTP host and port information
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check Ghost logs for mail errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'mail\\|smtp\\|error' | tail -10"
+        expected_output: ""
+      - id: step-6
+        description: Restart Ghost to reload mail configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify mail service is ready
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'mail\\|ready' | tail -5"
+    resolution: |
+      Ghost has been restarted to reload email (SMTP) configuration. Email settings must be configured via the Ghost config.production.json file or environment variables (MAIL_FROM, MAIL_TRANSPORT_HOST, MAIL_TRANSPORT_PORT, MAIL_TRANSPORT_USER, MAIL_TRANSPORT_PASSWORD). Without proper SMTP configuration, Ghost cannot send member invites, password resets, or notifications. Test the setup by sending a test email through Ghost admin Settings → Members → Email.
+
+default_config:
+  compose_template: |
+    services:
+      ghost:
+        image: ghost:latest
+        container_name: ghost
+        restart: unless-stopped
+        environment:
+          NODE_ENV: production
+          url: ${GHOST_URL:-http://localhost:2368}
+          database__client: mysql
+          database__connection__host: ${DB_HOST:-db}
+          database__connection__user: ${DB_USER:-ghost}
+          database__connection__password: ${DB_PASSWORD:-changeme}
+          database__connection__database: ${DB_NAME:-ghost}
+          mail__transport: SMTP
+          mail__options__host: ${SMTP_HOST:-smtp.example.com}
+          mail__options__port: ${SMTP_PORT:-587}
+          mail__options__auth__user: ${SMTP_USER}
+          mail__options__auth__pass: ${SMTP_PASSWORD}
+        volumes:
+          - ${CONFIG_PATH:-./ghost}:/var/lib/ghost/content
+        ports:
+          - "2368:2368/tcp"
+        depends_on:
+          - db
+
+      db:
+        image: mariadb:latest
+        container_name: ghost-db
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+          MYSQL_DATABASE: ${DB_NAME:-ghost}
+          MYSQL_USER: ${DB_USER:-ghost}
+          MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
+        volumes:
+          - ${DB_PATH:-./ghost-db}:/var/lib/mysql
+        ports:
+          - "3306:3306/tcp"
+
+  required_vars:
+    - name: GHOST_URL
+      description: Public URL of Ghost site (e.g., https://myblog.com)
+      default: "http://localhost:2368"
+    - name: DB_HOST
+      description: Database hostname
+      default: "db"
+    - name: DB_USER
+      description: Ghost database user
+      default: "ghost"
+    - name: DB_PASSWORD
+      description: Ghost database password
+      default: "changeme"
+    - name: DB_NAME
+      description: Ghost database name
+      default: "ghost"
+    - name: MYSQL_ROOT_PASSWORD
+      description: MariaDB root password
+      default: "rootpass"
+    - name: SMTP_HOST
+      description: SMTP server hostname (optional for email)
+      default: "smtp.example.com"
+    - name: SMTP_PORT
+      description: SMTP server port
+      default: "587"
+    - name: SMTP_USER
+      description: SMTP username
+      default: ""
+    - name: SMTP_PASSWORD
+      description: SMTP password
+      default: ""
+    - name: CONFIG_PATH
+      description: Host path for Ghost /var/lib/ghost/content
+      default: "./ghost"
+    - name: DB_PATH
+      description: Host path for MariaDB /var/lib/mysql
+      default: "./ghost-db"
+
+  known_mounts:
+    - container_path: /var/lib/ghost/content
+      purpose: Ghost configuration, database, themes, and uploads
+      recommended_permissions: "755"
+      owner: "node:node"
+    - container_path: /var/lib/mysql
+      purpose: MariaDB database files
+      recommended_permissions: "755"
+      owner: "mysql:mysql"
+
+notes: |
+  Ghost is a lightweight, open-source publishing platform optimized for blogs and member-based content sites. It emphasizes simplicity and performance.
+
+  Database: Ghost requires MySQL 5.7+ or MariaDB. The default config uses MariaDB; substitute mysql:8.0 if preferred. Initial database migration runs on first launch.
+
+  File uploads: Ghost stores media in /var/lib/ghost/content/images/. Ensure host mount is owned by node:node (UID 999 typically) with sufficient space and write permissions.
+
+  Email (optional): Ghost can send member invitations, password resets, and newsletters via SMTP. Configure mail__* environment variables or update config.production.json directly.
+
+  Themes: Ghost themes are stored in /var/lib/ghost/content/themes/. Changes are persisted only if the content directory is mounted from the host.
+
+  Public URL: Set GHOST_URL to the final public domain so Ghost generates correct links and member invitations work properly.
+
+  Common gotchas:
+  - Database not ready on startup: Allow 15-20 seconds for MariaDB initialization before Ghost attempts connection.
+  - Content directory permissions: Must be owned by node:node; uploads fail if ownership is incorrect.
+  - Configuration lost after restart: Requires host bind mount on /var/lib/ghost/content to persist config and settings.
+  - Email not sending: SMTP must be configured via environment variables or config.production.json; test in admin panel after setting credentials.

@@ -1,0 +1,264 @@
+id: passbolt
+name: Passbolt Password Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "passbolt/passbolt"
+  port_hints: [80, 443]
+category: passwords
+description: Open-source team password manager with role-based access control
+docs_url: https://hub.docker.com/r/passbolt/passbolt
+
+common_issues:
+  - id: database-connection-error
+    name: Database connection failed
+    symptoms:
+      - "Connection refused"
+      - "database error"
+      - "SQLSTATE[HY000]"
+      - "Unable to establish database connection"
+    trigger_conditions:
+      - log_pattern: "Connection refused"
+      - log_pattern: "SQLSTATE"
+    steps:
+      - id: step-1
+        description: Check if MariaDB container is running
+        type: check
+        command: "docker ps | grep mariadb"
+        expected_output: "mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database environment variables in Passbolt
+        type: check
+        command: "docker inspect {container_name} | grep -A 30 'Env' | grep -E 'DB_HOST|DB_NAME|DB_USER'"
+        expected_output: "DB_HOST"
+        on_fail: step-4
+      - id: step-4
+        description: Display database configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Passbolt container to re-establish connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check logs for successful database connection
+        type: check
+        command: "docker logs {container_name} | grep -i 'database.*connected' | tail -3"
+
+  - id: ssl-certificate-error
+    name: SSL certificate error or HTTPS not working
+    symptoms:
+      - "SSL certificate problem"
+      - "ERR_SSL_VERSION_OR_CIPHER_MISMATCH"
+      - "HTTPS not responding"
+      - "Mixed content warning"
+    trigger_conditions:
+      - log_pattern: "SSL"
+      - log_pattern: "certificate"
+    steps:
+      - id: step-1
+        description: Inform user about SSL certificate generation on first run
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if SSL certificates exist in the container
+        type: check
+        command: "docker exec {container_name} ls -la /etc/ssl/certs/passbolt*"
+        expected_output: "passbolt"
+        on_fail: step-3
+      - id: step-3
+        description: Display certificate directory listing
+        type: inform
+        command: ""
+      - id: step-4
+        description: Display Passbolt logs related to SSL initialization
+        type: check
+        command: "docker logs {container_name} | grep -i 'ssl\\|certificate' | tail -10"
+      - id: step-5
+        description: Explain that SSL certs are auto-generated and may need refresh
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Passbolt to trigger fresh certificate generation
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify SSL certificate after restart
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'listening' | tail -3"
+    resolution: |
+      Passbolt automatically generates SSL certificates on first run. If HTTPS is not responding, the certificate generation may have failed or timed out. Restarting the container will trigger certificate generation again. For production deployments, consider using a reverse proxy (nginx, Traefik) with your own valid certificate to avoid browser warnings.
+
+  - id: gpg-key-initialization-failed
+    name: GPG key initialization failed
+    symptoms:
+      - "GPG initialization error"
+      - "Cannot initialize server key"
+      - "Key not found"
+      - "GPG module not loaded"
+    trigger_conditions:
+      - log_pattern: "GPG"
+      - log_pattern: "key.*failed"
+    steps:
+      - id: step-1
+        description: Check if GPG is installed in the container
+        type: check
+        command: "docker exec {container_name} which gpg"
+        expected_output: "gpg"
+        on_fail: step-2
+      - id: step-2
+        description: Display GPG installation status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Passbolt logs for GPG initialization errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'gpg' | tail -10"
+      - id: step-4
+        description: Verify GPG directory permissions
+        type: check
+        command: "docker exec {container_name} ls -la /var/www/passbolt/config/gpg"
+        expected_output: ""
+      - id: step-5
+        description: Inform user that GPG keys are generated on first run
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Passbolt to retry GPG key generation
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for GPG key generation and verify initialization
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'gpg.*initialized\\|key.*generated' | tail -3"
+    resolution: |
+      Passbolt requires GPG keys for encryption/decryption of passwords. These are generated automatically on first run. If initialization failed, the container restart should trigger generation again. GPG key generation can take up to a minute. Check logs to verify the process completed successfully.
+
+  - id: permission-denied-config
+    name: Permission denied on config/storage directories
+    symptoms:
+      - "permission denied"
+      - "Cannot write to /var/www/passbolt"
+      - "EACCES"
+      - "Failed to create directory"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config directory to www-data:www-data (33:33)
+        type: fix
+        command: "chown -R 33:33 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+    resolution: |
+      Passbolt stores configuration, GPG keys, and password data in /var/www/passbolt. The directory ownership was mismatched with the www-data user (UID 33). The fix changed ownership to match the container process. Passbolt should now be able to read and write files properly.
+
+default_config:
+  compose_template: |
+    services:
+      passbolt:
+        image: passbolt/passbolt:latest
+        container_name: passbolt
+        restart: unless-stopped
+        environment:
+          DATASOURCES_DEFAULT_HOST: db
+          DATASOURCES_DEFAULT_DATABASE: passbolt
+          DATASOURCES_DEFAULT_USERNAME: passbolt
+          DATASOURCES_DEFAULT_PASSWORD: ${DB_PASSWORD:-passbolt}
+          PASSBOLT_SSL_FORCE: "true"
+          PASSBOLT_LEGAL_PRIVACYLINK: "https://www.passbolt.com/privacy"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/var/www/passbolt/config
+          - ${GPGKEY_PATH:-./gpgkey}:/var/www/passbolt/config/gpg
+          - ${JWT_PATH:-./jwt}:/var/www/passbolt/config/jwt
+        ports:
+          - "80:80/tcp"
+          - "443:443/tcp"
+        depends_on:
+          - db
+      db:
+        image: mariadb:latest
+        container_name: passbolt-db
+        restart: unless-stopped
+        environment:
+          MYSQL_DATABASE: passbolt
+          MYSQL_USER: passbolt
+          MYSQL_PASSWORD: ${DB_PASSWORD:-passbolt}
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+  required_vars:
+    - name: DB_PASSWORD
+      description: MariaDB password for Passbolt user
+      default: "passbolt"
+    - name: DB_ROOT_PASSWORD
+      description: MariaDB root password
+      default: "root"
+    - name: CONFIG_PATH
+      description: Host path for /var/www/passbolt/config
+      default: "./config"
+    - name: GPGKEY_PATH
+      description: Host path for GPG keys (must be separate for security)
+      default: "./gpgkey"
+    - name: JWT_PATH
+      description: Host path for JWT keys
+      default: "./jwt"
+    - name: DB_PATH
+      description: Host path for MariaDB data
+      default: "./db"
+  known_mounts:
+    - container_path: /var/www/passbolt/config
+      purpose: Passbolt configuration files
+      recommended_permissions: "755"
+      owner: "33:33"
+    - container_path: /var/www/passbolt/config/gpg
+      purpose: GPG encryption keys (CRITICAL for password decryption)
+      recommended_permissions: "700"
+      owner: "33:33"
+    - container_path: /var/www/passbolt/config/jwt
+      purpose: JWT authentication keys
+      recommended_permissions: "700"
+      owner: "33:33"
+
+notes: |
+  Passbolt is an open-source team password manager with end-to-end encryption. It requires MariaDB and GPG for operation.
+
+  Database: MariaDB must be running before Passbolt starts. The compose template includes both services.
+
+  SSL/HTTPS: Passbolt auto-generates self-signed SSL certificates on first run. For production, use a reverse proxy with a valid certificate to avoid browser warnings.
+
+  GPG keys: Critical for password encryption/decryption. These are auto-generated on first run and stored in /config/gpg. Backup this directory regularly.
+
+  Default admin: After deployment, create the first admin user. Follow the on-screen setup wizard.
+
+  Ownership: Config and GPG key directories must be owned by www-data (UID 33). Incorrect permissions will prevent password access.
+
+  Backup: Regularly back up the database and GPG key directory to prevent loss of encrypted passwords.
+
+  First run: Passbolt initialization can take up to 2 minutes. Monitor logs with "docker logs passbolt" to verify setup completion.
