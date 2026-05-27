@@ -290,6 +290,21 @@ export interface FsUploadResponse {
   bytes: number
 }
 
+// Chunked / resumable upload types (Feature F10)
+
+export interface FsUploadStatusResponse {
+  received: number
+}
+
+export interface FsUploadChunkResponse {
+  received: number
+}
+
+export interface FsUploadFinishResponse {
+  path: string
+  bytes: number
+}
+
 // UID/GID Conflict Visualizer types
 
 export type UidRowClass = 'match' | 'mismatch' | 'unresolvable'
