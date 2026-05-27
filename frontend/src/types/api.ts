@@ -528,3 +528,44 @@ export interface AcknowledgeRequest {
   flag_key: string
   note?: string
 }
+
+// Activity Log types (Sub-project 9)
+
+export interface ActivityEntry {
+  id: string
+  created_at: string
+  user_id?: string
+  username?: string
+  action: string
+  target_type?: string
+  target_id?: string
+  detail: unknown
+  result: 'success' | 'error' | string
+}
+
+export interface ActivityListResponse {
+  entries: ActivityEntry[]
+  next_cursor: string
+}
+
+export interface ActivityActionInfo {
+  action: string
+  label: string
+  category: string
+  target: string
+}
+
+export interface ActivityActionsResponse {
+  actions: ActivityActionInfo[]
+}
+
+export interface ActivityFilters {
+  user?: string
+  action?: string
+  action_prefix?: string
+  target_type?: string
+  result?: string
+  from?: string
+  to?: string
+  q?: string
+}
