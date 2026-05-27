@@ -120,6 +120,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/containers/{id}/start", d.Handlers.StartContainer)
 			audited.Post("/containers/{id}/stop", d.Handlers.StopContainer)
 			audited.Post("/containers/{id}/restart", d.Handlers.RestartContainer)
+			audited.Post("/containers/bulk", d.Handlers.BulkContainers)
 		})
 	})
 

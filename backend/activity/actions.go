@@ -31,6 +31,7 @@ const (
 	ActionContainerStart   = "container.start"
 	ActionContainerStop    = "container.stop"
 	ActionContainerRestart = "container.restart"
+	ActionContainerRemove  = "container.remove"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -79,6 +80,7 @@ var actionCatalog = []ActionInfo{
 	{ActionContainerStart, "Container started", "container", TargetContainer},
 	{ActionContainerStop, "Container stopped", "container", TargetContainer},
 	{ActionContainerRestart, "Container restarted", "container", TargetContainer},
+	{ActionContainerRemove, "Container removed", "container", TargetContainer},
 }
 
 var actionByName = func() map[string]ActionInfo {
