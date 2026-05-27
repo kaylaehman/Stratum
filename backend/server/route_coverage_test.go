@@ -56,6 +56,14 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"DELETE /api/bookmarks/{id}": true,
 	}
 
+	// Resumable-upload staging (F10): chunk write + cancel only touch a temp
+	// file; the completed upload is audited via POST .../fs/upload/finish. So
+	// these two are intentionally not under the activity middleware.
+	stagingMutating := map[string]bool{
+		"PUT /api/nodes/{id}/fs/upload/chunk":    true,
+		"DELETE /api/nodes/{id}/fs/upload/chunk": true,
+	}
+
 	// Mutating routes confirmed mounted under the activity middleware (the
 	// `audited` group in router.go). Adding a new POST/PUT/DELETE route forces an
 	// update here — the prompt to confirm the route is audited.
@@ -68,6 +76,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/nodes/probe-preview":             true,
 		"PUT /api/nodes/{id}/fs/file":               true,
 		"POST /api/nodes/{id}/fs/upload":            true,
+		"POST /api/nodes/{id}/fs/upload/finish":     true,
 		"POST /api/nodes/{id}/fs/mkdir":             true,
 		"POST /api/nodes/{id}/fs/rename":            true,
 		"DELETE /api/nodes/{id}/fs":                 true,
@@ -126,7 +135,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 			return nil
 		}
 		key := method + " " + route
-		if publicMutating[key] || auditedMutating[key] || nonMutatingPost[key] || userPrefMutating[key] {
+		if publicMutating[key] || auditedMutating[key] || nonMutatingPost[key] || userPrefMutating[key] || stagingMutating[key] {
 			return nil
 		}
 		t.Errorf("unclassified mutating route %q: it must be mounted under the activity middleware "+

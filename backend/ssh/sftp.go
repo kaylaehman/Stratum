@@ -228,3 +228,34 @@ func SFTPCreate(client *ssh.Client, p string) (io.WriteCloser, error) {
 	}
 	return &writeCloser{file: f, client: sc}, nil
 }
+
+// SFTPOpenWriteAt opens a remote file for writing at byte offset, for resumable
+// chunked uploads. offset==0 truncates (fresh start); offset>0 opens the
+// existing file and seeks to it (the caller has verified the file is exactly
+// that long). The returned io.WriteCloser owns and closes the per-op client.
+func SFTPOpenWriteAt(client *ssh.Client, p string, offset int64) (io.WriteCloser, error) {
+	sc, err := sftp.NewClient(client)
+	if err != nil {
+		return nil, err
+	}
+	flags := os.O_WRONLY | os.O_CREATE
+	if offset == 0 {
+		flags |= os.O_TRUNC
+		if dir := path.Dir(p); dir != "." && dir != "/" {
+			_ = sc.MkdirAll(dir) // best-effort; parent may already exist
+		}
+	}
+	f, err := sc.OpenFile(p, flags)
+	if err != nil {
+		sc.Close()
+		return nil, err
+	}
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			f.Close()
+			sc.Close()
+			return nil, err
+		}
+	}
+	return &writeCloser{file: f, client: sc}, nil
+}

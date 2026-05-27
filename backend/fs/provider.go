@@ -32,6 +32,9 @@ type FileProvider interface {
 	RealPath(ctx context.Context, path string) (string, error)
 	OpenRead(ctx context.Context, path string) (io.ReadCloser, error)
 	OpenWrite(ctx context.Context, path string) (io.WriteCloser, error)
+	// OpenWriteAt opens for writing at a byte offset (resumable chunked upload);
+	// offset==0 truncates.
+	OpenWriteAt(ctx context.Context, path string, offset int64) (io.WriteCloser, error)
 	Mkdir(ctx context.Context, path string) error
 	Rename(ctx context.Context, oldPath, newPath string) error
 	Remove(ctx context.Context, path string, recursive bool) error

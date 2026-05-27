@@ -27,6 +27,13 @@ var (
 	ErrDenied   = errors.New("fs: path is on the critical-path deny-list")
 	ErrStale    = errors.New("fs: file modified since read (precondition failed)")
 	ErrTooLarge = errors.New("fs: upload exceeds the size limit")
+	// ErrOffsetMismatch is returned by UploadChunk when the requested offset
+	// doesn't match the bytes already written (the caller should re-sync via
+	// UploadStatus and resume).
+	ErrOffsetMismatch = errors.New("fs: chunk offset does not match received bytes")
+	// ErrExists is returned by UploadFinish when the target exists and overwrite
+	// was not requested.
+	ErrExists = errors.New("fs: destination already exists")
 )
 
 // providerOpener returns a FileProvider for a node plus a Closer to release the
@@ -243,6 +250,137 @@ func (s *Service) Upload(ctx context.Context, nodeID, p string, r io.Reader) (in
 		return n, err
 	}, nil, s.uploadMax)
 	return written, err
+}
+
+// ResumableMax is the total-size cap for a chunked/resumable upload (Feature
+// F10: default 500MB per file).
+const ResumableMax = 500 << 20
+
+// partialSuffix marks the in-progress temp file for a resumable upload. The
+// path is deterministic from the target so an interrupted upload resumes by
+// stat-ing this file — the backend holds no per-upload session state.
+const partialSuffix = ".stratum-upload"
+
+func partialPath(clean string) string { return clean + partialSuffix }
+
+// UploadStatus returns how many bytes of a resumable upload have already landed
+// (the size of the partial temp file), or 0 if none exists. Used to resume.
+func (s *Service) UploadStatus(ctx context.Context, nodeID, p string) (int64, error) {
+	clean, err := ValidatePath(p)
+	if err != nil {
+		return 0, err
+	}
+	prov, closer, err := s.open(ctx, nodeID)
+	if err != nil {
+		return 0, err
+	}
+	defer closer.Close()
+	st, err := prov.Stat(ctx, partialPath(clean))
+	if err != nil {
+		return 0, nil // no partial yet => resume from 0
+	}
+	return st.Size, nil
+}
+
+// UploadChunk appends one chunk at the given offset to the resumable temp file.
+// offset MUST equal the bytes already received (ErrOffsetMismatch otherwise);
+// offset==0 starts fresh (truncating any stale partial). Returns the new total
+// received. The chunk is streamed straight to the remote file — never buffered
+// whole on the backend.
+func (s *Service) UploadChunk(ctx context.Context, nodeID, p string, offset int64, r io.Reader, maxChunk int64) (int64, error) {
+	clean, err := ValidatePath(p)
+	if err != nil {
+		return 0, err
+	}
+	if offset < 0 {
+		return 0, ErrOffsetMismatch
+	}
+	prov, closer, err := s.open(ctx, nodeID)
+	if err != nil {
+		return 0, err
+	}
+	defer closer.Close()
+
+	canonical := canonicalizeForWrite(ctx, prov, clean)
+	if IsDenied(canonical) {
+		return 0, ErrDenied
+	}
+
+	tmp := partialPath(clean)
+	var have int64
+	if st, serr := prov.Stat(ctx, tmp); serr == nil {
+		have = st.Size
+	}
+	if offset != have {
+		return have, ErrOffsetMismatch // caller must re-sync via UploadStatus
+	}
+	if offset+maxChunk > ResumableMax {
+		return have, ErrTooLarge
+	}
+
+	w, err := prov.OpenWriteAt(ctx, tmp, offset)
+	if err != nil {
+		return have, err
+	}
+	n, copyErr := io.Copy(w, io.LimitReader(r, maxChunk+1))
+	closeErr := w.Close()
+	if copyErr != nil {
+		return offset, copyErr
+	}
+	if closeErr != nil {
+		return offset, closeErr
+	}
+	if n > maxChunk {
+		return offset + maxChunk, ErrTooLarge
+	}
+	return offset + n, nil
+}
+
+// UploadFinish renames the completed partial onto the target path. When
+// overwrite is false and the target already exists, it returns ErrExists.
+func (s *Service) UploadFinish(ctx context.Context, nodeID, p string, overwrite bool) (int64, error) {
+	clean, err := ValidatePath(p)
+	if err != nil {
+		return 0, err
+	}
+	prov, closer, err := s.open(ctx, nodeID)
+	if err != nil {
+		return 0, err
+	}
+	defer closer.Close()
+
+	canonical := canonicalizeForWrite(ctx, prov, clean)
+	if IsDenied(canonical) {
+		return 0, ErrDenied
+	}
+	tmp := partialPath(clean)
+	st, err := prov.Stat(ctx, tmp)
+	if err != nil {
+		return 0, db.ErrNotFound // nothing staged
+	}
+	if !overwrite {
+		if _, serr := prov.Stat(ctx, clean); serr == nil {
+			return 0, ErrExists
+		}
+	}
+	if err := prov.Rename(ctx, tmp, clean); err != nil {
+		return 0, err
+	}
+	return st.Size, nil
+}
+
+// UploadCancel discards an in-progress resumable upload's temp file.
+func (s *Service) UploadCancel(ctx context.Context, nodeID, p string) error {
+	clean, err := ValidatePath(p)
+	if err != nil {
+		return err
+	}
+	prov, closer, err := s.open(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	defer closer.Close()
+	return prov.Remove(ctx, partialPath(clean), false)
 }
 
 func (s *Service) streamWrite(ctx context.Context, nodeID, p string, copyFn func(io.Writer) (int64, error), ifUnmodifiedSince *time.Time, _ int64) error {

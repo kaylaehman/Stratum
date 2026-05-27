@@ -72,6 +72,10 @@ func (p *sftpProvider) OpenWrite(_ context.Context, pth string) (io.WriteCloser,
 	return appssh.SFTPCreate(p.client, pth)
 }
 
+func (p *sftpProvider) OpenWriteAt(_ context.Context, pth string, offset int64) (io.WriteCloser, error) {
+	return appssh.SFTPOpenWriteAt(p.client, pth, offset)
+}
+
 func (p *sftpProvider) Mkdir(_ context.Context, pth string) error {
 	return appssh.SFTPMkdir(p.client, pth)
 }

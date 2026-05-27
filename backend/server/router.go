@@ -160,6 +160,13 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
 			r.Get("/nodes/{id}/fs/download", d.Handlers.FSDownload)
 
+			// Resumable upload staging (F10): status read + chunk/cancel write to a
+			// temp file only. The completed upload (finish) is the audited event, so
+			// these staging ops are intentionally not under the activity middleware.
+			r.Get("/nodes/{id}/fs/upload/status", d.Handlers.FSUploadStatus)
+			r.Put("/nodes/{id}/fs/upload/chunk", d.Handlers.FSUploadChunk)
+			r.Delete("/nodes/{id}/fs/upload/chunk", d.Handlers.FSUploadCancel)
+
 			// Authenticated + audited mutations.
 			audited := r.With(mw.Activity(d.Handlers.Activity))
 			audited.Post("/auth/logout", d.Handlers.Logout)
@@ -170,6 +177,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/probe-preview", d.Handlers.ProbePreview)
 			audited.Put("/nodes/{id}/fs/file", d.Handlers.FSWriteFile)
 			audited.Post("/nodes/{id}/fs/upload", d.Handlers.FSUpload)
+			audited.Post("/nodes/{id}/fs/upload/finish", d.Handlers.FSUploadFinish)
 			audited.Post("/nodes/{id}/fs/mkdir", d.Handlers.FSMkdir)
 			audited.Post("/nodes/{id}/fs/rename", d.Handlers.FSRename)
 			audited.Delete("/nodes/{id}/fs", d.Handlers.FSDelete)

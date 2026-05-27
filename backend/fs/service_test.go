@@ -25,10 +25,11 @@ func newFakeProvider() *fakeProvider {
 
 func (f *fakeProvider) List(context.Context, string) ([]Entry, bool, error) { return nil, false, nil }
 func (f *fakeProvider) Stat(_ context.Context, p string) (Entry, error) {
-	if _, ok := f.files[p]; !ok {
+	b, ok := f.files[p]
+	if !ok {
 		return Entry{}, errors.New("not found")
 	}
-	return Entry{Name: p, ModTime: f.modTimes[p]}, nil
+	return Entry{Name: p, ModTime: f.modTimes[p], Size: int64(len(b))}, nil
 }
 func (f *fakeProvider) RealPath(_ context.Context, p string) (string, error) {
 	if t, ok := f.symlinks[p]; ok {
@@ -49,6 +50,9 @@ func (f *fakeProvider) OpenRead(_ context.Context, p string) (io.ReadCloser, err
 func (f *fakeProvider) OpenWrite(_ context.Context, p string) (io.WriteCloser, error) {
 	return &fakeWriter{f: f, path: p}, nil
 }
+func (f *fakeProvider) OpenWriteAt(_ context.Context, p string, offset int64) (io.WriteCloser, error) {
+	return &fakeWriter{f: f, path: p, offset: offset, at: true}, nil
+}
 func (f *fakeProvider) Mkdir(context.Context, string) error { return nil }
 func (f *fakeProvider) Rename(_ context.Context, oldPath, newPath string) error {
 	b, ok := f.files[oldPath]
@@ -67,14 +71,25 @@ func (f *fakeProvider) Remove(_ context.Context, p string, _ bool) error {
 }
 
 type fakeWriter struct {
-	f    *fakeProvider
-	path string
-	buf  bytes.Buffer
+	f      *fakeProvider
+	path   string
+	buf    bytes.Buffer
+	offset int64
+	at     bool // offset-write mode (resumable chunk)
 }
 
 func (w *fakeWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }
 func (w *fakeWriter) Close() error {
-	w.f.files[w.path] = append([]byte(nil), w.buf.Bytes()...)
+	if w.at && w.offset > 0 {
+		// Append at offset: keep the first w.offset bytes, then the new chunk.
+		prev := w.f.files[w.path]
+		if int64(len(prev)) < w.offset {
+			prev = append(prev, make([]byte, w.offset-int64(len(prev)))...)
+		}
+		w.f.files[w.path] = append(append([]byte(nil), prev[:w.offset]...), w.buf.Bytes()...)
+	} else {
+		w.f.files[w.path] = append([]byte(nil), w.buf.Bytes()...)
+	}
 	w.f.modTimes[w.path] = time.Now()
 	return nil
 }
@@ -88,6 +103,75 @@ func newTestService(fp *fakeProvider, uploadMax int64) *Service {
 		open: func(context.Context, string) (FileProvider, io.Closer, error) {
 			return fp, io.NopCloser(nil), nil
 		},
+	}
+}
+
+func TestResumableUploadChunks(t *testing.T) {
+	fp := newFakeProvider()
+	s := newTestService(fp, 0)
+	ctx := context.Background()
+	const target = "/home/kayla/big.bin"
+	partial := target + partialSuffix
+
+	// Fresh upload: status is 0.
+	if got, _ := s.UploadStatus(ctx, "n1", target); got != 0 {
+		t.Fatalf("initial status = %d, want 0", got)
+	}
+
+	// Chunk 1 at offset 0.
+	rec, err := s.UploadChunk(ctx, "n1", target, 0, strings.NewReader("hello "), 1<<20)
+	if err != nil || rec != 6 {
+		t.Fatalf("chunk1 = (%d, %v), want (6, nil)", rec, err)
+	}
+	// Resume: status reflects 6 received.
+	if got, _ := s.UploadStatus(ctx, "n1", target); got != 6 {
+		t.Errorf("status after chunk1 = %d, want 6", got)
+	}
+	// Wrong offset is rejected with the true received count.
+	if _, err := s.UploadChunk(ctx, "n1", target, 3, strings.NewReader("x"), 1<<20); err != ErrOffsetMismatch {
+		t.Errorf("bad offset err = %v, want ErrOffsetMismatch", err)
+	}
+	// Chunk 2 at offset 6.
+	if rec, err = s.UploadChunk(ctx, "n1", target, 6, strings.NewReader("world"), 1<<20); err != nil || rec != 11 {
+		t.Fatalf("chunk2 = (%d, %v), want (11, nil)", rec, err)
+	}
+	if string(fp.files[partial]) != "hello world" {
+		t.Fatalf("partial content = %q", fp.files[partial])
+	}
+
+	// Finish renames partial -> target.
+	size, err := s.UploadFinish(ctx, "n1", target, false)
+	if err != nil || size != 11 {
+		t.Fatalf("finish = (%d, %v), want (11, nil)", size, err)
+	}
+	if string(fp.files[target]) != "hello world" {
+		t.Errorf("target content = %q", fp.files[target])
+	}
+	if _, ok := fp.files[partial]; ok {
+		t.Error("partial should be gone after finish")
+	}
+}
+
+func TestResumableFinishExistsGuard(t *testing.T) {
+	fp := newFakeProvider()
+	s := newTestService(fp, 0)
+	ctx := context.Background()
+	const target = "/srv/data.bin"
+	fp.files[target] = []byte("existing")
+
+	if _, err := s.UploadChunk(ctx, "n1", target, 0, strings.NewReader("new"), 1<<20); err != nil {
+		t.Fatalf("chunk: %v", err)
+	}
+	// Without overwrite, finishing over an existing file is refused.
+	if _, err := s.UploadFinish(ctx, "n1", target, false); err != ErrExists {
+		t.Errorf("finish no-overwrite = %v, want ErrExists", err)
+	}
+	// With overwrite, it replaces.
+	if _, err := s.UploadFinish(ctx, "n1", target, true); err != nil {
+		t.Fatalf("finish overwrite: %v", err)
+	}
+	if string(fp.files[target]) != "new" {
+		t.Errorf("target after overwrite = %q", fp.files[target])
 	}
 }
 
