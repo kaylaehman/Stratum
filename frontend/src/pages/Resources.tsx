@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Play, Square, RotateCw, Loader, BookmarkPlus, BookmarkCheck } from 'lucide-react'
 import { WakeOnLan } from '../components/nodes/WakeOnLan'
 import { SSHKeys } from '../components/nodes/SSHKeys'
+import { Scheduler } from '../components/nodes/Scheduler'
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
@@ -377,6 +378,7 @@ function DetailPane() {
             <Row label="OS type" value={node.status} mono />
             <WakeOnLan nodeId={selection.nodeId} />
             <SSHKeys nodeId={selection.nodeId} />
+            <Scheduler nodeId={selection.nodeId} />
           </div>
         )}
 

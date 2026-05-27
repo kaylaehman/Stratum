@@ -969,3 +969,30 @@ export interface DeleteSSHKeyRequest {
   path: string
   fingerprint: string
 }
+
+// Scheduled Tasks types (Feature 10)
+
+export interface CronJob {
+  user: string
+  schedule: string
+  command: string
+  human: string
+  raw: string
+}
+
+export interface SystemdTimer {
+  unit: string
+  activates: string
+  next: string
+  last: string
+}
+
+export interface ScheduleResponse {
+  cron: CronJob[]
+  timers: SystemdTimer[]
+}
+
+export interface SetCronRequest {
+  user: string
+  content: string
+}
