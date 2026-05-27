@@ -127,7 +127,6 @@ func run(logger *slog.Logger) error {
 		Volumes:        volumeSvc,
 		Topology:       topologySvc,
 		DepGraph:       depGraphSvc,
-		Docker:         api.DockerProvider(dockerForNode),
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

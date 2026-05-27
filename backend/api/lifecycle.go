@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
+
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/docker"
 )
@@ -34,14 +36,14 @@ func (h *Handlers) RestartContainer(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// lifecycle resolves the container, runs the daemon action against its node, and
-// records the audit entry. The inventory poller reconciles the new status on its
-// next cycle.
+// lifecycle resolves the container (which also yields its node's docker client),
+// runs the daemon action, and records the audit entry. The inventory poller
+// reconciles the new status on its next cycle.
 func (h *Handlers) lifecycle(w http.ResponseWriter, r *http.Request, action string, fn func(*docker.Client, context.Context, string) error) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
-	ctr, _, ok := h.resolveContainer(w, r)
+	ctr, clients, ok := h.resolveContainer(w, r)
 	if !ok {
 		return
 	}
@@ -53,14 +55,15 @@ func (h *Handlers) lifecycle(w http.ResponseWriter, r *http.Request, action stri
 		e.Detail = map[string]string{"node_id": ctr.NodeID, "container": ctr.Name}
 	}
 
-	client, err := h.Docker(r.Context(), ctr.NodeID)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "node_unreachable")
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), lifecycleTimeout)
 	defer cancel()
-	if err := fn(client, ctx, ctr.DockerID); err != nil {
+	if err := fn(clients.Docker, ctx, ctr.DockerID); err != nil {
+		// A conflict (e.g. starting an already-running container) is a state
+		// problem, not a gateway failure — surface it as 409, not 502.
+		if cerrdefs.IsConflict(err) {
+			writeError(w, http.StatusConflict, "container_already_in_state")
+			return
+		}
 		writeError(w, http.StatusBadGateway, "lifecycle_failed")
 		return
 	}

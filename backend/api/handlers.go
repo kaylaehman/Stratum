@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"log/slog"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/depgraph"
-	"github.com/kaylaehman/stratum/backend/docker"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
@@ -24,10 +22,6 @@ import (
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/volumes"
 )
-
-// DockerProvider yields a docker client for a node (used by handlers that act
-// directly on the daemon, e.g. container lifecycle).
-type DockerProvider func(ctx context.Context, nodeID string) (*docker.Client, error)
 
 // Handlers carries the dependencies shared by all HTTP handlers.
 type Handlers struct {
@@ -46,7 +40,6 @@ type Handlers struct {
 	Volumes        *volumes.Service
 	Topology       *topology.Service
 	DepGraph       *depgraph.Service
-	Docker         DockerProvider
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
