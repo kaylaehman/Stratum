@@ -27,6 +27,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/depgraph"
+	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/cve"
@@ -104,6 +105,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		AI:             ai.New(store, cipher, "", ""),
 		Certs:          certs.New(store, filesSvc.Exec, time.Minute),
 		Proxy:          proxy.New(store, cipher),
+		DNS:            dnspkg.New(store, cipher),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

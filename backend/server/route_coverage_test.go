@@ -120,6 +120,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/ai/ask":                          true,
 		"POST /api/certs/rescan":                    true,
 		"PUT /api/nodes/{id}/proxy/config":          true,
+		"PUT /api/nodes/{id}/dns/config":            true,
 		"POST /api/memory":                          true,
 		"PUT /api/memory/{id}":                      true,
 		"DELETE /api/memory/{id}":                   true,

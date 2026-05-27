@@ -14,6 +14,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/db"
+	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
@@ -63,6 +64,7 @@ type Handlers struct {
 	AI             *ai.Service
 	Certs          *certs.Service
 	Proxy          *proxy.Service
+	DNS            *dnspkg.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

@@ -260,6 +260,14 @@ type ProxyConfig struct {
 	UpdatedAt      time.Time
 }
 
+// DNSConfig is a node's DNS admin endpoint + sealed API token (Feature F3).
+type DNSConfig struct {
+	NodeID         string
+	Endpoint       string
+	TokenEncrypted []byte
+	UpdatedAt      time.Time
+}
+
 // AgentMemory is a persistent per-scope note the AI assistant uses (Feature F9).
 // Scope is "global" | "node" | "container"; ScopeID is "" for global. Source is
 // "user" | "ai" | "observed"; AI-proposed memories stay Confirmed=false until a
@@ -541,6 +549,10 @@ type Store interface {
 	// Reverse-proxy per-node admin config (Feature F1)
 	GetProxyConfig(ctx context.Context, nodeID string) (ProxyConfig, error)
 	UpsertProxyConfig(ctx context.Context, c ProxyConfig) error
+
+	// DNS per-node admin config (Feature F3)
+	GetDNSConfig(ctx context.Context, nodeID string) (DNSConfig, error)
+	UpsertDNSConfig(ctx context.Context, c DNSConfig) error
 
 	// Agent memory (Feature F9)
 	CreateAgentMemory(ctx context.Context, m AgentMemory) error

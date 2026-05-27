@@ -41,6 +41,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/cve"
+	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
@@ -135,6 +136,7 @@ func run(logger *slog.Logger) error {
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
 	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL)
 	proxySvc := proxy.New(store, cipher)
+	dnsSvc := dnspkg.New(store, cipher)
 	certSvc := certs.New(store, filesSvc.Exec, 6*time.Hour)
 	certSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
@@ -167,6 +169,7 @@ func run(logger *slog.Logger) error {
 		AI:             aiSvc,
 		Certs:          certSvc,
 		Proxy:          proxySvc,
+		DNS:            dnsSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
