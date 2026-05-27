@@ -679,3 +679,31 @@ export interface MetricsResponse {
   samples: MetricSample[]
   spikes: MetricSpike[]
 }
+
+// Bulk Operations types (Feature 13)
+
+export type BulkAction = 'start' | 'stop' | 'restart' | 'remove'
+
+export type BulkResult = 'planned' | 'ok' | 'error' | 'skipped' | 'not_found'
+
+export interface BulkResultItem {
+  container_id: string
+  name: string
+  node_id: string
+  status: string
+  skip: boolean
+  skip_reason?: string
+  result: BulkResult
+  error?: string
+}
+
+export interface BulkResponse {
+  results: BulkResultItem[]
+  dry_run: boolean
+}
+
+export interface BulkRequest {
+  action: BulkAction
+  container_ids: string[]
+  dry_run: boolean
+}

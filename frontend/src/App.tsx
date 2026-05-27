@@ -17,6 +17,7 @@ import Volumes from './pages/Volumes'
 import Metrics from './pages/Metrics'
 import Network from './pages/Network'
 import Dependencies from './pages/Dependencies'
+import Bulk from './pages/Bulk'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -115,6 +116,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Dependencies />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/bulk"
+          element={
+            <AuthGuard>
+              <Bulk />
             </AuthGuard>
           }
         />
