@@ -200,5 +200,14 @@ func validateHTTPURL(raw string) error {
 	if u.Host == "" {
 		return errors.New("url must include a host")
 	}
+	// The endpoint path ("/api/chat") is appended by the provider, so the base
+	// must be host-only — a base with a path/query would smuggle a different
+	// request target (e.g. http://host/x?y= -> http://host/x?y=/api/chat).
+	if u.Path != "" && u.Path != "/" {
+		return errors.New("url must not include a path")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("url must not include a query or fragment")
+	}
 	return nil
 }

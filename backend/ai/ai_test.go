@@ -108,9 +108,17 @@ func TestValidateHTTPURL(t *testing.T) {
 			t.Errorf("validateHTTPURL(%q) = %v, want nil", ok, err)
 		}
 	}
-	for _, bad := range []string{"", "ftp://x", "file:///etc/passwd", "notaurl", "://nohost"} {
+	// http(s) host-only required; path/query/fragment smuggling rejected.
+	for _, bad := range []string{
+		"", "ftp://x", "file:///etc/passwd", "notaurl", "://nohost",
+		"http://h/injected", "http://h/?q=", "http://h#frag", "http://h/api?x=1",
+	} {
 		if err := validateHTTPURL(bad); err == nil {
 			t.Errorf("validateHTTPURL(%q) = nil, want error", bad)
 		}
+	}
+	// A trailing slash is allowed (treated as host-only).
+	if err := validateHTTPURL("http://localhost:11434/"); err != nil {
+		t.Errorf("validateHTTPURL with trailing slash = %v, want nil", err)
 	}
 }

@@ -58,7 +58,9 @@ func truncateContext(text string) string {
 	}
 	out := strings.Join(lines, "\n")
 	if len(out) > maxContextBytes {
-		out = out[len(out)-maxContextBytes:]
+		// Slicing at an arbitrary byte offset can split a multi-byte rune; drop
+		// the leading partial rune so the context is valid UTF-8.
+		out = strings.ToValidUTF8(out[len(out)-maxContextBytes:], "")
 		dropped++ // signal a byte-level cut too
 	}
 	if dropped > 0 {

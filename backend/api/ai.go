@@ -55,10 +55,15 @@ type aiAskRequest struct {
 // aiAskTimeout bounds a single assistant call (a local model can be slow).
 const aiAskTimeout = 2 * time.Minute
 
-// AIAsk answers a single-turn question via the configured provider. Available to
-// any authenticated user; audited (who asked, which provider, token usage — never
-// the prompt/context, which may be large or sensitive).
+// AIAsk answers a single-turn question via the configured provider. Gated to
+// operator+ because it egresses caller-supplied infrastructure context (logs,
+// inspect, config) to an external/local LLM — not something a read-only viewer
+// should do. Audited (who asked, which provider, token usage — never the
+// prompt/context, which may be large or sensitive).
 func (h *Handlers) AIAsk(w http.ResponseWriter, r *http.Request) {
+	if !h.requireOperator(w, r) {
+		return
+	}
 	var req aiAskRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_body")

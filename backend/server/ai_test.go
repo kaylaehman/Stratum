@@ -14,7 +14,9 @@ func TestAIConfigAndAskGating(t *testing.T) {
 	c := &http.Client{}
 
 	createUser(t, c, srv.URL, adminTok, "viewer", "viewer")
+	createUser(t, c, srv.URL, adminTok, "op", "operator")
 	viewerTok := loginAs(t, c, srv.URL, "viewer")
+	opTok := loginAs(t, c, srv.URL, "op")
 
 	// Config GET is admin-only.
 	if s := status(t, c, authReq(t, http.MethodGet, srv.URL+"/api/ai/config", viewerTok, nil)); s != http.StatusForbidden {
@@ -31,10 +33,15 @@ func TestAIConfigAndAskGating(t *testing.T) {
 		t.Errorf("fresh config should be unconfigured: %+v", cfg)
 	}
 
-	// Ask with no provider configured -> 400 ai_not_configured (any auth user).
+	// Ask is operator+: a viewer is blocked at the role gate (data egress).
 	if s := status(t, c, authReq(t, http.MethodPost, srv.URL+"/api/ai/ask", viewerTok,
+		map[string]string{"prompt": "hi"})); s != http.StatusForbidden {
+		t.Errorf("viewer ask = %d, want 403", s)
+	}
+	// An operator passes the gate; with no provider configured -> 400.
+	if s := status(t, c, authReq(t, http.MethodPost, srv.URL+"/api/ai/ask", opTok,
 		map[string]string{"prompt": "why is my container down?"})); s != http.StatusBadRequest {
-		t.Errorf("ask unconfigured = %d, want 400", s)
+		t.Errorf("operator ask unconfigured = %d, want 400", s)
 	}
 
 	// Admin configures an Ollama endpoint; config now reports configured.
