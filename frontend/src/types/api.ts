@@ -758,6 +758,67 @@ export interface WebhookRequest {
   enabled: boolean
 }
 
+// Template Library types (Feature 14)
+
+export interface TemplateVar {
+  name: string
+  description: string
+  default: string
+}
+
+export interface Template {
+  id: string
+  name: string
+  description: string
+  tags: string[]
+  compose_yaml: string
+  variables: TemplateVar[]
+  version: number
+}
+
+export interface TemplateVersion {
+  version: number
+  compose_yaml: string
+  variables: TemplateVar[]
+  created_at: string
+}
+
+export interface TemplateWithVersions extends Template {
+  versions: TemplateVersion[]
+}
+
+export interface TemplatesResponse {
+  templates: Template[]
+}
+
+export interface TemplateCreateRequest {
+  name: string
+  description?: string
+  tags?: string[]
+  compose_yaml: string
+  variables?: TemplateVar[]
+}
+
+export interface TemplateRenderRequest {
+  variables: Record<string, string>
+}
+
+export interface TemplateRenderResponse {
+  rendered: string
+  unresolved: string[]
+}
+
+export interface TemplateDeployRequest {
+  node_id: string
+  dir?: string
+  variables: Record<string, string>
+}
+
+export interface TemplateDeployResponse {
+  path: string
+  output: string
+}
+
 // Wake-on-LAN types (Feature 6)
 
 export interface WOLConfig {
