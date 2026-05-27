@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Play, Square, RotateCw, Loader, BookmarkPlus, BookmarkCheck } from 'lucide-react'
+import { WakeOnLan } from '../components/nodes/WakeOnLan'
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
@@ -369,6 +370,7 @@ function DetailPane() {
             <Row label="Type" value={node.type} mono />
             <Row label="Status" value={node.status} mono />
             <Row label="OS type" value={node.status} mono />
+            <WakeOnLan nodeId={selection.nodeId} />
           </div>
         )}
 

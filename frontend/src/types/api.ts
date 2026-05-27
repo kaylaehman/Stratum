@@ -732,6 +732,20 @@ export interface CreateBookmarkRequest {
   group_name?: string
 }
 
+// Wake-on-LAN types (Feature 6)
+
+export interface WOLConfig {
+  mac: string
+  broadcast: string
+  port: number
+}
+
+export interface SetWOLRequest {
+  mac: string
+  broadcast?: string
+  port?: number
+}
+
 // Smart Search types (Feature 23)
 
 export interface SearchNodeHit {
