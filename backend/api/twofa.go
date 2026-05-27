@@ -16,14 +16,25 @@ func (h *Handlers) TwoFAStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // TwoFASetup begins enrollment: returns the secret, otpauth URI, and one-time
-// recovery codes. 2FA is not active until confirmed via Enable.
+// recovery codes. 2FA is not active until confirmed via Enable. Re-enrolling an
+// account that already has 2FA enabled requires proving possession of the
+// current factor via current_code (otherwise a hijacked session could reset a
+// victim's 2FA); first-time enrollment omits it.
 func (h *Handlers) TwoFASetup(w http.ResponseWriter, r *http.Request) {
 	user, _ := middleware.UserFromContext(r.Context())
-	res, err := h.TwoFA.Setup(r.Context(), user.ID, user.Username)
-	if err != nil {
+	var body struct {
+		CurrentCode string `json:"current_code"`
+	}
+	_ = decodeJSON(r, &body) // body is optional (absent on first enrollment)
+	res, err := h.TwoFA.Setup(r.Context(), user.ID, user.Username, body.CurrentCode)
+	if errors.Is(err, twofa.ErrInvalidCode) {
+		writeError(w, http.StatusBadRequest, "reenroll_requires_code")
+		return
+	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "setup_failed")
 		return
 	}
+	auditTwoFA(r, "setup")
 	writeJSON(w, http.StatusOK, res)
 }
 

@@ -41,7 +41,7 @@ func TestEnrollEnableVerifyFlow(t *testing.T) {
 	ctx := context.Background()
 	s := newSvc(t)
 
-	res, err := s.Setup(ctx, "u1", "kayla")
+	res, err := s.Setup(ctx, "u1", "kayla", "")
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -93,13 +93,54 @@ func TestEnrollEnableVerifyFlow(t *testing.T) {
 	}
 }
 
+// TestReenrollRequiresCurrentCode guards the session-hijack hole: once 2FA is
+// enabled, a re-Setup without proof of possession must be refused (otherwise it
+// would overwrite the secret and silently disable the victim's 2FA).
+func TestReenrollRequiresCurrentCode(t *testing.T) {
+	ctx := context.Background()
+	s := newSvc(t)
+
+	res, err := s.Setup(ctx, "u1", "kayla", "")
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	code, _ := totp.Code(res.Secret, now())
+	if err := s.Enable(ctx, "u1", code); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	// Re-enroll with no/invalid code is refused, leaving the original intact.
+	if _, err := s.Setup(ctx, "u1", "kayla", ""); err != ErrInvalidCode {
+		t.Errorf("re-Setup without code = %v, want ErrInvalidCode", err)
+	}
+	if _, err := s.Setup(ctx, "u1", "kayla", "000000"); err != ErrInvalidCode {
+		t.Errorf("re-Setup bad code = %v, want ErrInvalidCode", err)
+	}
+	if !s.Enabled(ctx, "u1") {
+		t.Error("victim's 2FA must remain enabled after a refused re-enrollment")
+	}
+
+	// With a valid current code, re-enrollment proceeds (new disabled secret).
+	code, _ = totp.Code(res.Secret, now())
+	res2, err := s.Setup(ctx, "u1", "kayla", code)
+	if err != nil {
+		t.Fatalf("re-Setup with valid code: %v", err)
+	}
+	if res2.Secret == res.Secret {
+		t.Error("re-enrollment should mint a fresh secret")
+	}
+	if s.Enabled(ctx, "u1") {
+		t.Error("re-enrollment leaves 2FA disabled until re-confirmed")
+	}
+}
+
 func TestSecretNotStoredPlaintext(t *testing.T) {
 	ctx := context.Background()
 	store := &memStore{}
 	key := make([]byte, 32)
 	c, _ := crypto.New(key)
 	s := New(store, c)
-	res, _ := s.Setup(ctx, "u1", "kayla")
+	res, _ := s.Setup(ctx, "u1", "kayla", "")
 	if string(store.rec.SecretEncrypted) == res.Secret {
 		t.Fatal("TOTP secret stored in plaintext")
 	}

@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"errors"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -31,11 +32,26 @@ type Service struct {
 	store  db.Store
 	cipher *crypto.Cipher
 	issuer string
+
+	// locks serialises the read-modify-write of a user's TOTP row so two
+	// concurrent logins cannot consume the same recovery code twice, and a
+	// re-enrollment cannot race the possession check. Keyed by user ID; this
+	// backend runs as a single process (SQLite single binary), so an in-process
+	// mutex is sufficient.
+	locks sync.Map // userID -> *sync.Mutex
 }
 
 // New wires the store + secret cipher.
 func New(store db.Store, cipher *crypto.Cipher) *Service {
 	return &Service{store: store, cipher: cipher, issuer: "Stratum"}
+}
+
+// lock serialises mutations for one user and returns the unlock func.
+func (s *Service) lock(userID string) func() {
+	mui, _ := s.locks.LoadOrStore(userID, &sync.Mutex{})
+	mu := mui.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // SetupResult is returned once at enrollment — the recovery codes are shown
@@ -48,7 +64,23 @@ type SetupResult struct {
 
 // Setup generates a new (disabled) TOTP secret + recovery codes for a user. The
 // plaintext recovery codes are returned once; only their hashes are stored.
-func (s *Service) Setup(ctx context.Context, userID, username string) (SetupResult, error) {
+//
+// If the account already has 2FA *enabled*, re-enrollment would silently
+// overwrite the existing secret (and reset Enabled to false) — a session
+// hijacker could use that to disable a victim's 2FA without the device. So when
+// already enabled, the caller must prove possession via currentCode (TOTP or
+// recovery) before the secret is replaced. First-time enrollment passes an
+// empty currentCode.
+func (s *Service) Setup(ctx context.Context, userID, username, currentCode string) (SetupResult, error) {
+	unlock := s.lock(userID)
+	defer unlock()
+
+	if existing, err := s.store.GetUserTOTP(ctx, userID); err == nil && existing.Enabled {
+		if ok, _ := s.check(existing, currentCode); !ok {
+			return SetupResult{}, ErrInvalidCode
+		}
+	}
+
 	secret, err := totp.GenerateSecret()
 	if err != nil {
 		return SetupResult{}, err
@@ -76,6 +108,8 @@ func (s *Service) Setup(ctx context.Context, userID, username string) (SetupResu
 // Enable activates 2FA after the user proves possession of the secret with a
 // valid code.
 func (s *Service) Enable(ctx context.Context, userID, code string) error {
+	unlock := s.lock(userID)
+	defer unlock()
 	rec, err := s.store.GetUserTOTP(ctx, userID)
 	if err != nil {
 		return err
@@ -93,6 +127,8 @@ func (s *Service) Enable(ctx context.Context, userID, code string) error {
 
 // Disable turns off 2FA after verifying a current code (TOTP or recovery).
 func (s *Service) Disable(ctx context.Context, userID, code string) error {
+	unlock := s.lock(userID)
+	defer unlock()
 	rec, err := s.store.GetUserTOTP(ctx, userID)
 	if err != nil {
 		return err
@@ -113,7 +149,14 @@ func (s *Service) Enabled(ctx context.Context, userID string) bool {
 // VerifyLogin checks a login code for a user who has 2FA enabled. A recovery
 // code is consumed (removed) on successful use. Returns ErrInvalidCode on
 // failure. Callers MUST only invoke this when Enabled is true.
+//
+// Note: a TOTP code stays valid across the ±1-step skew window (~90s) and is
+// not single-use within that window — the standard RFC 6238 trade-off. Recovery
+// codes, by contrast, are strictly single-use (consumed under the per-user
+// lock, so concurrent logins cannot redeem the same code twice).
 func (s *Service) VerifyLogin(ctx context.Context, userID, code string) error {
+	unlock := s.lock(userID)
+	defer unlock()
 	rec, err := s.store.GetUserTOTP(ctx, userID)
 	if err != nil {
 		return err
