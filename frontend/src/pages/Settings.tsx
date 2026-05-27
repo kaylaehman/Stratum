@@ -9,6 +9,9 @@ import {
   Shield,
   Monitor,
   LogOut,
+  Flag,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 import {
@@ -30,6 +33,7 @@ import { ApiError } from '../lib/api'
 import type { TwoFASetupResponse, UserRole } from '../types/api'
 import { AISettingsSection } from '../components/ai/AISettingsSection'
 import { MemoryPanel } from '../components/ai/MemoryPanel'
+import { useFeatures, useSetFeature } from '../lib/api/features'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1018,6 +1022,166 @@ function SessionsSection() {
   )
 }
 
+// ── Features section (admin-only toggle; read-only for others) ────────────────
+
+function FeaturesSection() {
+  const { isAdmin } = useCan()
+  const { data, isLoading } = useFeatures()
+  const setFeature = useSetFeature()
+
+  const features = data?.features ?? []
+
+  return (
+    <section
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '3px',
+        padding: '20px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+        <Flag size={16} style={{ color: 'var(--accent)' }} />
+        <div>
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)', margin: 0 }}>
+            Feature Flags
+          </h2>
+          <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+            {isAdmin ? 'Enable or disable platform features' : 'Feature states (admin-controlled)'}
+          </p>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+          <Loader size={14} className="animate-spin" />
+          <span className="text-xs">Loading features…</span>
+        </div>
+      ) : features.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No feature flags registered.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', border: '1px solid var(--border-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+          {features.map((flag, idx) => {
+            const isOverridden = flag.enabled !== flag.default
+            const isPending = setFeature.isPending && (setFeature.variables as { key: string } | undefined)?.key === flag.key
+            return (
+              <div
+                key={flag.key}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  backgroundColor: idx % 2 === 0 ? 'var(--bg-elevated)' : 'var(--bg-surface)',
+                  borderBottom: idx < features.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                }}
+              >
+                <button
+                  type="button"
+                  disabled={!isAdmin || isPending}
+                  onClick={() => {
+                    if (isAdmin) {
+                      void setFeature.mutate({ key: flag.key, enabled: !flag.enabled })
+                    }
+                  }}
+                  title={isAdmin ? (flag.enabled ? 'Disable' : 'Enable') : 'Admin only'}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    cursor: isAdmin ? 'pointer' : 'not-allowed',
+                    color: flag.enabled ? 'var(--status-ok)' : 'var(--text-muted)',
+                    opacity: isPending ? 0.5 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexShrink: 0,
+                  }}
+                  aria-label={flag.enabled ? `Disable ${flag.label}` : `Enable ${flag.label}`}
+                >
+                  {isPending ? (
+                    <Loader size={18} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                  ) : flag.enabled ? (
+                    <ToggleRight size={20} />
+                  ) : (
+                    <ToggleLeft size={20} />
+                  )}
+                </button>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+                      {flag.label}
+                    </span>
+                    <code
+                      className="font-mono text-xs"
+                      style={{
+                        color: 'var(--text-muted)',
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '3px',
+                        padding: '0 4px',
+                        fontSize: '0.65rem',
+                        letterSpacing: '0.03em',
+                      }}
+                    >
+                      {flag.key}
+                    </code>
+                    {isOverridden && (
+                      <span
+                        style={{
+                          fontSize: '0.6rem',
+                          fontWeight: 600,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: 'var(--accent)',
+                          border: '1px solid var(--accent)',
+                          borderRadius: '3px',
+                          padding: '0 4px',
+                          flexShrink: 0,
+                          backgroundColor: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                        }}
+                      >
+                        overridden
+                      </span>
+                    )}
+                  </div>
+                  {flag.description && (
+                    <p
+                      className="text-xs"
+                      style={{ color: 'var(--text-muted)', margin: '2px 0 0', lineHeight: 1.4 }}
+                    >
+                      {flag.description}
+                    </p>
+                  )}
+                </div>
+
+                <span
+                  style={{
+                    fontSize: '0.65rem',
+                    fontWeight: 600,
+                    padding: '2px 8px',
+                    borderRadius: '3px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    flexShrink: 0,
+                    backgroundColor: flag.enabled
+                      ? 'color-mix(in srgb, var(--status-ok) 15%, transparent)'
+                      : 'var(--bg-elevated)',
+                    color: flag.enabled ? 'var(--status-ok)' : 'var(--text-muted)',
+                    border: `1px solid ${flag.enabled ? 'var(--status-ok)' : 'var(--border-subtle)'}`,
+                  }}
+                >
+                  {flag.enabled ? 'on' : 'off'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Settings() {
@@ -1051,6 +1215,8 @@ export default function Settings() {
         {isAdmin && <UsersSection />}
 
         {isAdmin && <AISettingsSection />}
+
+        <FeaturesSection />
 
         <MemoryPanel scope="global" />
       </div>

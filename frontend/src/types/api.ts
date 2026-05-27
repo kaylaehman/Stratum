@@ -1334,6 +1334,24 @@ export interface SetProxyConfigRequest {
   token?: string
 }
 
+// Feature Flags types
+
+export interface FeatureFlag {
+  key: string
+  label: string
+  enabled: boolean
+  default: boolean
+  description: string
+}
+
+export interface FeaturesResponse {
+  features: FeatureFlag[]
+}
+
+export interface SetFeatureRequest {
+  enabled: boolean
+}
+
 // DNS Record Management types (Feature F3)
 
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'PTR' | 'TXT' | 'SRV'
