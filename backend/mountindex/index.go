@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/singleflight"
+
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/docker"
 )
@@ -27,6 +29,7 @@ type Index struct {
 
 	mu     sync.Mutex
 	seeded map[string]time.Time
+	sf     singleflight.Group // dedupe concurrent seeds for the same node
 }
 
 // New builds an Index. ttl bounds how stale a node's mount rows may be before a
@@ -37,34 +40,50 @@ func New(store db.Store, provider ClientProvider, ttl time.Duration) *Index {
 
 // ensureFresh re-inspects a node's containers and refreshes their mount rows if
 // the node hasn't been seeded within the TTL.
-func (ix *Index) ensureFresh(ctx context.Context, nodeID string) error {
+func (ix *Index) fresh(nodeID string) bool {
 	ix.mu.Lock()
-	if t, ok := ix.seeded[nodeID]; ok && time.Since(t) < ix.ttl {
-		ix.mu.Unlock()
+	defer ix.mu.Unlock()
+	t, ok := ix.seeded[nodeID]
+	return ok && time.Since(t) < ix.ttl
+}
+
+func (ix *Index) ensureFresh(ctx context.Context, nodeID string) error {
+	if ix.fresh(nodeID) {
 		return nil
 	}
-	ix.mu.Unlock()
-
-	containers, err := ix.store.ListContainersByNode(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	client, err := ix.provider(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	for _, c := range containers {
-		info, err := client.Inspect(ctx, c.DockerID)
-		if err != nil {
-			continue // skip a container that vanished mid-seed; its rows cascade-clean on delete
+	// singleflight dedupes concurrent seeds for the same node (avoids racing
+	// delete+insert transactions and double inspects).
+	_, err, _ := ix.sf.Do(nodeID, func() (any, error) {
+		if ix.fresh(nodeID) { // another goroutine seeded while we waited
+			return nil, nil
 		}
-		_ = ix.store.ReplaceContainerMounts(ctx, c.ID, rowsFor(c, info.Mounts))
-	}
-
-	ix.mu.Lock()
-	ix.seeded[nodeID] = time.Now()
-	ix.mu.Unlock()
-	return nil
+		containers, err := ix.store.ListContainersByNode(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		client, err := ix.provider(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		var firstErr error
+		for _, c := range containers {
+			info, err := client.Inspect(ctx, c.DockerID)
+			if err != nil {
+				continue // skip a container that vanished mid-seed; rows cascade-clean on delete
+			}
+			if rerr := ix.store.ReplaceContainerMounts(ctx, c.ID, rowsFor(c, info.Mounts)); rerr != nil && firstErr == nil {
+				firstErr = rerr
+			}
+		}
+		if firstErr != nil {
+			return nil, firstErr // do NOT mark seeded on a persist error — retry next query
+		}
+		ix.mu.Lock()
+		ix.seeded[nodeID] = time.Now()
+		ix.mu.Unlock()
+		return nil, nil
+	})
+	return err
 }
 
 // Invalidate forces the next query for a node to re-seed.
