@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -139,7 +140,16 @@ func removeAll(sc *sftp.Client, root string) error {
 		}
 	}
 	// Sort descending: longer (deeper) paths sort before shorter parent paths.
-	sort.Slice(dirs, func(i, j int) bool { return dirs[i] > dirs[j] })
+	// Deepest-first: sort by path depth (separator count) descending so a child
+	// is always removed before its parent, regardless of sibling name ordering
+	// (lexical-only ordering is fragile for uppercase/non-ASCII names).
+	sort.Slice(dirs, func(i, j int) bool {
+		di, dj := strings.Count(dirs[i], "/"), strings.Count(dirs[j], "/")
+		if di != dj {
+			return di > dj
+		}
+		return dirs[i] > dirs[j]
+	})
 
 	for _, d := range dirs {
 		if err := sc.RemoveDirectory(d); err != nil {

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -76,10 +78,15 @@ func (h *Handlers) FSWriteFile(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
-	path := r.URL.Query().Get("path")
-	body, err := io.ReadAll(io.LimitReader(r.Body, fs.PreviewMax+1))
+	filePath := r.URL.Query().Get("path")
+	limit := h.Files.UploadMax()
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "read_body")
+		return
+	}
+	if int64(len(body)) > limit {
+		writeError(w, http.StatusRequestEntityTooLarge, "too_large")
 		return
 	}
 	var ifUnmod *time.Time
@@ -88,11 +95,11 @@ func (h *Handlers) FSWriteFile(w http.ResponseWriter, r *http.Request) {
 			ifUnmod = &t
 		}
 	}
-	if err := h.Files.Write(r.Context(), chi.URLParam(r, "id"), path, body, ifUnmod); err != nil {
+	if err := h.Files.Write(r.Context(), chi.URLParam(r, "id"), filePath, body, ifUnmod); err != nil {
 		writeFSError(w, err)
 		return
 	}
-	enrichFSActivity(r, "fs.write", path)
+	enrichFSActivity(r, "fs.write", filePath)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -133,7 +140,14 @@ func (h *Handlers) FSUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer part.Close()
 
-	target := destDir + "/" + part.FileName()
+	// Strip any directory components from the client-supplied filename to prevent
+	// path traversal (e.g. "../../etc/passwd"); only the base name is used.
+	name := path.Base(part.FileName())
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		writeError(w, http.StatusBadRequest, "bad_filename")
+		return
+	}
+	target := path.Join(destDir, name)
 	written, err := h.Files.Upload(r.Context(), chi.URLParam(r, "id"), target, part)
 	result := activity.ResultSuccess
 	if err != nil {

@@ -53,6 +53,9 @@ func NewService(store db.Store, cipher *crypto.Cipher, uploadMax int64) *Service
 	return s
 }
 
+// UploadMax returns the configured per-write/upload byte cap.
+func (s *Service) UploadMax() int64 { return s.uploadMax }
+
 func (s *Service) openSFTP(ctx context.Context, nodeID string) (FileProvider, io.Closer, error) {
 	node, err := s.store.GetNode(ctx, nodeID)
 	if err != nil {
