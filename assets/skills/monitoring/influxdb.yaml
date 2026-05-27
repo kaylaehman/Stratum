@@ -1,0 +1,288 @@
+id: influxdb
+name: InfluxDB Time-Series Database
+version: "1.0"
+container_match:
+  image_patterns:
+    - "influxdb"
+    - "library/influxdb"
+  port_hints: [8086]
+category: monitoring
+description: High-performance time-series database for metrics and telemetry ingestion
+docs_url: https://hub.docker.com/_/influxdb
+
+common_issues:
+  - id: initialization-failed
+    name: InfluxDB initialization fails or remains uninitialized
+    symptoms:
+      - "Initialization not completed"
+      - "Failed to set up initial organization"
+      - "InfluxDB 2.0+ init setup incomplete"
+      - "Cannot write data; bucket not found"
+    trigger_conditions:
+      - log_pattern: "initialization.*failed"
+      - log_pattern: "Unable to create initial org"
+    steps:
+      - id: step-1
+        description: Check if InfluxDB initialization environment variables are set
+        type: check
+        command: "docker inspect {container_name} | grep -A 20 'Env'"
+        expected_output: "DOCKER_INFLUXDB_INIT_MODE"
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify the /var/lib/influxdb2 volume is properly mounted
+        type: check
+        command: "docker inspect {container_name} | grep -A 10 'Mounts'"
+        expected_output: "/var/lib/influxdb2"
+        on_fail: step-4
+      - id: step-4
+        description: Display volume mount status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check InfluxDB logs for specific initialization errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | head -10"
+        expected_output: ""
+      - id: step-6
+        description: Remove existing influxdb data and reinitialize with correct environment
+        type: fix
+        command: "docker exec {container_name} rm -rf /var/lib/influxdb2/* /root/.influxdbv2/* && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for initialization and verify setup completed
+        type: check
+        command: "sleep 10 && docker logs {container_name} | tail -20"
+    resolution: |
+      InfluxDB initialization was reset and the container has been restarted with the configured environment variables. The initialization process will now recreate the initial organization, bucket, and admin user based on DOCKER_INFLUXDB_INIT_* settings. Verify that DOCKER_INFLUXDB_INIT_MODE=setup, DOCKER_INFLUXDB_INIT_USERNAME, DOCKER_INFLUXDB_INIT_PASSWORD, DOCKER_INFLUXDB_INIT_ORG, and DOCKER_INFLUXDB_INIT_BUCKET are all configured in your docker-compose file.
+
+  - id: permission-denied-data-dir
+    name: Permission denied writing to /var/lib/influxdb2
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write data directory"
+      - "Failed to write to /var/lib/influxdb2"
+    trigger_conditions:
+      - log_pattern: "permission denied.*influxdb"
+      - log_pattern: "EACCES.*var/lib/influxdb2"
+    steps:
+      - id: step-1
+        description: Check current ownership of the influxdb data directory
+        type: check
+        command: "stat {mount_path} | head -10"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current directory permissions and ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check which user InfluxDB runs as inside container
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: "uid="
+      - id: step-4
+        description: Inform about InfluxDB user requirements
+        type: inform
+        command: ""
+      - id: step-5
+        description: Recursively fix ownership of the data directory
+        type: fix
+        command: "chown -R 999:999 {mount_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Set appropriate permissions on the data directory
+        type: fix
+        command: "chmod -R 755 {mount_path}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart InfluxDB to confirm write access
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify successful startup and data directory access
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      The /var/lib/influxdb2 directory ownership was corrected to match the InfluxDB process user (UID 999). InfluxDB can now write metrics and configuration data. Ensure all bind-mounted data directories on the host have consistent ownership for smooth operation across restarts.
+
+  - id: connection-refused
+    name: Unable to connect to InfluxDB on port 8086
+    symptoms:
+      - "Connection refused on port 8086"
+      - "Cannot connect to InfluxDB HTTP API"
+      - "curl: (7) Failed to connect"
+      - "Client unable to reach server"
+    trigger_conditions:
+      - log_pattern: "address already in use"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if InfluxDB is listening on port 8086
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8086"
+        expected_output: "LISTEN.*8086"
+        on_fail: step-2
+      - id: step-2
+        description: Verify port 8086 is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '8086'"
+        expected_output: "8086"
+        on_fail: step-3
+      - id: step-3
+        description: Display port configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if another process is using port 8086 on the host
+        type: check
+        command: "ss -tlnp | grep 8086"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Display process using port 8086
+        type: inform
+        command: ""
+      - id: step-6
+        description: Verify InfluxDB container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+        on_fail: step-7
+      - id: step-7
+        description: Display container status
+        type: inform
+        command: ""
+      - id: step-8
+        description: Restart InfluxDB to restore connectivity
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Wait for startup and verify HTTP API is responding
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s http://localhost:8086/api/v2/ready | head -5"
+    resolution: |
+      InfluxDB has been restarted and the HTTP API on port 8086 should now be accepting connections. If the connection is still refused, verify your docker-compose port mapping is correct (ports: - "8086:8086") and that no other service on the host is already using port 8086.
+
+  - id: bucket-not-found-write
+    name: Writes fail with "bucket not found" error
+    symptoms:
+      - "bucket not found"
+      - "404 Not Found"
+      - "Error writing to bucket"
+      - "Write points but bucket does not exist"
+    trigger_conditions:
+      - log_pattern: "bucket not found"
+      - log_pattern: "404.*bucket"
+    steps:
+      - id: step-1
+        description: Check configured bucket name in initialization variables
+        type: check
+        command: "docker inspect {container_name} | grep DOCKER_INFLUXDB_INIT_BUCKET"
+        expected_output: "DOCKER_INFLUXDB_INIT_BUCKET"
+        on_fail: step-2
+      - id: step-2
+        description: Display initialization bucket configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check what buckets currently exist in InfluxDB
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:8086/api/v2/buckets -H 'Authorization: Token {influxdb_token}' | head -20"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display available buckets
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify the bucket name matches exactly (case-sensitive)
+        type: check
+        command: "echo 'Bucket names in InfluxDB are case-sensitive. Verify the bucket name used in your client matches the one created during initialization.'"
+        expected_output: ""
+      - id: step-6
+        description: Create the missing bucket if initialization was incomplete
+        type: fix
+        command: "docker exec {container_name} influx bucket create --name {bucket_name} --org {org_name} --retention 0 2>/dev/null || true"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify bucket was created successfully
+        type: check
+        command: "docker exec {container_name} influx bucket list --org {org_name} | grep {bucket_name}"
+    resolution: |
+      The bucket was created or verified to exist in InfluxDB. Ensure that your metrics client is configured with the correct bucket name (case-sensitive), organization name, and authentication token. The token must have write permissions to the target bucket.
+
+default_config:
+  compose_template: |
+    services:
+      influxdb:
+        image: influxdb:latest
+        container_name: influxdb
+        restart: unless-stopped
+        environment:
+          DOCKER_INFLUXDB_INIT_MODE: setup
+          DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:-admin}
+          DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-changeme}
+          DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-myorg}
+          DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-mybucket}
+          DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUXDB_RETENTION:-0}
+          DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-mytoken}
+          INFLUXDB_HTTP_BIND_ADDRESS: 0.0.0.0:8086
+        volumes:
+          - ${INFLUXDB_DATA_PATH:-./influxdb2}:/var/lib/influxdb2
+        ports:
+          - "8086:8086/tcp"
+  required_vars:
+    - name: INFLUXDB_USERNAME
+      description: Initial admin username for InfluxDB
+      default: "admin"
+    - name: INFLUXDB_PASSWORD
+      description: Initial admin password for InfluxDB (minimum 8 characters)
+      default: "changeme"
+    - name: INFLUXDB_ORG
+      description: Initial organization name
+      default: "myorg"
+    - name: INFLUXDB_BUCKET
+      description: Initial bucket name for metrics storage
+      default: "mybucket"
+    - name: INFLUXDB_TOKEN
+      description: Initial admin API token (minimum 12 characters recommended)
+      default: "mytoken"
+    - name: INFLUXDB_RETENTION
+      description: Bucket retention in hours (0 = infinite)
+      default: "0"
+    - name: INFLUXDB_DATA_PATH
+      description: Host path for /var/lib/influxdb2 (database and configuration)
+      default: "./influxdb2"
+  known_mounts:
+    - container_path: /var/lib/influxdb2
+      purpose: InfluxDB 2.0+ data, configuration, and metadata
+      recommended_permissions: "755"
+      owner: "999:999"
+
+notes: |
+  InfluxDB is a high-performance, open-source time-series database designed for metrics ingestion and querying. This skill covers InfluxDB 2.0+, which uses a setup-based initialization with environment variables.
+
+  Initialization: On first startup, set DOCKER_INFLUXDB_INIT_MODE=setup along with DOCKER_INFLUXDB_INIT_USERNAME, DOCKER_INFLUXDB_INIT_PASSWORD, DOCKER_INFLUXDB_INIT_ORG, DOCKER_INFLUXDB_INIT_BUCKET, and DOCKER_INFLUXDB_INIT_ADMIN_TOKEN. Initialization is only performed on first run; subsequent restarts skip setup.
+
+  Data directory: Must have read/write permissions for UID 999 (default InfluxDB user). Ensure the host directory is owned by UID 999 or has world-writable permissions (755+).
+
+  Port 8086: Default HTTP API port. Ensure it is exposed in your docker-compose and that no other service on the host is already using it.
+
+  Retention: Set to 0 for infinite retention, or specify hours (e.g., 720 for 30 days). Retention is per-bucket and can be modified after creation.
+
+  Token security: The DOCKER_INFLUXDB_INIT_ADMIN_TOKEN should be a strong, random token (minimum 12 characters). Store in secrets manager rather than plaintext docker-compose.
+
+  Bucket operations: After initialization, new buckets can be created via CLI (influx bucket create) or the web UI. Buckets are case-sensitive and organization-scoped.

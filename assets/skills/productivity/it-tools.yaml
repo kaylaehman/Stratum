@@ -1,0 +1,116 @@
+id: it-tools
+name: IT-Tools
+version: "1.0"
+container_match:
+  image_patterns:
+    - "corentinth/it-tools"
+  port_hints: [80]
+category: productivity
+description: Static web application with utilities for IT professionals—base64, hash, regex, UUID, JSON, and more
+docs_url: https://hub.docker.com/r/corentinth/it-tools
+
+common_issues:
+  - id: container-not-responding
+    name: Container fails to start or responds with 404
+    symptoms:
+      - "Connection refused on port 80"
+      - "404 Not Found"
+      - "Service unavailable"
+      - "Container exits immediately"
+    trigger_conditions:
+      - log_pattern: "exit.*code"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check container logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-2
+        description: Verify port 80 is not already in use
+        type: check
+        command: "docker port {container_name} 80"
+        expected_output: "0.0.0.0:80"
+        on_fail: step-3
+      - id: step-3
+        description: Display port conflict information
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart the container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "{container_name}.*Up"
+    resolution: |
+      The IT-Tools container has been restarted. Since IT-Tools is a static web application with no database or persistent state, most startup issues resolve with a restart. If the container continues to fail, verify that no other service is using port 80 on the host.
+
+  - id: static-content-not-loading
+    name: Tool interface loads but styling or functionality broken
+    symptoms:
+      - "Page loads but looks broken (no CSS)"
+      - "JavaScript errors in browser console"
+      - "Some tools not working"
+      - "CORS errors in console"
+    trigger_conditions:
+      - log_pattern: "404"
+    steps:
+      - id: step-1
+        description: Clear browser cache and reload
+        type: inform
+        command: ""
+      - id: step-2
+        description: Verify container is fully running
+        type: check
+        command: "docker exec {container_name} ps aux | grep -v grep | head -3"
+        expected_output: ""
+      - id: step-3
+        description: Check for any error logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i error | tail -5"
+        expected_output: ""
+      - id: step-4
+        description: Restart container to restore full application state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify container stability
+        type: check
+        command: "sleep 3 && docker exec {container_name} wget -q -O- http://localhost 2>&1 | head -5"
+    resolution: |
+      The IT-Tools container has been restarted. Since this is a static web application, broken styling typically indicates incomplete startup. Hard refresh your browser (Ctrl+Shift+R or Cmd+Shift+R) to clear any cached assets. If issues persist, check your reverse proxy (if used) for proper forwarding configuration.
+
+default_config:
+  compose_template: |
+    services:
+      it-tools:
+        image: corentinth/it-tools:latest
+        container_name: it-tools
+        restart: unless-stopped
+        ports:
+          - "80:80/tcp"
+  required_vars: []
+  known_mounts: []
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  IT-Tools is a lightweight, stateless web application—no database, no volumes, no environment configuration required. It provides a collection of utilities useful for IT professionals: base64 encoding/decoding, hash generation (MD5, SHA1, SHA256, etc.), regex testing, UUID generation, JSON formatting, YAML conversion, and more.
+
+  Deployment: Extremely simple—just expose port 80. Can be run behind any reverse proxy (Nginx, Traefik) for HTTPS termination and routing.
+
+  Performance: Single container; no horizontal scaling needed. CPU and memory usage are minimal due to static nature.
+
+  Browser compatibility: Works with any modern browser. No special plugins required.
+
+  Updates: Pull latest image tag to get new tool additions and improvements.
+
+  Use case: Perfect for quick utility access in a homelab or team environment. Pin to sidebar bookmarks for one-click access.

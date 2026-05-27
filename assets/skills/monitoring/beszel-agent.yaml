@@ -1,0 +1,234 @@
+id: beszel-agent
+name: Beszel Agent
+version: "1.0"
+container_match:
+  image_patterns:
+    - "henrygd/beszel-agent"
+  port_hints: [45876]
+category: monitoring
+description: Agent for Beszel monitoring hub; collects system metrics and reports to central hub
+docs_url: https://hub.docker.com/r/henrygd/beszel-agent
+
+common_issues:
+  - id: hub-connectivity-failure
+    name: Agent unable to connect to Beszel hub
+    symptoms:
+      - "Connection refused errors in logs"
+      - "Hub shows agent as offline"
+      - "Metrics not being reported"
+      - "Failed to register with hub"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "unable.*connect"
+      - log_pattern: "hub.*unreachable"
+    steps:
+      - id: step-1
+        description: Verify HUB_URL environment variable is set correctly
+        type: check
+        command: "docker inspect {container_name} | grep -i 'HUB_URL'"
+        expected_output: "HUB_URL"
+        on_fail: step-2
+      - id: step-2
+        description: Display current HUB_URL configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test network connectivity to hub host
+        type: check
+        command: "docker exec {container_name} ping -c 1 {hub_host}"
+        expected_output: "bytes from"
+        on_fail: step-4
+      - id: step-4
+        description: Display network connectivity troubleshooting information
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify KEY environment variable matches hub configuration
+        type: check
+        command: "docker inspect {container_name} | grep -i 'KEY'"
+        expected_output: "KEY"
+        on_fail: step-6
+      - id: step-6
+        description: Confirm KEY value is identical to hub settings
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart agent to re-establish connection with hub
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor agent logs for successful hub connection
+        type: check
+        command: "sleep 3 && docker logs {container_name} | grep -i 'connect\\|success\\|registered' | tail -5"
+    resolution: |
+      Beszel agent has been restarted and will attempt to reconnect to the hub. Ensure HUB_URL is set to the correct address (http://<hub-host>:8090) and that the KEY environment variable matches exactly what is configured in the hub. Network connectivity from this agent host to the hub host on port 8090 must be available.
+
+  - id: docker-socket-permission
+    name: Agent cannot access Docker socket for container stats
+    symptoms:
+      - "Permission denied accessing /var/run/docker.sock"
+      - "Cannot list containers or retrieve container metrics"
+      - "Docker stats unavailable in hub dashboard"
+      - "Error spawning container reporters"
+    trigger_conditions:
+      - log_pattern: "permission denied.*docker"
+      - log_pattern: "socket.*permission"
+      - log_pattern: "cannot.*stat"
+    steps:
+      - id: step-1
+        description: Check if docker.sock is mounted into container
+        type: check
+        command: "docker inspect {container_name} | grep -A 2 'docker.sock'"
+        expected_output: "docker.sock"
+        on_fail: step-2
+      - id: step-2
+        description: Display volume mounts for this container
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify host docker.sock permissions
+        type: check
+        command: "ls -l /var/run/docker.sock"
+        expected_output: "rw"
+        on_fail: step-4
+      - id: step-4
+        description: Display docker.sock ownership and permissions
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check container user and group IDs
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: "uid="
+      - id: step-6
+        description: Add docker group permissions to allow socket access
+        type: fix
+        command: "usermod -aG docker {container_user}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart agent to apply new permissions
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify docker.sock access is now working
+        type: check
+        command: "docker exec {container_name} docker ps | head -3"
+    resolution: |
+      The Beszel agent process permissions have been updated to access the Docker socket. The container has been restarted to apply the new group membership. The agent should now be able to collect container metrics from the local Docker daemon. Verify in the hub dashboard that container-level metrics are now appearing.
+
+  - id: metrics-gaps-or-incomplete
+    name: Agent metrics show gaps or incomplete data collection
+    symptoms:
+      - "Metrics data points missing at regular intervals"
+      - "Hub shows agent offline periodically"
+      - "Memory or CPU metrics incomplete"
+      - "Inconsistent data collection intervals"
+    trigger_conditions:
+      - log_pattern: "timeout"
+      - log_pattern: "failed.*report"
+      - log_pattern: "metric.*error"
+    steps:
+      - id: step-1
+        description: Check agent CPU and memory usage for resource constraints
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Verify agent process is running
+        type: check
+        command: "docker top {container_name}"
+        expected_output: "root"
+        on_fail: step-3
+      - id: step-3
+        description: Check for agent crashes in container logs
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-4
+        description: Verify agent reporting interval is reasonable (not too frequent)
+        type: check
+        command: "docker inspect {container_name} | grep -i 'INTERVAL\\|FREQUENCY'"
+        expected_output: ""
+      - id: step-5
+        description: Check network latency to hub
+        type: check
+        command: "docker exec {container_name} ping -c 3 {hub_host} | grep 'time='"
+        expected_output: "time="
+      - id: step-6
+        description: Increase agent reporting interval to reduce network load
+        type: fix
+        command: "docker exec {container_name} sed -i 's/INTERVAL=.*/INTERVAL=30/' /etc/beszel-agent/config"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart agent with new reporting interval
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor for improved metrics consistency
+        type: check
+        command: "sleep 30 && docker logs {container_name} | tail -10"
+    resolution: |
+      The Beszel agent reporting interval has been adjusted to reduce network overhead and potential timeout issues. The agent will now collect and report metrics at longer intervals, which should improve consistency and reduce dropped data points. Monitor the hub dashboard over the next few minutes to confirm metrics are now being collected without gaps.
+
+default_config:
+  compose_template: |
+    services:
+      beszel-agent:
+        image: henrygd/beszel-agent:latest
+        container_name: beszel-agent
+        restart: unless-stopped
+        network_mode: host
+        environment:
+          HUB_URL: ${HUB_URL:-http://beszel:8090}
+          KEY: ${KEY:-your-agent-key}
+          PORT: ${AGENT_PORT:-45876}
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+        privileged: false
+  required_vars:
+    - name: HUB_URL
+      description: Full URL to the Beszel hub (http://<hub-host>:8090)
+      default: "http://beszel:8090"
+    - name: KEY
+      description: Agent authentication key (must match hub configuration)
+      default: "your-agent-key"
+    - name: AGENT_PORT
+      description: Port on which agent listens
+      default: "45876"
+  known_mounts:
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket for collecting container metrics
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Beszel agent is a lightweight metric collector that runs on each monitored host and reports to a central Beszel hub. The agent collects system-level metrics (CPU, memory, disk, network) and optionally Docker container metrics if Docker socket is available.
+
+  Agent registration: Each agent requires a unique KEY that must match the key configured in the hub. The HUB_URL must point to the central hub's address including the port (default 8090).
+
+  Docker socket access: To collect container metrics, the agent requires read access to /var/run/docker.sock. Mount the socket as read-only in the container. The agent process must be able to read the socket, typically requiring membership in the docker group.
+
+  Network mode: Uses host network mode by default to accurately report host-level metrics and for direct access to docker.sock.
+
+  Reporting frequency: Metrics are reported to the hub at regular intervals. The default interval can be adjusted via environment variables to balance data granularity with network load.
+
+  Port: Agent listens on port 45876 by default (configurable via PORT environment variable). This port is used for health checks and communication with the hub.
+
+  Container permissions: The agent does not require privileged mode but does need read access to /var/run/docker.sock. Use read-only mount (`:ro`) for security.
+
+  Common gotchas:
+  - Hub shows offline: Check HUB_URL and KEY match hub configuration, verify network connectivity.
+  - No container metrics: Verify /var/run/docker.sock is mounted and accessible.
+  - Metrics gaps: Check network latency to hub, consider increasing reporting interval on high-latency connections.
+  - Permission denied errors: Ensure docker socket permissions allow the agent process to read.

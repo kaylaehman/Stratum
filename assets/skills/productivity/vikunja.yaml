@@ -1,0 +1,265 @@
+id: vikunja
+name: Vikunja Task and Project Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "vikunja/vikunja"
+  port_hints: [3456]
+category: productivity
+description: Self-hosted open-source task and project management platform
+docs_url: https://hub.docker.com/r/vikunja/vikunja
+
+common_issues:
+  - id: database-connection-failed
+    name: Database connection failed
+    symptoms:
+      - "Cannot connect to database"
+      - "Database configuration missing"
+      - "ECONNREFUSED on startup"
+      - "No tasks or projects loaded"
+    trigger_conditions:
+      - log_pattern: "database.*connection"
+      - log_pattern: "ECONNREFUSED"
+    steps:
+      - id: step-1
+        description: Check if database backend is configured
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i 'db_type\\|db_host\\|db_user'"
+        expected_output: "DB_"
+        on_fail: step-2
+      - id: step-2
+        description: Display database configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test database connectivity from container
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {db_host} {db_port}'"
+        expected_output: "succeeded"
+        on_fail: step-4
+      - id: step-4
+        description: Check database container logs
+        type: check
+        command: "docker logs {db_container_name} 2>&1 | tail -10"
+      - id: step-5
+        description: Restart Vikunja to retry connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor startup for successful connection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      Vikunja requires a configured database. Supported backends are SQLite (default, file-based), MySQL, and PostgreSQL. Database credentials must be correct and the database must be accessible. After restarting, Vikunja will initialize its schema automatically.
+
+  - id: permission-denied-files
+    name: Permission denied on /app/vikunja/files
+    symptoms:
+      - "Cannot upload file attachments"
+      - "Permission denied on /app/vikunja/files"
+      - "EACCES when saving files"
+      - "Task attachments not persisting"
+    trigger_conditions:
+      - log_pattern: "permission denied.*files"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of /app/vikunja/files directory
+        type: check
+        command: "stat {files_path} | grep Uid"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display files directory permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively fix ownership of files directory
+        type: fix
+        command: "chmod -R 755 {files_path} && chown -R 1000:1000 {files_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership and try uploading a test file
+        type: check
+        command: "stat {files_path} | grep Uid"
+    resolution: |
+      Vikunja requires write access to /app/vikunja/files for storing file attachments and uploads. The directory permissions have been corrected. Users should now be able to upload attachments to tasks.
+
+  - id: config-file-invalid
+    name: Configuration file invalid or missing
+    symptoms:
+      - "Configuration error at startup"
+      - "YAML parsing error"
+      - "/app/vikunja/config.yml is missing"
+      - "Invalid configuration syntax"
+    trigger_conditions:
+      - log_pattern: "config.*error"
+      - log_pattern: "yaml.*parse"
+    steps:
+      - id: step-1
+        description: Check if config.yml exists
+        type: check
+        command: "docker exec {container_name} ls -la /app/vikunja/config.yml"
+        expected_output: "config.yml"
+        on_fail: step-2
+      - id: step-2
+        description: Display config file location and status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Validate config file syntax
+        type: check
+        command: "docker exec {container_name} cat /app/vikunja/config.yml | head -20"
+      - id: step-4
+        description: Display configuration and verify required sections
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restore default config if corrupted
+        type: fix
+        command: "docker exec {container_name} cp /app/vikunja/config.yml.default /app/vikunja/config.yml"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Vikunja with valid config
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify startup with corrected config
+        type: check
+        command: "sleep 3 && docker logs {container_name} | tail -10"
+    resolution: |
+      Vikunja configuration has been restored to defaults. You can customize /app/vikunja/config.yml with your specific settings. Refer to https://vikunja.io/docs/config/ for configuration options. Common settings include database type, port, and authentication providers.
+
+  - id: web-ui-not-accessible
+    name: Web UI not responding or accessible
+    symptoms:
+      - "Port 3456 not responding"
+      - "Connection timeout to Vikunja"
+      - "Page not found or blank page"
+      - "Cannot access Vikunja web interface"
+    trigger_conditions:
+      - log_pattern: "listen.*3456"
+    steps:
+      - id: step-1
+        description: Check if Vikunja is listening on port 3456
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 3456"
+        expected_output: "LISTEN.*3456"
+        on_fail: step-2
+      - id: step-2
+        description: Check container logs for startup errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | tail -20"
+      - id: step-3
+        description: Verify port is published in docker-compose
+        type: check
+        command: "docker port {container_name} 3456"
+        expected_output: "3456"
+        on_fail: step-4
+      - id: step-4
+        description: Display port mapping status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Vikunja to force reinitialize
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait for startup and verify port is bound
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -tlnp | grep 3456"
+    resolution: |
+      Vikunja should now be listening on port 3456. Access the web interface via http://localhost:3456 or the configured external URL. If the page is still blank, clear browser cache and ensure JavaScript is enabled.
+
+default_config:
+  compose_template: |
+    services:
+      vikunja:
+        image: vikunja/vikunja:latest
+        container_name: vikunja
+        restart: unless-stopped
+        environment:
+          VIKUNJA_DATABASE_TYPE: ${DB_TYPE:-sqlite}
+          VIKUNJA_DATABASE_SQLITE_PATH: ${SQLITE_PATH:-/app/vikunja/vikunja.db}
+          VIKUNJA_DATABASE_HOST: ${DB_HOST:-}
+          VIKUNJA_DATABASE_USER: ${DB_USER:-}
+          VIKUNJA_DATABASE_PASSWORD: ${DB_PASSWORD:-}
+          VIKUNJA_DATABASE_DATABASE: ${DB_NAME:-}
+          VIKUNJA_SERVICE_FRONTENDURL: ${FRONTEND_URL:-http://localhost:3456}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/app/vikunja/config
+          - ${FILES_PATH:-./files}:/app/vikunja/files
+          - ${DB_PATH:-./db}:/app/vikunja/db
+        ports:
+          - "3456:3456"
+
+  required_vars:
+    - name: DB_TYPE
+      description: Database backend (sqlite, mysql, postgres)
+      default: "sqlite"
+    - name: SQLITE_PATH
+      description: Path to SQLite database file (if DB_TYPE=sqlite)
+      default: "/app/vikunja/vikunja.db"
+    - name: DB_HOST
+      description: Database host (if DB_TYPE=mysql or postgres)
+      default: ""
+    - name: DB_USER
+      description: Database user (if DB_TYPE=mysql or postgres)
+      default: ""
+    - name: DB_PASSWORD
+      description: Database password (if DB_TYPE=mysql or postgres)
+      default: ""
+    - name: DB_NAME
+      description: Database name (if DB_TYPE=mysql or postgres)
+      default: ""
+    - name: FRONTEND_URL
+      description: Public URL for Vikunja access
+      default: "http://localhost:3456"
+    - name: CONFIG_PATH
+      description: Host path for /app/vikunja/config (configuration files)
+      default: "./config"
+    - name: FILES_PATH
+      description: Host path for /app/vikunja/files (task attachments)
+      default: "./files"
+    - name: DB_PATH
+      description: Host path for /app/vikunja/db (SQLite database if used)
+      default: "./db"
+
+  known_mounts:
+    - container_path: /app/vikunja/config
+      purpose: Configuration and settings
+      recommended_permissions: "755"
+      owner: "1000:1000"
+    - container_path: /app/vikunja/files
+      purpose: Task attachments and uploaded files
+      recommended_permissions: "755"
+      owner: "1000:1000"
+    - container_path: /app/vikunja/db
+      purpose: SQLite database (if using SQLite backend)
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Vikunja is a self-hosted open-source task and project management platform. It supports multiple database backends: SQLite (default, file-based), MySQL, and PostgreSQL.
+
+  Database selection:
+  - SQLite: Easiest for single-user or small deployments. Database stored at /app/vikunja/vikunja.db.
+  - MySQL/PostgreSQL: Required for multi-user deployments. Set VIKUNJA_DATABASE_TYPE and connection env vars.
+
+  File attachments: Stored in /app/vikunja/files. Ensure this directory is on persistent storage and has sufficient space.
+
+  Configuration: Edit /app/vikunja/config.yml to customize settings (SMTP, authentication, features). See https://vikunja.io/docs/config/ for options.
+
+  Backups: Back up /app/vikunja/config, /app/vikunja/files, and the database (SQLite file or MySQL/PostgreSQL dump).
+
+  Multi-user: For team use, configure a MySQL or PostgreSQL database. SQLite is not recommended for concurrent access.
+
+  Performance: SQLite is sufficient for personal use and small teams. For 50+ users, migrate to MySQL or PostgreSQL.

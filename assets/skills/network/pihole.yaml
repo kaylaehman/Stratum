@@ -1,0 +1,300 @@
+id: pihole
+name: Pi-hole DNS Blocker
+version: "1.0"
+container_match:
+  image_patterns:
+    - "pihole/pihole"
+  port_hints: [53, 80]
+category: network
+description: Lightweight DNS sinkhole that blocks ads and trackers across your entire network
+docs_url: https://docs.pi-hole.net
+
+common_issues:
+  - id: port-53-conflict
+    name: DNS port 53 already in use (systemd-resolved conflict)
+    symptoms:
+      - "Cannot start container: port 53 already allocated"
+      - "Address already in use"
+      - "Error response from daemon"
+      - "systemd-resolved is listening on port 53"
+    trigger_conditions:
+      - log_pattern: "port.*already.*in.*use"
+      - log_pattern: "Address already in use"
+    steps:
+      - id: step-1
+        description: Check what is listening on port 53
+        type: check
+        command: "ss -tlnp | grep 53"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display listening services on port 53
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if systemd-resolved is running
+        type: check
+        command: "systemctl status systemd-resolved | grep -i active"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Inform about systemd-resolved conflict
+        type: inform
+        command: ""
+      - id: step-5
+        description: Create systemd-resolved override to disable DNS port binding
+        type: fix
+        command: "mkdir -p /etc/systemd/resolved.conf.d && echo '[Resolve]' > /etc/systemd/resolved.conf.d/pihole.conf && echo 'DNSStubListener=no' >> /etc/systemd/resolved.conf.d/pihole.conf && systemctl restart systemd-resolved"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify systemd-resolved is not listening on port 53
+        type: check
+        command: "sleep 2 && ss -tlnp | grep 53 | grep -v pihole"
+        expected_output: ""
+    resolution: |
+      systemd-resolved was listening on port 53, preventing Pi-hole from binding to the DNS port. The override configuration disabled DNS stub listener on systemd-resolved. You can now start Pi-hole. The system will use Pi-hole as the DNS server instead of systemd-resolved's stub listener. Note: If you restart the host, systemd-resolved may reacquire the port — you may need to disable it entirely (systemctl disable systemd-resolved) and configure a static DNS resolver.
+
+  - id: webpassword-not-set
+    name: Cannot log into Pi-hole web interface (password not configured)
+    symptoms:
+      - "Admin login fails"
+      - "Password incorrect message"
+      - "Cannot access Settings page"
+      - "Unauthorized to access admin API"
+    trigger_conditions:
+      - log_pattern: "auth.*failed"
+      - log_pattern: "unauthorized"
+    steps:
+      - id: step-1
+        description: Check if WEBPASSWORD environment variable is set in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep WEBPASSWORD"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display container environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Inform user about WEBPASSWORD requirement
+        type: inform
+        command: ""
+      - id: step-4
+        description: Stop the container to apply new WEBPASSWORD
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Update container with new WEBPASSWORD environment variable
+        type: fix
+        command: "docker update --env WEBPASSWORD='YourSecurePassword' {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Start the container with the new password
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify Pi-hole web interface is accessible
+        type: check
+        command: "sleep 5 && curl -s http://localhost:80 | head -5"
+    resolution: |
+      The WEBPASSWORD environment variable was not set during container startup. Pi-hole requires this for admin authentication. The container has been restarted with a new password. You can now log into the Pi-hole admin dashboard. Change the password from the Settings page for security. Note: Use docker-compose with WEBPASSWORD in environment: key to persist this change across container restarts.
+
+  - id: gravity-db-corruption
+    name: Gravity database is corrupted or inaccessible
+    symptoms:
+      - "Error loading gravity database"
+      - "Database is locked"
+      - "Cannot update adlists"
+      - "Whitelist/blacklist not loading"
+      - "Disabled by admin"
+    trigger_conditions:
+      - log_pattern: "database.*locked"
+      - log_pattern: "gravity.*error"
+      - log_pattern: "Disabled by admin"
+    steps:
+      - id: step-1
+        description: Check if gravity database file exists
+        type: check
+        command: "docker exec {container_name} ls -lh /etc/pihole/gravity.db"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display gravity database status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check gravity database integrity
+        type: check
+        command: "docker exec {container_name} sqlite3 /etc/pihole/gravity.db 'PRAGMA integrity_check;' | head -1"
+        expected_output: "ok"
+        on_fail: step-4
+      - id: step-4
+        description: Backup corrupted gravity database
+        type: fix
+        command: "docker exec {container_name} cp /etc/pihole/gravity.db /etc/pihole/gravity.db.backup.corrupted"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Remove corrupted gravity database to trigger recreation
+        type: fix
+        command: "docker exec {container_name} rm -f /etc/pihole/gravity.db"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Pi-hole to regenerate gravity database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify gravity database is recreated
+        type: check
+        command: "sleep 10 && docker exec {container_name} ls -lh /etc/pihole/gravity.db"
+        expected_output: "gravity.db"
+    resolution: |
+      The gravity database was corrupted and could not be accessed by Pi-hole. A backup was saved as gravity.db.backup.corrupted. The database has been removed and Pi-hole will automatically recreate it on startup. Your adlists, whitelist, and blacklist will be regenerated from the backup. If you want to restore a previous good backup, copy it to /etc/pihole/gravity.db before restarting. Otherwise, reconfigure your adlists in the admin dashboard.
+
+  - id: dnsmasq-conf-error
+    name: Dnsmasq configuration error or DNS queries failing
+    symptoms:
+      - "No DNS resolution working"
+      - "Dnsmasq error in logs"
+      - "DNS queries timeout or fail"
+      - "Upstream DNS not responding"
+      - "All DNS queries blocked"
+    trigger_conditions:
+      - log_pattern: "dnsmasq.*error"
+      - log_pattern: "Failed to.*lookup"
+      - log_pattern: "all queries blocked"
+    steps:
+      - id: step-1
+        description: Check dnsmasq process status
+        type: check
+        command: "docker exec {container_name} ps aux | grep dnsmasq | grep -v grep"
+        expected_output: "dnsmasq"
+        on_fail: step-2
+      - id: step-2
+        description: Display dnsmasq status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check dnsmasq configuration files for syntax errors
+        type: check
+        command: "docker exec {container_name} dnsmasq --test 2>&1 | head -10"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display dnsmasq test results
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check /etc/dnsmasq.d custom config files
+        type: check
+        command: "docker exec {container_name} ls -la /etc/dnsmasq.d/"
+        expected_output: ""
+      - id: step-6
+        description: Verify upstream DNS servers are configured and responding
+        type: check
+        command: "docker exec {container_name} cat /etc/pihole/pihole-FTL.conf | grep -i upstream"
+        expected_output: ""
+      - id: step-7
+        description: Restart pihole-FTL and dnsmasq services
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify DNS resolution is working after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} nslookup google.com 127.0.0.1 | grep -i address"
+    resolution: |
+      Pi-hole's DNS resolution was not working due to a dnsmasq configuration error or upstream DNS server issue. The container has been restarted to reload all configurations. If the issue persists, check /etc/dnsmasq.d/ for custom configuration files with syntax errors. Verify your upstream DNS servers (in Settings → DNS) are accessible and responding. You can also check pihole-FTL logs for detailed error messages.
+
+notes: |
+  Pi-hole is a network-wide ad blocker that acts as a DNS sinkhole. It intercepts DNS queries and blocks known ad/tracker domains.
+
+  Common gotchas:
+  - Port 53 conflict: Most Linux hosts run systemd-resolved which listens on port 53. Disable or reconfigure it before starting Pi-hole.
+  - WEBPASSWORD: Must be set during first startup; changing later requires docker update or compose restart.
+  - Gravity database: Stores adlists, whitelist, blacklist, and regex filters. Corruption is rare but requires rebuild.
+  - FTLCONF_LOCAL_IPV4: If you change the host's IP after deployment, update this variable so Pi-hole advertises the correct IP to DHCP clients.
+  - DHCP server: Optional but requires /etc/pihole and /etc/dnsmasq.d to be mounted and writable.
+
+default_config:
+  compose_template: |
+    services:
+      pihole:
+        image: pihole/pihole:latest
+        container_name: pihole
+        restart: unless-stopped
+        environment:
+          WEBPASSWORD: ${WEBPASSWORD:-changeme}
+          FTLCONF_LOCAL_IPV4: ${HOST_IP:-192.168.1.100}
+          TZ: ${TZ:-UTC}
+          DHCP_ENABLED: "false"
+          DNS1: ${UPSTREAM_DNS1:-1.1.1.1}
+          DNS2: ${UPSTREAM_DNS2:-1.0.0.1}
+        volumes:
+          - ${CONFIG_PATH:-./etc-pihole}:/etc/pihole
+          - ${DNSMASQ_PATH:-./etc-dnsmasq.d}:/etc/dnsmasq.d
+        ports:
+          - "53:53/tcp"
+          - "53:53/udp"
+          - "80:80/tcp"
+          - "443:443/tcp"
+        cap_add:
+          - NET_ADMIN
+  required_vars:
+    - name: WEBPASSWORD
+      description: Admin web interface password
+      default: "changeme"
+    - name: HOST_IP
+      description: Host IP address that Pi-hole should advertise (for DHCP)
+      default: "192.168.1.100"
+    - name: TZ
+      description: Timezone for log timestamps
+      default: "UTC"
+    - name: UPSTREAM_DNS1
+      description: Primary upstream DNS resolver
+      default: "1.1.1.1"
+    - name: UPSTREAM_DNS2
+      description: Secondary upstream DNS resolver
+      default: "1.0.0.1"
+    - name: CONFIG_PATH
+      description: Host path for /etc/pihole
+      default: "./etc-pihole"
+    - name: DNSMASQ_PATH
+      description: Host path for /etc/dnsmasq.d
+      default: "./etc-dnsmasq.d"
+  known_mounts:
+    - container_path: /etc/pihole
+      purpose: Pi-hole configuration, gravity database, and admin settings
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /etc/dnsmasq.d
+      purpose: Dnsmasq custom configuration files (optional; for advanced DNS rules)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Pi-hole blocks ads and tracking at the DNS level, protecting all devices on your network.
+
+  Port 53 (DNS) must be accessible on both TCP and UDP.
+  Port 80 is for the admin web interface; use reverse proxy for HTTPS.
+
+  Optional DHCP server: Set DHCP_ENABLED=true and configure DHCP_ variables to use Pi-hole as your network's DHCP server.
+
+  Upstream DNS: Configure primary and secondary servers. Cloudflare (1.1.1.1), Google (8.8.8.8), and Quad9 (9.9.9.9) are popular choices.
+
+  Ad list management: Add adlists (blocklists) via the Admin → Adlists page. Community lists are available at:
+  https://doh.centraleuropean.de (curated blocklists)
+  https://firebog.net (comprehensive blocklist compilation)

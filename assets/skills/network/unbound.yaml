@@ -1,0 +1,261 @@
+id: unbound
+name: Unbound Recursive DNS Resolver
+version: "1.0"
+container_match:
+  image_patterns:
+    - "mvance/unbound"
+    - "klud/unbound"
+    - "madnuttah/unbound"
+  port_hints: [5335]
+category: network
+description: Lightweight recursive DNS resolver commonly deployed as upstream for Pi-hole or AdGuard Home
+docs_url: https://hub.docker.com/r/mvance/unbound
+
+common_issues:
+  - id: upstream-config-missing
+    name: Unbound not responding or not configured as upstream DNS
+    symptoms:
+      - "Upstream DNS timeout"
+      - "Cannot resolve with nslookup to unbound port"
+      - "Pi-hole/AdGuard reports upstream as unreachable"
+      - "Port 5335 not listening"
+    trigger_conditions:
+      - log_pattern: "error.*bind"
+      - log_pattern: "REFUSED"
+      - log_pattern: "Unable to open socket"
+    steps:
+      - id: step-1
+        description: Check if unbound process is running
+        type: check
+        command: "docker exec {container_name} ps aux | grep unbound | grep -v grep"
+        expected_output: "unbound"
+        on_fail: step-2
+      - id: step-2
+        description: Display unbound process status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify unbound is listening on port 5335
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 5335"
+        expected_output: "LISTEN.*5335"
+        on_fail: step-4
+      - id: step-4
+        description: Check unbound configuration file for errors
+        type: check
+        command: "docker exec {container_name} unbound-checkconf /etc/unbound/unbound.conf 2>&1 | head -10"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Display unbound configuration validation results
+        type: inform
+        command: ""
+      - id: step-6
+        description: Test DNS resolution via unbound on localhost
+        type: check
+        command: "docker exec {container_name} nslookup google.com 127.0.0.1 | grep -i address"
+        expected_output: "Address"
+        on_fail: step-7
+      - id: step-7
+        description: Restart unbound container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify unbound is responding after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} nslookup google.com 127.0.0.1 | grep -i address"
+    resolution: |
+      Unbound was restarted and should now be listening on port 5335. If using Pi-hole or AdGuard Home as a forwarder, add this unbound container as an upstream DNS server with the address <host-ip>:5335 (or <container-name>:5335 if on the same Docker network). You can verify connectivity from the forwarding container with: nslookup google.com unbound:5335
+
+  - id: unbound-conf-bind-mount
+    name: Unbound configuration not persisting or custom config not loading
+    symptoms:
+      - "Configuration reverts after restart"
+      - "Custom entries not loaded"
+      - "Changes to unbound.conf are lost"
+      - "Cannot edit unbound.conf on host"
+    trigger_conditions:
+      - log_pattern: "config.*error"
+      - log_pattern: "unable to read"
+    steps:
+      - id: step-1
+        description: Check if unbound.conf is mounted from host
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep -i conf"
+        expected_output: "/etc/unbound"
+        on_fail: step-2
+      - id: step-2
+        description: Display current mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify unbound.conf exists on host
+        type: check
+        command: "ls -la {config_path}/unbound.conf"
+        expected_output: "unbound.conf"
+        on_fail: step-4
+      - id: step-4
+        description: Display host configuration path status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check ownership and permissions of host config file
+        type: check
+        command: "stat {config_path}/unbound.conf | grep -E 'Uid|Access:'"
+        expected_output: ""
+      - id: step-6
+        description: Ensure host config directory is readable by container
+        type: fix
+        command: "chmod 755 {config_path} && chmod 644 {config_path}/unbound.conf"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart unbound to reload configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify unbound loaded updated configuration
+        type: check
+        command: "sleep 3 && docker logs {container_name} | grep -i 'config.*ok\\|reading.*config' | tail -3"
+    resolution: |
+      The unbound.conf file has been made readable by the container, and unbound has been restarted. Configuration changes should now persist across restarts as long as the config directory remains mounted. You can edit {config_path}/unbound.conf on the host and restart the container to apply changes. Verify changes with: docker logs {container_name}
+
+  - id: unbound-performance-high-memory
+    name: High memory usage or slow resolution with many queries
+    symptoms:
+      - "Memory usage > 500MB"
+      - "DNS resolution slow or timing out"
+      - "CPU usage elevated during query bursts"
+      - "Too many open files error"
+    trigger_conditions:
+      - log_pattern: "out of memory"
+      - log_pattern: "file descriptor"
+    steps:
+      - id: step-1
+        description: Check current resource usage of unbound container
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Display current memory and CPU stats
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check unbound message cache settings in config
+        type: check
+        command: "docker exec {container_name} grep -E 'msg-cache-size|rrset-cache-size' /etc/unbound/unbound.conf"
+        expected_output: ""
+      - id: step-4
+        description: Display current cache configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Inform about cache tuning options
+        type: inform
+        command: ""
+      - id: step-6
+        description: Reduce cache sizes in unbound.conf to lower memory usage
+        type: fix
+        command: "docker exec {container_name} sed -i 's/msg-cache-size:.*/msg-cache-size: 33m/g' /etc/unbound/unbound.conf && docker exec {container_name} sed -i 's/rrset-cache-size:.*/rrset-cache-size: 67m/g' /etc/unbound/unbound.conf"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart unbound with reduced cache settings
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor memory usage after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      Unbound cache sizes have been reduced from defaults to lower memory footprint. Typical production settings: msg-cache-size 33m, rrset-cache-size 67m. If memory is still high, consider: (1) increasing Docker memory limit, (2) reducing cache further, (3) enabling EDNS buffer size limits in config. For high-query scenarios, consider running unbound on a host with 2GB+ RAM and enabling extended EDNS client subnet (ECS) support if needed.
+
+notes: |
+  Unbound is a lightweight recursive DNS resolver that performs full DNS lookups rather than forwarding queries. It is commonly used as an upstream server for Pi-hole or AdGuard Home.
+
+  Deployment pattern: Unbound handles recursive resolution, Pi-hole/AdGuard handles ad blocking and DHCP. Pi-hole points to unbound:5335 as upstream.
+
+  Configuration file: /etc/unbound/unbound.conf is the main configuration. Key tuning parameters for homelab use:
+  - msg-cache-size: message cache (default 4m, reduce to 33m for homelab)
+  - rrset-cache-size: RRset cache (default 4m, reduce to 67m for homelab)
+  - num-threads: CPU threads to use (default: auto-detect)
+  - access-control: restrict which clients can query (default: 127.0.0.1)
+
+  Root hints: Unbound requires root hints file (/etc/unbound/root.hints) to bootstrap DNS queries. The image includes this automatically.
+
+  Performance tuning: Enable threaded operation and adjust cache sizes based on available RAM. Monitor memory usage; unbound can grow if serving many recursive queries.
+
+  Security: By default, unbound only listens on loopback (127.0.0.1). To allow queries from other containers or hosts on the network, add access-control rules in unbound.conf for the trusted networks (e.g., 172.17.0.0/16 for Docker bridge network).
+
+  DNSSEC validation: Unbound performs DNSSEC validation by default, improving security but requiring valid root hints and clock synchronization.
+
+default_config:
+  compose_template: |
+    services:
+      unbound:
+        image: mvance/unbound:latest
+        container_name: unbound
+        restart: unless-stopped
+        ports:
+          - "5335:5335/tcp"
+          - "5335:5335/udp"
+        volumes:
+          - ${CONFIG_PATH:-./unbound.conf}:/etc/unbound/unbound.conf
+          - ${DATA_PATH:-./unbound}:/var/lib/unbound
+        environment:
+          TZ: ${TZ:-UTC}
+        networks:
+          - dns
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path to unbound.conf configuration file
+      default: "./unbound.conf"
+    - name: DATA_PATH
+      description: Host path for unbound data directory (cache, logs)
+      default: "./unbound"
+    - name: TZ
+      description: Timezone for logs
+      default: "UTC"
+  known_mounts:
+    - container_path: /etc/unbound/unbound.conf
+      purpose: Unbound configuration (cache sizes, access control, DNSSEC settings)
+      recommended_permissions: "644"
+      owner: "root:root"
+    - container_path: /var/lib/unbound
+      purpose: Unbound data directory (cache, logs, statistics)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Unbound is a simple, lightweight recursive DNS resolver. No special permissions or complex volume layouts required compared to Pi-hole.
+
+  Quick start: Mount unbound.conf and run. The container initializes automatically with root hints.
+
+  Network setup: If Pi-hole or AdGuard is in a separate container, create a shared Docker network and use the container name (unbound) as the upstream address, not localhost.
+
+  Query logging: Enable query logging in unbound.conf with:
+  ```
+  log-queries: yes
+  log-replies: yes
+  ```
+
+  Then inspect logs with: docker logs unbound
+
+  Access control: Restrict which clients can query by adding to unbound.conf:
+  ```
+  access-control: 127.0.0.1/8 allow
+  access-control: 172.17.0.0/16 allow    # Docker bridge
+  access-control: 0.0.0.0/0 deny
+  ```
+
+  Common upstream configuration in Pi-hole:
+  Settings → DNS → Upstream DNS Servers → add 172.17.0.2:5335 (or <host-ip>:5335 if unbound is on a different Docker host)

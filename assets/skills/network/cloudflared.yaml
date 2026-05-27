@@ -1,0 +1,239 @@
+id: cloudflared
+name: Cloudflare Tunnel (cloudflared)
+version: "1.0"
+container_match:
+  image_patterns:
+    - "cloudflare/cloudflared"
+  port_hints: [8000, 8080]
+category: network
+description: Cloudflare Tunnel client for secure ingress without port forwarding
+docs_url: https://hub.docker.com/r/cloudflare/cloudflared
+
+common_issues:
+  - id: tunnel-offline-invalid-token
+    name: Tunnel offline or credential invalid
+    symptoms:
+      - "tunnel offline"
+      - "credential invalid"
+      - "authentication failed"
+      - "exited with code 1"
+      - "unable to authenticate"
+    trigger_conditions:
+      - log_pattern: "offline|credential|authentication"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if TUNNEL_TOKEN environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"TUNNEL_TOKEN\"}}{{.}}{{end}}{{end}}'"
+        expected_output: "TUNNEL_TOKEN"
+        on_fail: step-2
+      - id: step-2
+        description: Display environment variables (TUNNEL_TOKEN should be present)
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check cloudflared logs for authentication errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|credential\\|token' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Display recent log entries
+        type: inform
+        command: ""
+      - id: step-5
+        description: Generate a new tunnel token from Cloudflare dashboard
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart container with correct TUNNEL_TOKEN
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify tunnel is now online
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'connected\\|online' | tail -3"
+    resolution: |
+      Cloudflare Tunnel requires a valid TUNNEL_TOKEN to authenticate with Cloudflare's edge. The token is generated in the Cloudflare dashboard under Tunnels. If the token is expired, revoked, or invalid, the tunnel will remain offline. The container has been restarted; if the issue persists, generate a fresh token from the Cloudflare dashboard and update the TUNNEL_TOKEN environment variable.
+
+  - id: tunnel-ingress-routing-misconfigured
+    name: Tunnel connected but routes not working
+    symptoms:
+      - "tunnel online but requests timeout"
+      - "502 Bad Gateway"
+      - "no ingress route for request"
+      - "upstream service unreachable"
+      - "tunnel connected but no traffic reaching backend"
+    trigger_conditions:
+      - log_pattern: "no ingress route|504|502"
+    steps:
+      - id: step-1
+        description: Verify tunnel is in connected state
+        type: check
+        command: "docker logs {container_name} | grep -i 'connected' | tail -1"
+        expected_output: "connected"
+        on_fail: step-2
+      - id: step-2
+        description: Display tunnel status in logs
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if config.yml or ingress rules are present
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if contains .Source \"config\"}}{{.Source}}{{end}}{{end}}'"
+        expected_output: ""
+      - id: step-4
+        description: Verify backend service is running and accessible
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:8000 || echo 'backend not responding'"
+        expected_output: "200"
+        on_fail: step-5
+      - id: step-5
+        description: Display backend connectivity status
+        type: inform
+        command: ""
+      - id: step-6
+        description: Review cloudflared ingress configuration in dashboard
+        type: inform
+        command: ""
+      - id: step-7
+        description: Reload tunnel configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Test tunnel routing with a request
+        type: check
+        command: "docker logs {container_name} | grep -i 'route' | tail -5"
+    resolution: |
+      Cloudflare Tunnel requires properly configured ingress routing in the tunnel's config.yml or via the Cloudflare dashboard. Each public hostname must have a corresponding ingress rule pointing to a reachable backend service (container name, localhost:port, or external URL). If the backend is unreachable, requests will fail even if the tunnel is online. Verify the backend service is running and accessible from the cloudflared container's network.
+
+  - id: legacy-config-migration
+    name: Legacy config.yml + credentials.json approach
+    symptoms:
+      - "using credentials file"
+      - "config.yml configuration"
+      - "not using TUNNEL_TOKEN"
+      - "older cloudflared deployment"
+    trigger_conditions:
+      - log_pattern: "credentials|config.yml"
+    steps:
+      - id: step-1
+        description: Identify which authentication method is in use
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if or (contains . \"TUNNEL_TOKEN\") (contains . \"TUNNEL_CERT\")}}{{.}}{{end}}{{end}}'"
+        expected_output: ""
+      - id: step-2
+        description: Check if credentials.json or config files are mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}}{{println}}{{end}}' | grep -E 'credential|config'"
+        expected_output: ""
+      - id: step-3
+        description: Display current authentication setup
+        type: inform
+        command: ""
+      - id: step-4
+        description: Display recommendation to migrate to TUNNEL_TOKEN (zero-config approach)
+        type: inform
+        command: ""
+      - id: step-5
+        description: If legacy setup is still needed, verify credentials.json has correct ownership
+        type: check
+        command: "stat /path/to/credentials.json 2>/dev/null || echo 'credentials not found'"
+        expected_output: ""
+      - id: step-6
+        description: For legacy setups, ensure config.yml references valid hostname and ingress
+        type: inform
+        command: ""
+    resolution: |
+      Cloudflare Tunnel supports two authentication methods: the modern TUNNEL_TOKEN (zero-config, recommended) and the legacy credentials.json + config.yml approach (supported for backward compatibility). The TUNNEL_TOKEN method is simpler and more secure. If migrating from legacy to TUNNEL_TOKEN, generate a new token in the Cloudflare dashboard, remove the credentials and config file mounts, and set the TUNNEL_TOKEN environment variable instead.
+
+  - id: tunnel-connection-unstable
+    name: Tunnel frequently disconnects or reconnects
+    symptoms:
+      - "tunnel offline/online flapping"
+      - "repeated reconnects in logs"
+      - "connection reset"
+      - "tunnel unstable"
+      - "inconsistent connectivity"
+    trigger_conditions:
+      - log_pattern: "reconnect|offline.*online|connection reset"
+    steps:
+      - id: step-1
+        description: Check for network connectivity issues
+        type: check
+        command: "docker exec {container_name} ping -c 3 1.1.1.1 | grep -E 'loss|transmitted'"
+        expected_output: "0% packet loss"
+        on_fail: step-2
+      - id: step-2
+        description: Display network connectivity status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check container resource usage (CPU, memory)
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-4
+        description: Review cloudflared logs for connection patterns
+        type: check
+        command: "docker logs {container_name} | tail -20 | grep -E 'Connected|Reconnecting|disconnected'"
+        expected_output: ""
+      - id: step-5
+        description: Display identified disconnect patterns
+        type: inform
+        command: ""
+      - id: step-6
+        description: Increase tunnel connection resilience by restarting container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor for stability over next 5 minutes
+        type: check
+        command: "sleep 60 && docker logs {container_name} | tail -10"
+    resolution: |
+      Tunnel reconnects can be caused by network instability, resource exhaustion, DNS issues, or firewall rules dropping idle connections. Ensure the container has adequate resources and network connectivity. Cloudflared includes automatic reconnection logic, but frequent disconnects may indicate underlying network issues (ISP, firewall, DNS). Check your network logs and ISP connectivity for any patterns. If issues persist, adjust cloudflared's connection parameters or contact Cloudflare support with tunnel logs.
+
+default_config:
+  compose_template: |
+    services:
+      cloudflared:
+        image: cloudflare/cloudflared:latest
+        container_name: cloudflared
+        restart: unless-stopped
+        network_mode: bridge
+        environment:
+          TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+        ports:
+          - "8000:8000/tcp"
+        command: tunnel run
+  required_vars:
+    - name: TUNNEL_TOKEN
+      description: Cloudflare Tunnel authentication token (generated from dashboard)
+      default: ""
+  known_mounts: []
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Cloudflare Tunnel (cloudflared) provides secure ingress to your applications without exposing ports directly. Two configuration methods are supported:
+
+  **Modern method (recommended):** Use TUNNEL_TOKEN environment variable. Generate the token from Cloudflare dashboard → Tunnels → Create tunnel. Token contains all authentication; no additional files needed.
+
+  **Legacy method (still supported):** Mount credentials.json and config.yml. Credentials file must have correct ownership; config.yml defines ingress routes.
+
+  Tunnel status: The tunnel must be listed as "connected" in the Cloudflare dashboard for traffic to flow. Online status in container logs confirms connection to Cloudflare edge.
+
+  Ingress routing: Every hostname exposed through the tunnel needs a corresponding ingress rule (config.yml for legacy, or dashboard routes for modern). Without correct routing, requests receive 502/504 errors.
+
+  Common issues:
+  - Token invalid or expired: Regenerate in dashboard and restart container.
+  - Tunnel online but no traffic: Check ingress routes in dashboard or config.yml; verify backend is reachable from container.
+  - Frequent disconnects: Check network stability, container resources, and firewall rules blocking persistent connections.
+  - Legacy credentials issues: Ensure credentials.json has correct owner/permissions; config.yml syntax must be valid YAML.

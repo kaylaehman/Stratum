@@ -1,0 +1,97 @@
+id: notifuse
+name: Notifuse
+version: "1.0"
+container_match:
+  image_patterns:
+    - "notifuse/notifuse"
+  port_hints: [8080]
+category: productivity
+description: Self-hosted multi-channel notification platform (email, push, SMS)
+docs_url: https://docs.notifuse.com/
+
+common_issues:
+  - id: db-connection-failed
+    name: Cannot connect to database on startup
+    symptoms:
+      - "connection refused"
+      - "FATAL: database does not exist"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Verify the DB container is up
+        type: check
+        command: "docker inspect {db_container} --format='{{.State.Status}}'"
+        expected_output: "running"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about service ordering and credentials
+        type: inform
+        command: ""
+    resolution: |
+      Notifuse requires a database (Postgres recommended). Verify the DB
+      container is running, both containers share a Docker network, and
+      DATABASE_URL points to the DB container by name.
+
+  - id: notification-delivery-failed
+    name: Notifications enqueue but never deliver
+    symptoms:
+      - "Provider connection refused"
+      - "SMTP authentication failed"
+      - "Push gateway returned 401"
+    trigger_conditions:
+      - log_pattern: "provider.*failed"
+    steps:
+      - id: step-1
+        description: Surface recent provider errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'provider|smtp|push' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Inform about provider credential rotation
+        type: inform
+        command: ""
+    resolution: |
+      Provider failures are usually expired credentials or rate-limiting
+      from the upstream (SMTP relay, push gateway, SMS API). Re-verify the
+      credentials in the provider configuration and check the provider's
+      own status page for outages.
+
+default_config:
+  compose_template: |
+    services:
+      notifuse:
+        image: notifuse/notifuse:latest
+        container_name: notifuse
+        restart: unless-stopped
+        environment:
+          DATABASE_URL: ${DATABASE_URL}
+          APP_SECRET: ${APP_SECRET}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/app/config
+        ports:
+          - "8080:8080"
+  required_vars:
+    - name: DATABASE_URL
+      description: Full database connection string (e.g. postgres://user:pass@db:5432/notifuse)
+      default: ""
+    - name: APP_SECRET
+      description: Random secret for session signing
+      default: ""
+    - name: CONFIG_PATH
+      description: Host path for /app/config
+      default: "./config"
+  known_mounts:
+    - container_path: /app/config
+      purpose: Notifuse settings and provider configuration
+      recommended_permissions: "750"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Image and port hints were not exhaustively verified against an official
+  Docker Hub registry entry for `notifuse/notifuse` — if the canonical
+  image name or port differs (verify on docs.notifuse.com), update this
+  file before deploying.

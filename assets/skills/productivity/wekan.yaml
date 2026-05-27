@@ -1,0 +1,304 @@
+id: wekan
+name: Wekan Kanban Board
+version: "1.0"
+container_match:
+  image_patterns:
+    - "wekan/wekan"
+    - "wekan/wekan-meteor"
+  port_hints: [8080]
+category: productivity
+description: Open-source Trello-like Kanban board with team collaboration and card tracking
+docs_url: https://hub.docker.com/r/wekan/wekan
+
+common_issues:
+  - id: mongodb-connection-failed
+    name: MongoDB connection failed or not initialized
+    symptoms:
+      - "Connection refused"
+      - "ECONNREFUSED"
+      - "Cannot connect to MongoDB"
+      - "Database not initialized"
+      - "Blank page or error on startup"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "mongodb.*error"
+      - log_pattern: "ECONNREFUSED"
+    steps:
+      - id: step-1
+        description: Verify MongoDB container is running and healthy
+        type: check
+        command: "docker ps | grep -i mongo"
+        expected_output: "mongo"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check MongoDB logs for startup errors
+        type: check
+        command: "docker logs wekan-db 2>&1 | tail -20"
+        expected_output: "waiting for connections"
+        on_fail: step-4
+      - id: step-4
+        description: Verify MongoDB data directory is accessible
+        type: check
+        command: "ls -la {db_path} | head -10"
+        expected_output: ""
+      - id: step-5
+        description: Restart Wekan and MongoDB to reset connection
+        type: fix
+        command: "docker restart wekan-db && sleep 5 && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check if connection was established
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'mongodb\\|connected\\|listening' | tail -5"
+    resolution: |
+      Wekan requires MongoDB to store boards, cards, and user data. MongoDB has been restarted to initialize. Wekan may take 30-60 seconds to fully start. Verify the MongoDB connection string (MONGO_URL environment variable) is correct and that the database directory has sufficient permissions.
+
+  - id: root-url-mismatch
+    name: ROOT_URL mismatch causing web client issues or frame embeds not working
+    symptoms:
+      - "Cannot load boards or cards"
+      - "Redirect loops on pages"
+      - "Scripts and styles not loading"
+      - "Frame embed not displaying"
+      - "WebSocket connection failures"
+    trigger_conditions:
+      - log_pattern: "redirect"
+      - log_pattern: "ROOT_URL"
+      - log_pattern: "Cannot read property"
+    steps:
+      - id: step-1
+        description: Check the current ROOT_URL environment variable
+        type: check
+        command: "docker exec {container_name} printenv | grep ROOT_URL"
+        expected_output: "ROOT_URL="
+        on_fail: step-2
+      - id: step-2
+        description: Display Wekan configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Confirm the URL you use to access Wekan
+        type: confirm
+        description: "Please confirm: Are you accessing Wekan via http://localhost:8080 or another URL (reverse proxy, domain name, etc.)?"
+      - id: step-4
+        description: Update ROOT_URL to match access URL
+        type: fix
+        command: "docker exec {container_name} sed -i 's|ROOT_URL=.*|ROOT_URL={access_url}|' /root/.bashrc && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait for restart and verify boards are loading
+        type: check
+        command: "sleep 10 && curl -s {access_url} | grep -q 'Wekan' && echo 'Boards loading'"
+    resolution: |
+      ROOT_URL must match the exact URL used to access Wekan, including protocol and port. Mismatches cause the web interface to fail loading boards and cards. The configuration has been updated and Wekan restarted. Refresh your browser and clear cache if pages still don't load.
+
+  - id: permission-denied-wekan-data
+    name: Permission denied on Wekan data or uploads directory
+    symptoms:
+      - "permission denied"
+      - "Cannot upload attachments"
+      - "EACCES"
+      - "Failed to save card attachment"
+      - "Upload directory not writable"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+      - log_pattern: "upload.*error"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host wekan data path
+        type: check
+        command: "stat {wekan_data_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check ownership of uploads directory
+        type: check
+        command: "ls -la {wekan_data_path}/uploads 2>/dev/null || echo 'uploads directory does not exist'"
+        expected_output: ""
+      - id: step-4
+        description: Recursively chown the wekan data directory to the running user
+        type: fix
+        command: "chown -R 999:999 {wekan_data_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Set appropriate permissions on data directory
+        type: fix
+        command: "chmod -R 755 {wekan_data_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {wekan_data_path} | grep Uid"
+        expected_output: "Uid: 999"
+    resolution: |
+      Wekan requires write permissions to store attachments and data. The ownership has been changed to match the container's user (UID 999) and permissions set to 755. Wekan should now be able to save card attachments and data.
+
+  - id: high-memory-usage
+    name: High memory consumption or out of memory errors
+    symptoms:
+      - "Out of memory"
+      - "OOMKilled"
+      - "Memory usage growing continuously"
+      - "Container restarts frequently"
+      - "Sluggish performance or timeouts"
+    trigger_conditions:
+      - log_pattern: "out of memory"
+      - log_pattern: "OOMKilled"
+      - log_pattern: "memory.*limit"
+    steps:
+      - id: step-1
+        description: Check current memory usage of Wekan container
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Check memory limits set on the container
+        type: check
+        command: "docker inspect {container_name} | grep -i memory"
+        expected_output: ""
+      - id: step-3
+        description: Check MongoDB memory usage
+        type: check
+        command: "docker stats wekan-db --no-stream | grep wekan-db"
+        expected_output: ""
+      - id: step-4
+        description: Display memory recommendations
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check for stuck connections or memory leaks in logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'memory\\|leak\\|garbage' | tail -10"
+        expected_output: ""
+      - id: step-6
+        description: Restart Wekan and MongoDB to free memory
+        type: fix
+        command: "docker restart wekan-db && sleep 5 && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor memory usage after restart
+        type: check
+        command: "sleep 20 && docker stats {container_name} --no-stream"
+    resolution: |
+      Wekan and MongoDB have been restarted to free up memory. Consider increasing the memory limit in your docker-compose.yml or upgrading the host. For large deployments with many boards and cards, ensure MongoDB has sufficient memory allocated (at least 512MB recommended).
+
+default_config:
+  compose_template: |
+    services:
+      wekan:
+        image: wekan/wekan:latest
+        container_name: wekan
+        restart: unless-stopped
+        environment:
+          MONGO_URL: ${MONGO_URL:-mongodb://wekan-db:27017/wekan}
+          ROOT_URL: ${ROOT_URL:-http://localhost:8080}
+          PORT: ${PORT:-8080}
+          MAIL_FROM: ${MAIL_FROM:-noreply@wekan.local}
+          MAIL_URL: ${MAIL_URL:-}
+        volumes:
+          - ${DATA_PATH:-./wekan-data}:/home/wekan/app/uploads
+        ports:
+          - "8080:8080/tcp"
+        depends_on:
+          wekan-db:
+            condition: service_healthy
+        networks:
+          - wekan-net
+
+      wekan-db:
+        image: mongo:5
+        container_name: wekan-db
+        restart: unless-stopped
+        command:
+          - --storageEngine
+          - wiredTiger
+          - --logpath
+          - /dev/null
+        volumes:
+          - ${DB_PATH:-./wekan-db}:/data/db
+          - ${DUMP_PATH:-./dump}:/dump
+        networks:
+          - wekan-net
+        healthcheck:
+          test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+
+    networks:
+      wekan-net:
+        driver: bridge
+  required_vars:
+    - name: MONGO_URL
+      description: MongoDB connection string (use service name if in same compose)
+      default: "mongodb://wekan-db:27017/wekan"
+    - name: ROOT_URL
+      description: Full URL where Wekan is accessible (e.g., http://localhost:8080 or https://wekan.example.com)
+      default: "http://localhost:8080"
+    - name: PORT
+      description: Internal port Wekan listens on
+      default: "8080"
+    - name: MAIL_FROM
+      description: Email address for notifications (leave blank if no mail configured)
+      default: "noreply@wekan.local"
+    - name: MAIL_URL
+      description: SMTP connection string for email notifications (optional)
+      default: ""
+    - name: DATA_PATH
+      description: Host path for /home/wekan/app/uploads (attachments and user data)
+      default: "./wekan-data"
+    - name: DB_PATH
+      description: Host path for MongoDB data directory
+      default: "./wekan-db"
+    - name: DUMP_PATH
+      description: Host path for MongoDB backups
+      default: "./dump"
+  known_mounts:
+    - container_path: /home/wekan/app/uploads
+      purpose: Card attachments and Wekan application data
+      recommended_permissions: "755"
+      owner: "999:999"
+    - container_path: /data/db
+      purpose: MongoDB database files
+      recommended_permissions: "755"
+      owner: "mongodb:mongodb"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Wekan is an open-source Trello-like Kanban board built with Meteor. It's designed for team collaboration on cards and boards.
+
+  Database: Requires MongoDB (included in the compose template). MongoDB is initialized automatically and stores all board, card, and user data.
+
+  ROOT_URL: Must match the exact URL where Wekan is accessed. Mismatches cause the web interface to fail loading.
+
+  User management: Create the first admin user on initial access. All subsequent users can be added via the UI.
+
+  Email notifications: Configure MAIL_URL with an SMTP server to enable email notifications for card mentions and due dates.
+
+  Memory: Wekan and MongoDB are both memory-intensive. Allocate at least 512MB to MongoDB and 256MB to Wekan. Monitor memory usage for large deployments.
+
+  Attachments: Card attachments are stored in the /home/wekan/app/uploads directory on the host. Ensure sufficient disk space.
+
+  Backups: Back up the MongoDB data directory regularly. Use `mongodump` to create portable backups.
+
+  Common gotchas:
+  - MongoDB not initializing: Ensure the db_path directory has write permissions.
+  - Permission denied on uploads: Check uploads directory is owned by UID 999.
+  - ROOT_URL mismatch: Verify the URL matches exactly what you use to access Wekan.
+  - Memory issues: Monitor memory and increase limits if using large boards.

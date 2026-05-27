@@ -1,0 +1,276 @@
+id: kanboard
+name: Kanboard Project Management
+version: "1.0"
+container_match:
+  image_patterns:
+    - "kanboard/kanboard"
+  port_hints: [80]
+category: productivity
+description: Lightweight open-source Kanban board for project and task management
+docs_url: https://hub.docker.com/r/kanboard/kanboard
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /var/www/html/data mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to data directory"
+      - "Failed to create database file"
+      - "Unable to save projects or tasks"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "data.*not writable"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host data path
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify Kanboard container is running as expected user
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: ""
+      - id: step-4
+        description: Recursively chown the data directory to container user (www-data)
+        type: fix
+        command: "chown -R 33:33 {data_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Set appropriate permissions on data directory
+        type: fix
+        command: "chmod -R 755 {data_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify ownership and permissions were changed
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid: 33"
+    resolution: |
+      Kanboard runs as www-data user (UID 33) and requires write permissions to the /var/www/html/data directory. The ownership has been changed to www-data:www-data and permissions set to 755. Kanboard should now be able to save projects, tasks, and database files.
+
+  - id: sqlite-database-locked
+    name: SQLite database locked or corrupted
+    symptoms:
+      - "database is locked"
+      - "disk I/O error"
+      - "Cannot open database"
+      - "500 error on page load"
+      - "Blank or error page consistently"
+    trigger_conditions:
+      - log_pattern: "database is locked"
+      - log_pattern: "I/O error"
+      - log_pattern: "SQL error"
+    steps:
+      - id: step-1
+        description: Check if the database file exists
+        type: check
+        command: "ls -la {data_path}/db.sqlite"
+        expected_output: "db.sqlite"
+        on_fail: step-2
+      - id: step-2
+        description: Display data directory contents
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check file size and modification time of database
+        type: check
+        command: "stat {data_path}/db.sqlite"
+        expected_output: ""
+      - id: step-4
+        description: Check for stale lock files
+        type: check
+        command: "ls -la {data_path}/ | grep -E 'sqlite|lock'"
+        expected_output: ""
+      - id: step-5
+        description: Restart Kanboard to release database locks
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait for restart and verify database connectivity
+        type: check
+        command: "sleep 10 && curl -s http://localhost/ | grep -q 'Kanboard' && echo 'Database accessible'"
+    resolution: |
+      SQLite database locks are typically caused by multiple processes accessing the database simultaneously or an unclean shutdown. The container has been restarted, which releases any locks. If the error persists, the database may be corrupted. Back up {data_path}/db.sqlite and consider re-initializing Kanboard from scratch.
+
+  - id: plugins-not-loading
+    name: Plugins not loading or disabled
+    symptoms:
+      - "Plugins not appearing in settings"
+      - "Plugin features not working"
+      - "Plugins disabled automatically"
+      - "Cannot enable installed plugins"
+    trigger_conditions:
+      - log_pattern: "plugin.*disable"
+      - log_pattern: "plugin.*error"
+    steps:
+      - id: step-1
+        description: Check if plugins directory exists and has correct permissions
+        type: check
+        command: "ls -la {data_path}/plugins | head -20"
+        expected_output: "plugins"
+        on_fail: step-2
+      - id: step-2
+        description: Create plugins directory if missing
+        type: fix
+        command: "mkdir -p {data_path}/plugins && chown -R 33:33 {data_path}/plugins && chmod 755 {data_path}/plugins"
+        requires_approval: true
+        on_success: step-3
+      - id: step-3
+        description: Check Kanboard logs for plugin errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i plugin | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify plugin file permissions are correct
+        type: check
+        command: "find {data_path}/plugins -type f -exec stat {{}} \\; | grep Uid"
+        expected_output: ""
+      - id: step-5
+        description: Restart Kanboard to reload plugins
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check plugins are now recognized
+        type: check
+        command: "docker logs {container_name} | grep -i plugin | tail -5"
+    resolution: |
+      Kanboard plugins are loaded from the /var/www/html/data/plugins directory. The directory permissions have been corrected and Kanboard restarted. Plugins should now be visible in Settings > Plugins. Install new plugins by extracting their archives into the plugins directory and restarting Kanboard.
+
+  - id: ssl-certificate-errors
+    name: SSL certificate errors or HTTPS not working
+    symptoms:
+      - "SSL: CERTIFICATE_VERIFY_FAILED"
+      - "self signed certificate"
+      - "Cannot access over HTTPS"
+      - "Mixed content warnings (HTTP/HTTPS)"
+      - "Insecure connection warning"
+    trigger_conditions:
+      - log_pattern: "SSL"
+      - log_pattern: "certificate"
+      - log_pattern: "HTTPS"
+    steps:
+      - id: step-1
+        description: Check if SSL volume is mounted
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 ssl"
+        expected_output: "ssl"
+        on_fail: step-2
+      - id: step-2
+        description: Display volume mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify SSL certificate files exist on host
+        type: check
+        command: "ls -la {ssl_path}/*.crt {ssl_path}/*.key 2>/dev/null"
+        expected_output: ".crt"
+        on_fail: step-4
+      - id: step-4
+        description: Display SSL directory contents
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify certificate matches key
+        type: check
+        command: "openssl x509 -noout -modulus -in {ssl_path}/*.crt | md5sum && openssl rsa -noout -modulus -in {ssl_path}/*.key | md5sum"
+        expected_output: ""
+      - id: step-6
+        description: Restart Kanboard to reload SSL certificates
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify HTTPS is responding
+        type: check
+        command: "curl -sk https://localhost/ | grep -q 'Kanboard' && echo 'HTTPS working'"
+    resolution: |
+      Kanboard supports HTTPS via the ssl volume mount. Ensure your SSL certificate files (.crt) and key files (.key) are in the correct directory and match. The container has been restarted to reload certificates. For self-signed certificates, browsers will show a security warning — this is normal for non-public deployments.
+
+default_config:
+  compose_template: |
+    services:
+      kanboard:
+        image: kanboard/kanboard:latest
+        container_name: kanboard
+        restart: unless-stopped
+        environment:
+          DATABASE_URL: ${DATABASE_URL:-sqlite:///var/www/html/data/db.sqlite}
+          HIDE_LOGIN_FORM: ${HIDE_LOGIN_FORM:-false}
+          PLUGINS: ${PLUGINS:-}
+        volumes:
+          - ${DATA_PATH:-./data}:/var/www/html/data
+          - ${PLUGINS_PATH:-./plugins}:/var/www/html/plugins
+          - ${SSL_PATH:-./ssl}:/etc/nginx/ssl
+        ports:
+          - "80:80/tcp"
+          - "443:443/tcp"
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for /var/www/html/data (database and projects)
+      default: "./data"
+    - name: PLUGINS_PATH
+      description: Host path for /var/www/html/plugins (optional custom plugins)
+      default: "./plugins"
+    - name: SSL_PATH
+      description: Host path for /etc/nginx/ssl (SSL certificates and keys)
+      default: "./ssl"
+    - name: DATABASE_URL
+      description: Database connection string (default SQLite, can use PostgreSQL/MySQL)
+      default: "sqlite:///var/www/html/data/db.sqlite"
+    - name: HIDE_LOGIN_FORM
+      description: Hide login form if using authentication plugins
+      default: "false"
+    - name: PLUGINS
+      description: Comma-separated list of plugins to enable
+      default: ""
+  known_mounts:
+    - container_path: /var/www/html/data
+      purpose: SQLite database, projects, and task data
+      recommended_permissions: "755"
+      owner: "www-data:www-data"
+    - container_path: /var/www/html/plugins
+      purpose: Kanboard plugins for extending functionality
+      recommended_permissions: "755"
+      owner: "www-data:www-data"
+    - container_path: /etc/nginx/ssl
+      purpose: SSL certificates and private keys for HTTPS
+      recommended_permissions: "600"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Kanboard is a lightweight, self-hosted Kanban board designed for simplicity and minimal resource usage. It uses SQLite by default for easy deployment.
+
+  Database: By default, Kanboard uses SQLite stored in {data_path}/db.sqlite. For multi-user or high-traffic deployments, configure DATABASE_URL to use PostgreSQL or MySQL.
+
+  User management: Create the first admin user on initial access. All subsequent users can be added via the UI or configured with LDAP/OAuth plugins.
+
+  Plugins: Kanboard supports plugins for extending functionality (e.g., LDAP, OAuth, custom boards). Plugins are stored in the /var/www/html/plugins directory. Install by extracting plugin archives there.
+
+  SSL: To enable HTTPS, place certificate (.crt) and key (.key) files in the {ssl_path} directory. Kanboard will automatically detect and use them.
+
+  Permissions: Kanboard runs as www-data user (UID 33). The data directory must be owned by www-data for write access.
+
+  Backups: Back up {data_path}/db.sqlite regularly. For other databases, use standard database backup tools.
+
+  Common gotchas:
+  - Permission denied on data: Verify data directory is owned by www-data (UID 33).
+  - Database locked: Restart Kanboard to release locks from unclean shutdown.
+  - Plugins not loading: Check plugins directory exists and has correct permissions.
+  - HTTPS not working: Verify SSL certificate and key files are in place and match.

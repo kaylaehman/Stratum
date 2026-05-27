@@ -1,0 +1,264 @@
+id: prometheus
+name: Prometheus Metrics Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "prom/prometheus"
+  port_hints: [9090]
+category: monitoring
+description: Open-source monitoring and alerting system for collecting and storing time-series metrics
+docs_url: https://hub.docker.com/r/prom/prometheus
+
+common_issues:
+  - id: config-not-reloading
+    name: Configuration changes not taking effect
+    symptoms:
+      - "Prometheus not scraping new targets"
+      - "Config file modified but targets unchanged"
+      - "New alerting rules not evaluating"
+      - "Scrape interval change not applied"
+    trigger_conditions:
+      - log_pattern: "config.*reload"
+      - log_pattern: "parse error"
+    steps:
+      - id: step-1
+        description: Check Prometheus configuration file syntax
+        type: check
+        command: "docker exec {container_name} promtool check config /etc/prometheus/prometheus.yml"
+        expected_output: "SUCCESS"
+        on_fail: step-2
+      - id: step-2
+        description: Display configuration validation errors
+        type: inform
+        command: ""
+      - id: step-3
+        description: Send HTTP reload signal to Prometheus
+        type: fix
+        command: "docker exec {container_name} curl -X POST http://localhost:9090/-/reload"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify configuration was reloaded successfully
+        type: check
+        command: "docker logs {container_name} | tail -5 | grep -i 'reload\\|config.*loaded'"
+      - id: step-5
+        description: Check Prometheus targets status
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:9090/api/v1/targets | grep -i 'state'"
+    resolution: |
+      Prometheus configuration has been reloaded. New scrape targets, recording rules, and alert rules should now be active. If targets remain in 'down' state, verify target addresses are reachable and listening on the expected ports. Check logs for connection errors.
+
+  - id: disk-space-full
+    name: Storage disk space running out or full
+    symptoms:
+      - "Prometheus stops accepting new metrics"
+      - "Error: no space left on device"
+      - "Write errors in logs"
+      - "WAL (write-ahead log) errors"
+    trigger_conditions:
+      - log_pattern: "no space left"
+      - log_pattern: "write error"
+    steps:
+      - id: step-1
+        description: Check available disk space on Prometheus data directory
+        type: check
+        command: "df -h {prometheus_path} | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Display current disk usage details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check current TSDB (time-series database) block count
+        type: check
+        command: "docker exec {container_name} ls -la /prometheus/wal | wc -l"
+        expected_output: ""
+      - id: step-4
+        description: Inform user about data retention options
+        type: inform
+        command: ""
+      - id: step-5
+        description: Reduce retention period to free disk space
+        type: fix
+        command: "docker stop {container_name} && sleep 5"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Remove oldest metric blocks to reclaim space
+        type: fix
+        command: "docker exec {container_name} find /prometheus -type d -name '0*' -mtime +7 -exec rm -rf {{}} + 2>/dev/null || true"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Prometheus
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify Prometheus is running and accepting metrics
+        type: check
+        command: "docker logs {container_name} | tail -5 | grep -i 'tsdb\\|ready'"
+    resolution: |
+      Prometheus storage has been reclaimed by removing old metric blocks. To prevent this issue in the future, adjust retention settings. Increase storage capacity, reduce retention period, or reduce scrape frequency if metrics volume is too high. Monitor /prometheus directory size regularly.
+
+  - id: memory-usage-high
+    name: Prometheus consuming excessive memory
+    symptoms:
+      - "Container memory usage exceeds 90%"
+      - "OOM (out of memory) killer evicting process"
+      - "Prometheus stops and restarts repeatedly"
+      - "System load high due to memory pressure"
+    trigger_conditions:
+      - log_pattern: "OOM\\|out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage of Prometheus container
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Display memory limit and current usage
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check number of active time series in Prometheus
+        type: check
+        command: "docker exec {container_name} curl -s 'http://localhost:9090/api/v1/query?query=count({{__name__=~\".*\"}})' | grep -o '\"value\":\\[[0-9.]*' | head -1"
+        expected_output: ""
+      - id: step-4
+        description: Reduce scrape frequency to lower cardinality
+        type: inform
+        command: ""
+      - id: step-5
+        description: Increase memory limit in Docker compose
+        type: fix
+        command: "echo 'Increase mem_limit in docker-compose.yml for {container_name}'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Prometheus with new memory limit
+        type: fix
+        command: "docker-compose down && docker-compose up -d {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify Prometheus is stable after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream | tail -1"
+    resolution: |
+      Prometheus memory usage has been stabilized. High memory is typically due to high cardinality metrics (too many unique label combinations). Reduce the number of metrics scraped, increase scrape intervals, or drop high-cardinality labels via metric relabeling in prometheus.yml. Consider running multiple Prometheus instances with remote_write to distribute load.
+
+  - id: scrape-target-down
+    name: Scrape targets showing as down or failed
+    symptoms:
+      - "Target state shows 'Down'"
+      - "Connection timeout to target"
+      - "Endpoint returns 5xx errors"
+      - "No metrics received from target"
+    trigger_conditions:
+      - log_pattern: "target.*down"
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Check target endpoint availability
+        type: check
+        command: "docker exec {container_name} curl -v http://{target_host}:{target_port}{target_path} 2>&1 | head -20"
+        expected_output: "200"
+        on_fail: step-2
+      - id: step-2
+        description: Display target connection attempt details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if target host is reachable
+        type: check
+        command: "docker exec {container_name} ping -c 1 {target_host}"
+        expected_output: "bytes from"
+        on_fail: step-4
+      - id: step-4
+        description: Check Prometheus DNS resolution
+        type: check
+        command: "docker exec {container_name} nslookup {target_host}"
+        expected_output: "Address:"
+      - id: step-5
+        description: Verify target metrics endpoint responds correctly
+        type: check
+        command: "docker exec {container_name} curl -s http://{target_host}:{target_port}{target_path} | head -5"
+      - id: step-6
+        description: Check for network or firewall issues
+        type: inform
+        command: ""
+    resolution: |
+      Target reachability has been verified. If targets remain down, check network connectivity, firewall rules, and ensure the target application is running and exposing metrics on the correct port/path. Verify the target_path in prometheus.yml is correct (e.g., /metrics for standard Prometheus format). Restart the target application if it's unresponsive.
+
+default_config:
+  compose_template: |
+    services:
+      prometheus:
+        image: prom/prometheus:latest
+        container_name: prometheus
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${PROMETHEUS_CONFIG:-./prometheus.yml}:/etc/prometheus/prometheus.yml:ro
+          - ${PROMETHEUS_DATA:-./prometheus_data}:/prometheus
+        ports:
+          - "9090:9090/tcp"
+        command:
+          - "--config.file=/etc/prometheus/prometheus.yml"
+          - "--storage.tsdb.path=/prometheus"
+          - "--storage.tsdb.retention.time=${RETENTION_TIME:-15d}"
+          - "--storage.tsdb.retention.size=${RETENTION_SIZE:-0}"
+          - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+          - "--web.console.templates=/usr/share/prometheus/consoles"
+          - "--web.enable-lifecycle"
+        networks:
+          - monitoring
+  required_vars:
+    - name: PROMETHEUS_CONFIG
+      description: Host path to prometheus.yml configuration file
+      default: "./prometheus.yml"
+    - name: PROMETHEUS_DATA
+      description: Host path for Prometheus TSDB storage
+      default: "./prometheus_data"
+    - name: RETENTION_TIME
+      description: Metrics retention period (e.g., 15d, 30d)
+      default: "15d"
+    - name: RETENTION_SIZE
+      description: Maximum storage size before deletion (0 = unlimited)
+      default: "0"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+
+known_mounts:
+  - container_path: /etc/prometheus/prometheus.yml
+    purpose: Prometheus configuration (scrape targets, recording rules, alerting)
+    recommended_permissions: "644"
+    owner: "root:root"
+  - container_path: /prometheus
+    purpose: Time-series database storage (blocks, WAL)
+    recommended_permissions: "755"
+    owner: "nobody:nogroup"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Prometheus configuration: prometheus.yml defines scrape targets, recording rules, and alert rules. Mount this file as read-only from the host. Use --web.enable-lifecycle in the command to allow configuration reload via HTTP POST /-/reload.
+
+  Retention: Control how long metrics are kept using --storage.tsdb.retention.time (default 15d) and --storage.tsdb.retention.size. Balance retention against storage capacity.
+
+  TSDB storage: Prometheus stores metrics in /prometheus in time-series blocks. The WAL (write-ahead log) is in /prometheus/wal. Do not manually delete files from this directory unless you know what you're doing.
+
+  Recording rules: Pre-compute expensive queries and store results as new metrics. Define in prometheus.yml under rule_files.
+
+  Alert rules: Define alerting rules in separate files (e.g., alerts.yml) and reference them in prometheus.yml. Prometheus evaluates rules but does not send alerts; use AlertManager (separate container) to handle alert routing.
+
+  High cardinality: Avoid labels with unbounded values (e.g., request IDs, timestamps). Use label relabeling to drop or limit high-cardinality labels to reduce memory usage.
+
+  Scrape configuration: Each job in scrape_configs defines targets to monitor. Use service discovery (kubernetes_sd_configs, consul_sd_configs) or static_configs for target lists. Test scrape intervals (default 15s) to balance freshness vs. overhead.
+
+  Performance: Prometheus is single-threaded by design. CPU usage is normally low unless running many recording rule evaluations or serving high query volume. Distribute load across multiple Prometheus instances with remote_write.

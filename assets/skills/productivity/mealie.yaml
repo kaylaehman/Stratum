@@ -1,0 +1,304 @@
+id: mealie
+name: Mealie Recipe Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/mealie-recipes/mealie"
+  port_hints: [9000]
+category: productivity
+description: Self-hosted recipe manager and meal planner with grocery list generation
+docs_url: https://mealie.io/
+
+common_issues:
+  - id: postgres-connection-failed
+    name: PostgreSQL database connection failed
+    symptoms:
+      - "SQLSTATE connection error"
+      - "Cannot connect to database"
+      - "Connection refused"
+      - "Blank page or 500 error on startup"
+      - "No such host or network unreachable"
+    trigger_conditions:
+      - log_pattern: "SQLSTATE.*connection"
+      - log_pattern: "Connection refused"
+      - log_pattern: "FATAL.*database"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if PostgreSQL container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display PostgreSQL container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database connection variables in Mealie container
+        type: check
+        command: "docker inspect {container_name} | grep -E 'POSTGRES_|DB_'"
+        expected_output: "POSTGRES"
+        on_fail: step-4
+      - id: step-4
+        description: Test connectivity to PostgreSQL from Mealie container
+        type: check
+        command: "docker exec {container_name} psql -h {postgres_host} -U {postgres_user} -d {postgres_db} -c 'SELECT 1'"
+        expected_output: "1"
+        on_fail: step-5
+      - id: step-5
+        description: Check PostgreSQL logs for connection errors
+        type: check
+        command: "docker logs postgres | tail -20"
+      - id: step-6
+        description: Restart both PostgreSQL and Mealie containers
+        type: fix
+        command: "docker restart postgres {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify database connection after restart
+        type: check
+        command: "docker logs {container_name} | grep -i 'connected\\|database' | tail -5"
+    resolution: |
+      PostgreSQL connectivity was restored. Both containers were restarted to reinitialize the connection. Verify POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB match your PostgreSQL configuration. Ensure PostgreSQL is running and accessible on the same Docker network as Mealie.
+
+  - id: data-mount-permission
+    name: Permission denied on /app/data mount
+    symptoms:
+      - "Permission denied writing to data"
+      - "Cannot create directory in /app/data"
+      - "Failed to write recipe images"
+      - "Recipe import fails"
+      - "EACCES error"
+    trigger_conditions:
+      - log_pattern: "permission denied.*data"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host data path
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Mealie's running UID inside container
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: "uid="
+      - id: step-4
+        description: Recursively fix ownership of data directory to container UID
+        type: fix
+        command: "chown -R 911:911 {data_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Set correct directory permissions
+        type: fix
+        command: "chmod -R 755 {data_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Mealie to apply permissions
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify data directory is writable
+        type: check
+        command: "ls -la {data_path} | head -5"
+    resolution: |
+      Data directory ownership and permissions were corrected to match Mealie's requirements (UID 911). The container was restarted and should now be able to write recipes, images, and database files without permission errors.
+
+  - id: recipe-import-timeout
+    name: Recipe import or backup operations timeout
+    symptoms:
+      - "Import process hangs indefinitely"
+      - "Backup never completes"
+      - "Memory usage grows during import"
+      - "CPU spike during large import"
+      - "500 error after timeout during import"
+    trigger_conditions:
+      - log_pattern: "timeout"
+      - log_pattern: "import.*failed"
+    steps:
+      - id: step-1
+        description: Check current memory usage of Mealie container
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Check available disk space on data mount
+        type: check
+        command: "df {data_path}"
+        expected_output: "/"
+        on_fail: step-3
+      - id: step-3
+        description: Display disk space information
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check for stuck or slow database queries
+        type: check
+        command: "docker logs {container_name} | grep -i 'slow.*query\\|timeout' | tail -5"
+      - id: step-5
+        description: Increase container memory limit if needed
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Mealie to clear any stuck import process
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify Mealie is responsive after restart
+        type: check
+        command: "docker logs {container_name} | tail -10"
+    resolution: |
+      Mealie was restarted to clear any stuck import or backup process. Large recipe imports may require additional memory or disk space. Monitor resource usage during the next import. If imports consistently timeout, increase the container memory limit (via compose mem_limit or Docker settings) or reduce batch import size.
+
+  - id: web-interface-inaccessible
+    name: Web interface not loading or returns error
+    symptoms:
+      - "Blank page or infinite loading"
+      - "404 Not Found"
+      - "500 Internal Server Error"
+      - "Connection refused on port 9000"
+      - "Page loads but no styling or functions"
+    trigger_conditions:
+      - log_pattern: "500 Internal Server"
+      - log_pattern: "Fatal error"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if Mealie container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "mealie"
+        on_fail: step-2
+      - id: step-2
+        description: Display container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Mealie application logs for errors
+        type: check
+        command: "docker logs {container_name} | tail -30"
+        expected_output: ""
+      - id: step-4
+        description: Verify Mealie is listening on port 9000 inside container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 9000"
+        expected_output: "LISTEN"
+        on_fail: step-5
+      - id: step-5
+        description: Check if port 9000 is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '9000'"
+      - id: step-6
+        description: Restart Mealie container to clear any application state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for container to fully start and check logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'ready\\|listening\\|started' | tail -3"
+    resolution: |
+      Mealie container was restarted to clear the application state. The web interface should now be accessible at http://<host>:9000. If the error persists, check the container logs for application errors or verify that the database connection is working. Ensure the /app/data mount is properly writable and all environment variables are set correctly.
+
+default_config:
+  compose_template: |
+    services:
+      mealie:
+        image: ghcr.io/mealie-recipes/mealie:latest
+        container_name: mealie
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-mealie}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mealiepass}
+          POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+          POSTGRES_DB: ${POSTGRES_DB:-mealie}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./data}:/app/data
+        ports:
+          - "9000:9000"
+        depends_on:
+          - postgres
+
+      postgres:
+        image: postgres:16-alpine
+        container_name: postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-mealie}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mealiepass}
+          POSTGRES_DB: ${POSTGRES_DB:-mealie}
+        volumes:
+          - ${DB_PATH:-./database}:/var/lib/postgresql/data
+  required_vars:
+    - name: POSTGRES_USER
+      description: PostgreSQL username for Mealie
+      default: "mealie"
+    - name: POSTGRES_PASSWORD
+      description: PostgreSQL password for Mealie user
+      default: "mealiepass"
+    - name: POSTGRES_HOST
+      description: PostgreSQL host (use service name if in same network)
+      default: "postgres"
+    - name: POSTGRES_DB
+      description: PostgreSQL database name
+      default: "mealie"
+    - name: TZ
+      description: Timezone for the application
+      default: "UTC"
+    - name: DATA_PATH
+      description: Host path for /app/data (recipes, images, uploads)
+      default: "./data"
+    - name: DB_PATH
+      description: Host path for PostgreSQL data directory
+      default: "./database"
+  known_mounts:
+    - container_path: /app/data
+      purpose: Recipe data, images, and application cache
+      recommended_permissions: "755"
+      owner: "911:911"
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL data files
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Mealie is a self-hosted recipe manager and meal planner built with Python and Vue.js. It allows you to store, organize, and plan meals with automatic grocery list generation.
+
+  Database: Mealie recommends PostgreSQL for production use (SQLite supported but not recommended for multi-user or production deployments). The compose template includes a PostgreSQL service. Database is automatically initialized on first run if credentials are correct.
+
+  Data directory: Mealie stores recipes, imported images, and user uploads in /app/data. This directory must be writable by the Mealie process (UID 911). Always ensure proper ownership and permissions.
+
+  First run: On startup, Mealie initializes the database schema and creates default categories. This may take a few seconds.
+
+  Web interface: Accessible at http://<host>:9000. Create your account on first login; there are no default credentials.
+
+  Recipe import: Supports recipe import from URLs, JSON, and other formats. Large imports (100+ recipes) may require additional memory.
+
+  Backups: Mealie supports full database and data exports. Regularly backup both the /app/data directory and the PostgreSQL database.
+
+  Database backup: The recommended approach is `pg_dump` on the PostgreSQL container:
+    docker exec postgres pg_dump -U mealie mealie > mealie-backup.sql
+
+  Gotchas:
+  - Permission denied on /app/data: Most common issue. Ensure UID 911 owns the directory.
+  - Database connection: POSTGRES_HOST must match the service name if using Docker Compose networking.
+  - Memory: Large recipe imports can consume significant memory. Monitor during import and increase if needed.
+  - Port conflict: Ensure port 9000 is not already in use.

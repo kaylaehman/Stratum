@@ -1,0 +1,256 @@
+id: scrutiny
+name: Scrutiny S.M.A.R.T. Monitoring
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/analogj/scrutiny"
+  port_hints: [8080]
+category: monitoring
+description: S.M.A.R.T. disk health monitoring and analysis tool for proactive drive failure detection
+docs_url: https://github.com/AnalogJ/scrutiny
+
+common_issues:
+  - id: no-drive-detected
+    name: Scrutiny unable to detect or scan disk drives
+    symptoms:
+      - "No drives showing in Scrutiny dashboard"
+      - "Drive list is empty"
+      - "Cannot scan S.M.A.R.T. data"
+      - "Permission denied when accessing drives"
+    trigger_conditions:
+      - log_pattern: "no.*drive"
+      - log_pattern: "permission denied.*dev"
+      - log_pattern: "cannot.*access"
+    steps:
+      - id: step-1
+        description: Check if /dev and /sys mounts are available in container
+        type: check
+        command: "docker inspect {container_name} | grep -E '/dev|/sys' | head -5"
+        expected_output: "/dev"
+        on_fail: step-2
+      - id: step-2
+        description: Inform user that /dev and /sys mounts are required for disk detection
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify container has CAP_SYS_RAWIO capability for S.M.A.R.T. access
+        type: check
+        command: "docker inspect {container_name} | grep -i 'cap_sys_rawio'"
+        expected_output: "SYS_RAWIO"
+        on_fail: step-4
+      - id: step-4
+        description: Display current container capabilities
+        type: inform
+        command: ""
+      - id: step-5
+        description: List available block devices on host
+        type: check
+        command: "lsblk -d | tail -n +2 | awk '{print $1}'"
+        expected_output: ""
+      - id: step-6
+        description: Mount required device paths and add SYS_RAWIO capability
+        type: fix
+        command: "docker run -d --name scrutiny-new -p 8080:8080 -v /dev:/dev:ro -v /sys:/sys:ro -v scrutiny_data:/opt/scrutiny/config -v scrutiny_db:/opt/scrutiny/db --cap-add SYS_RAWIO ghcr.io/analogj/scrutiny:latest"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify drives are now detected and scanning
+        type: check
+        command: "sleep 5 && docker logs scrutiny-new | grep -i 'scan\\|device\\|found' | tail -5"
+    resolution: |
+      Scrutiny requires access to /dev and /sys to enumerate and monitor disk drives. The container has been configured with the necessary device mounts and SYS_RAWIO capability for S.M.A.R.T. data access. Drive detection and scanning should now be working. Initial scan may take several minutes depending on the number of drives.
+
+  - id: smart-scan-failures
+    name: S.M.A.R.T. scans fail or return incomplete data
+    symptoms:
+      - "Scan status shows failed or incomplete"
+      - "S.M.A.R.T. data returns as unknown or unavailable"
+      - "Error messages during scan operations"
+      - "Some drives scan successfully, others fail"
+    trigger_conditions:
+      - log_pattern: "scan.*failed"
+      - log_pattern: "smartctl.*error"
+      - log_pattern: "smart.*unavailable"
+    steps:
+      - id: step-1
+        description: Verify smartmontools is available in container for S.M.A.R.T. reading
+        type: check
+        command: "docker exec {container_name} which smartctl"
+        expected_output: "smartctl"
+        on_fail: step-2
+      - id: step-2
+        description: Check smartmontools version and S.M.A.R.T. support
+        type: check
+        command: "docker exec {container_name} smartctl --version | head -1"
+        expected_output: "smartctl"
+      - id: step-3
+        description: Test S.M.A.R.T. scan on first available disk
+        type: check
+        command: "docker exec {container_name} smartctl -a /dev/sda 2>&1 | head -10"
+        expected_output: "SMART"
+        on_fail: step-4
+      - id: step-4
+        description: Display S.M.A.R.T. scan error details
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check disk permissions and accessibility
+        type: check
+        command: "ls -l /dev/sd* | awk '{print $1, $NF}'"
+        expected_output: "rw"
+      - id: step-6
+        description: Update container permissions to allow raw device access
+        type: fix
+        command: "docker exec {container_name} chmod 666 /dev/sd* /dev/nvme*"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Scrutiny to retry S.M.A.R.T. scans
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify S.M.A.R.T. scans complete successfully
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'scan.*success\\|completed' | tail -5"
+    resolution: |
+      Device permissions have been updated to allow the Scrutiny container full read access to disk devices for S.M.A.R.T. scanning. The container has been restarted to retry S.M.A.R.T. data collection. Scans should now complete successfully. If issues persist, verify that the drives support S.M.A.R.T. and that they are not in an error state on the host.
+
+  - id: database-corrupted
+    name: Scrutiny database error or corrupted data
+    symptoms:
+      - "Dashboard shows no historical data"
+      - "Recent scans not appearing in history"
+      - "Charts or timeline graphs are empty"
+      - "Database locked or initialization errors in logs"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "database.*locked"
+      - log_pattern: "corrupted"
+    steps:
+      - id: step-1
+        description: Check if database volume is mounted and persistent
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 'scrutiny_db'"
+        expected_output: "scrutiny_db"
+        on_fail: step-2
+      - id: step-2
+        description: Display volume mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check database directory permissions
+        type: check
+        command: "docker exec {container_name} ls -lh /opt/scrutiny/db/"
+        expected_output: ""
+      - id: step-4
+        description: Attempt database integrity check
+        type: check
+        command: "docker exec {container_name} sqlite3 /opt/scrutiny/db/scrutiny.db 'PRAGMA integrity_check;' 2>&1"
+        expected_output: "ok"
+        on_fail: step-5
+      - id: step-5
+        description: Database appears corrupted; reinitialize from backup if available
+        type: inform
+        command: ""
+      - id: step-6
+        description: Create backup of current database before reinitializing
+        type: fix
+        command: "docker exec {container_name} cp /opt/scrutiny/db/scrutiny.db /opt/scrutiny/db/scrutiny.db.backup"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Stop container and remove corrupted database
+        type: fix
+        command: "docker stop {container_name} && docker exec {container_name} rm /opt/scrutiny/db/scrutiny.db"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Restart container to reinitialize clean database
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify database has been reinitialized
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'database\\|initialized' | tail -5"
+    resolution: |
+      The database has been reset to a clean state and Scrutiny has been restarted. All historical S.M.A.R.T. data has been cleared, but new scans will begin collecting fresh data. A backup of the corrupted database has been saved as scrutiny.db.backup in the database directory, in case any data recovery is needed. Future scans will populate the database with current drive health information.
+
+default_config:
+  compose_template: |
+    services:
+      scrutiny:
+        image: ghcr.io/analogj/scrutiny:latest
+        container_name: scrutiny
+        restart: unless-stopped
+        environment:
+          SCRUTINY_LOG_LEVEL: ${LOG_LEVEL:-info}
+        volumes:
+          - scrutiny_data:/opt/scrutiny/config
+          - scrutiny_db:/opt/scrutiny/db
+          - /dev:/dev:ro
+          - /sys:/sys:ro
+          - /run/udev:/run/udev:ro
+        devices:
+          - /dev/sda:/dev/sda:ro
+          - /dev/sdb:/dev/sdb:ro
+          - /dev/nvme0n1:/dev/nvme0n1:ro
+        cap_add:
+          - SYS_RAWIO
+        ports:
+          - "8080:8080/tcp"
+    volumes:
+      scrutiny_data:
+      scrutiny_db:
+  required_vars:
+    - name: LOG_LEVEL
+      description: Logging level (debug, info, warn, error)
+      default: "info"
+  known_mounts:
+    - container_path: /opt/scrutiny/config
+      purpose: Scrutiny configuration and settings
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /opt/scrutiny/db
+      purpose: S.M.A.R.T. scan history and drive data database
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /dev
+      purpose: Host device access for disk enumeration and S.M.A.R.T. reading
+      recommended_permissions: "ro"
+      owner: "root:root"
+    - container_path: /sys
+      purpose: Host sysfs for device metadata
+      recommended_permissions: "ro"
+      owner: "root:root"
+    - container_path: /run/udev
+      purpose: Udev device notifications for hot-plug support
+      recommended_permissions: "ro"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Scrutiny monitors S.M.A.R.T. (Self-Monitoring, Analysis and Reporting Technology) data from storage devices to predict disk failures and track drive health over time. It requires direct access to disk devices and udev.
+
+  S.M.A.R.T. access: The container needs /dev mounts and CAP_SYS_RAWIO capability to read S.M.A.R.T. data. Specific device mount (e.g., /dev/sda:/dev/sda:ro) or blanket /dev:/dev:ro can be used. Include all drives you want to monitor.
+
+  Drive enumeration: Scrutiny automatically detects and begins monitoring all available disk drives (SATA, NVMe, etc.) on startup. Initial scan may take several minutes depending on drive count.
+
+  Historical data: The /opt/scrutiny/db volume persists scan history, enabling trend analysis and failure prediction. Use fast local storage (SSD preferred) for the database.
+
+  udev notifications: Mount /run/udev:ro to receive hot-plug notifications when drives are added or removed while the container is running.
+
+  Database: Scrutiny uses SQLite for storing drive data and scan history. The database should be backed up regularly, especially if monitoring valuable or critical drives.
+
+  Thresholds and alerts: Configure S.M.A.R.T. attribute thresholds and alert actions in the Scrutiny web UI. Setup requires manual configuration per drive.
+
+  Common gotchas:
+  - No drives detected: Verify /dev and /sys mounts and CAP_SYS_RAWIO capability.
+  - S.M.A.R.T. scan fails: Check device permissions, ensure drives support S.M.A.R.T.
+  - Database errors: Ensure /opt/scrutiny/db is a persistent volume with sufficient space.
+  - Missing historical data: If starting fresh, expect several hours/days to collect trend data before predictions are accurate.

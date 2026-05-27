@@ -1,0 +1,303 @@
+id: headscale
+name: Headscale (Open-Source Tailscale Control Server)
+version: "1.0"
+container_match:
+  image_patterns:
+    - "headscale/headscale"
+  port_hints: [8080, 50443]
+category: network
+description: Self-hosted Tailscale control server; coordinates WireGuard peer discovery and routing for on-premises or private mesh networks
+docs_url: https://hub.docker.com/r/headscale/headscale
+
+common_issues:
+  - id: database-migration-failed
+    name: Database migration failed on startup
+    symptoms:
+      - "migration failed"
+      - "database is locked"
+      - "table already exists"
+      - "column mismatch"
+      - "container exits with code 1"
+    trigger_conditions:
+      - log_pattern: "migration|database.*error"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check Headscale database migration logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'migration\\|database' | tail -20"
+        expected_output: ""
+      - id: step-2
+        description: Verify database file exists and is readable
+        type: check
+        command: "test -r {db_path} && echo 'DB readable' || echo 'DB not readable'"
+        expected_output: "DB readable"
+        on_fail: step-3
+      - id: step-3
+        description: Check if database file is corrupted or locked
+        type: inform
+        command: ""
+      - id: step-4
+        description: Stop container to allow exclusive DB access
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart container to re-run migrations
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor migration progress
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+        expected_output: ""
+    resolution: |
+      Headscale requires a SQLite database (or PostgreSQL if configured) to track nodes and encryption keys. The migration failed, likely due to file permissions or database corruption. The container has been restarted to re-run migrations. If migrations continue to fail, back up and delete the old database file to force a fresh initialization (warning: this will lose all registered nodes).
+
+  - id: nodes-not-registering
+    name: Nodes cannot register or appear offline
+    symptoms:
+      - "No nodes appear in Headscale UI"
+      - "Node registers but shows offline immediately"
+      - "registration failed"
+      - "node key mismatch"
+      - "client cannot connect to control server"
+    trigger_conditions:
+      - log_pattern: "register.*fail|node.*offline"
+    steps:
+      - id: step-1
+        description: Check Headscale is listening on registration port
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8080"
+        expected_output: "LISTEN.*8080"
+        on_fail: step-2
+      - id: step-2
+        description: Display listening ports
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check registration key exists and is valid
+        type: check
+        command: "docker exec {container_name} headscale preauthkeys list || echo 'No auth keys configured'"
+        expected_output: ""
+      - id: step-4
+        description: Verify container can resolve its own hostname
+        type: check
+        command: "docker exec {container_name} nslookup {headscale_hostname} 127.0.0.11 2>&1 | grep -i address"
+        expected_output: "Address"
+        on_fail: step-5
+      - id: step-5
+        description: Check DNS and network configuration
+        type: inform
+        command: ""
+      - id: step-6
+        description: Verify HEADSCALE_SERVER_URL environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep HEADSCALE_SERVER_URL"
+        expected_output: "HEADSCALE_SERVER_URL="
+        on_fail: step-7
+      - id: step-7
+        description: Display environment variables (focusing on server URL)
+        type: inform
+        command: ""
+    resolution: |
+      Nodes register with Headscale by connecting to the control server's public URL (set via HEADSCALE_SERVER_URL). If nodes cannot register, the server is not listening, the URL is wrong, or DNS resolution failed. Ensure HEADSCALE_SERVER_URL matches the publicly reachable FQDN or IP:port that clients will connect to. Pre-auth keys must also be generated and provided to nodes during their initialization.
+
+  - id: tls-certificate-expired
+    name: TLS certificate expired or missing
+    symptoms:
+      - "certificate has expired"
+      - "x509: certificate signed by unknown authority"
+      - "https connection refused"
+      - "client certificate validation failed"
+      - "unable to verify peer certificate"
+    trigger_conditions:
+      - log_pattern: "certificate.*expired|x509.*authority"
+    steps:
+      - id: step-1
+        description: Check current TLS certificate expiration date
+        type: check
+        command: "openssl x509 -in {tls_cert_path} -noout -enddate 2>/dev/null || echo 'Certificate not found or invalid'"
+        expected_output: "notAfter"
+        on_fail: step-2
+      - id: step-2
+        description: Verify certificate file path and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if certificate is self-signed
+        type: check
+        command: "openssl x509 -in {tls_cert_path} -noout -text 2>/dev/null | grep -i 'self.*signed' || echo 'Not self-signed'"
+        expected_output: ""
+      - id: step-4
+        description: Inform user to generate a new self-signed certificate
+        type: inform
+        command: ""
+      - id: step-5
+        description: Stop container before updating certificates
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Display instructions to regenerate TLS certificate
+        type: inform
+        command: ""
+    resolution: |
+      Headscale requires a TLS certificate for HTTPS connections from Tailscale clients. Self-signed certificates are acceptable for private deployments. The certificate has expired or is missing. Generate a new self-signed certificate using OpenSSL, mount it into the container at the path specified in HEADSCALE_TLS_CERT_PATH and HEADSCALE_TLS_KEY_PATH, then restart the container. For production, use Let's Encrypt with certbot or another automated renewal service.
+
+  - id: dns-resolution-failure
+    name: Nodes cannot resolve DNS or split DNS not working
+    symptoms:
+      - "DNS resolution timeout"
+      - "nslookup fails on Tailscale IP"
+      - "split-dns not routing queries correctly"
+      - "nameserver unreachable"
+      - "no nameservers configured"
+    trigger_conditions:
+      - log_pattern: "dns.*fail|nameserver.*unreachable"
+    steps:
+      - id: step-1
+        description: Check if Headscale is configured with DNS settings
+        type: check
+        command: "docker exec {container_name} cat /etc/headscale/config.yaml | grep -A 5 'dns:' || echo 'No DNS section found'"
+        expected_output: ""
+      - id: step-2
+        description: Verify DNS nameserver is reachable from container
+        type: check
+        command: "docker exec {container_name} nslookup google.com 8.8.8.8 | grep -i 'address'"
+        expected_output: "Address"
+        on_fail: step-3
+      - id: step-3
+        description: Check container network connectivity
+        type: inform
+        command: ""
+      - id: step-4
+        description: Display Headscale DNS configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Headscale to apply DNS configuration changes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify DNS resolution is now working
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i dns | tail -5"
+    resolution: |
+      Headscale can distribute DNS settings to all registered nodes (split-DNS). If DNS is not working, check that your config.yaml includes a `dns:` section with valid nameserver IPs (e.g., 8.8.8.8). Ensure the nameserver is reachable from the Headscale container network. Nodes will pull DNS configuration from Headscale during registration or on policy update.
+
+  - id: preauth-key-expired
+    name: Pre-auth keys expired or invalid
+    symptoms:
+      - "register: invalid pre-auth key"
+      - "key is expired"
+      - "key not found"
+      - "node registration rejected"
+    trigger_conditions:
+      - log_pattern: "pre.*auth.*key|key.*expired"
+    steps:
+      - id: step-1
+        description: List all pre-auth keys
+        type: check
+        command: "docker exec {container_name} headscale preauthkeys list"
+        expected_output: ""
+      - id: step-2
+        description: Check expiration dates of existing keys
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a new pre-auth key
+        type: fix
+        command: "docker exec {container_name} headscale preauthkeys create --reusable --expiration 24h"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Display the new pre-auth key for distribution to nodes
+        type: inform
+        command: ""
+    resolution: |
+      Headscale pre-auth keys are temporary tokens that authorize a new node to register. Keys expire after the configured duration. If registration is failing, generate a new pre-auth key and distribute it to the node during initialization. Use `headscale preauthkeys create` with appropriate flags (--reusable, --expiration) to control key lifetime and reusability.
+
+default_config:
+  compose_template: |
+    services:
+      headscale:
+        image: headscale/headscale:latest
+        container_name: headscale
+        restart: unless-stopped
+        network_mode: bridge
+        ports:
+          - "8080:8080"
+          - "50443:50443"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/etc/headscale
+          - ${DATA_PATH:-./data}:/var/lib/headscale
+        environment:
+          TZ: ${TZ:-UTC}
+          HEADSCALE_SERVER_URL: ${HEADSCALE_SERVER_URL:-http://localhost:8080}
+          HEADSCALE_LISTEN_ADDR: 0.0.0.0:8080
+          HEADSCALE_LISTEN_ADDR_GRPC: 0.0.0.0:50443
+          HEADSCALE_DB_PATH: /var/lib/headscale/db.sqlite
+          HEADSCALE_TLS_CERT_PATH: ${TLS_CERT_PATH:-/etc/headscale/certs/cert.pem}
+          HEADSCALE_TLS_KEY_PATH: ${TLS_KEY_PATH:-/etc/headscale/certs/key.pem}
+  required_vars:
+    - name: HEADSCALE_SERVER_URL
+      description: Public URL that nodes will use to connect (e.g., https://vpn.example.com:8080)
+      default: "http://localhost:8080"
+    - name: CONFIG_PATH
+      description: Host path for /etc/headscale (configuration files and schema)
+      default: "./config"
+    - name: DATA_PATH
+      description: Host path for /var/lib/headscale (SQLite database and state)
+      default: "./data"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: TLS_CERT_PATH
+      description: Host path to TLS certificate file (self-signed or Let's Encrypt)
+      default: "./certs/cert.pem"
+    - name: TLS_KEY_PATH
+      description: Host path to TLS private key
+      default: "./certs/key.pem"
+  known_mounts:
+    - container_path: /etc/headscale
+      purpose: Headscale configuration, routes, and ACLs
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/headscale
+      purpose: SQLite database, encryption keys, node state
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Headscale is a self-hosted Tailscale control server. It does not run WireGuard itself — clients connect to Headscale for node discovery and key exchange, then communicate peer-to-peer via WireGuard. No managed infrastructure required.
+
+  Key facts:
+  - HEADSCALE_SERVER_URL must match the public FQDN or IP that clients will connect to (not localhost unless testing locally)
+  - TLS certificate can be self-signed for private networks; for internet-facing deployments, use Let's Encrypt
+  - Pre-auth keys authorize nodes to register; generate them with `headscale preauthkeys create`
+  - ACLs are defined in /etc/headscale/acl.yaml and control which nodes can communicate
+  - Database is SQLite by default; PostgreSQL is supported for multi-user setups
+  - Headscale CLI (`headscale` command) is available inside the container for user/route/key management
+  - /var/lib/headscale must be persisted to host volume; loss of this directory loses all registered nodes and keys
+
+  First-run gotchas:
+  - HEADSCALE_SERVER_URL must be publicly resolvable and reachable by clients (firewall/NAT may block)
+  - TLS certificate mismatch: if clients cannot verify the certificate, they will reject the connection
+  - Pre-auth keys must be provided to nodes; without a valid key, registration fails silently
+  - Database migration on first run takes time; be patient and check logs
+  - Default ACL is deny-all; configure /etc/headscale/acl.yaml to allow node-to-node communication
+
+  Advanced:
+  - `headscale users create <name>` — create user/namespace in CLI
+  - `headscale routes list` — view advertised subnet routes
+  - `headscale nodes list` — view all registered nodes and their IP assignments
+  - Dual-stack: Headscale can assign both IPv4 and IPv6 Tailscale IPs
+  - Relay mode: nodes that can directly communicate will peer; unreachable nodes route through DERP or relay
+  - Policy-based routing: define routes per node or user group in ACLs

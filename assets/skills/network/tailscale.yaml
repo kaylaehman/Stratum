@@ -1,0 +1,307 @@
+id: tailscale
+name: Tailscale WireGuard Mesh VPN
+version: "1.0"
+container_match:
+  image_patterns:
+    - "tailscale/tailscale"
+  port_hints: [3478]
+category: network
+description: WireGuard-based mesh VPN for secure node-to-node connectivity with Tailscale infrastructure
+docs_url: https://hub.docker.com/r/tailscale/tailscale
+
+common_issues:
+  - id: auth-key-expired-or-invalid
+    name: Authentication failed or auth key expired
+    symptoms:
+      - "error accepting auth: invalid or expired key"
+      - "unauthorized: authentication required"
+      - "failed to authenticate"
+      - "TS_AUTHKEY empty or invalid"
+      - "container exits with code 1"
+    trigger_conditions:
+      - log_pattern: "invalid.*key|expired.*key|unauthorized"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if TS_AUTHKEY environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep TS_AUTHKEY"
+        expected_output: "TS_AUTHKEY="
+        on_fail: step-2
+      - id: step-2
+        description: Display environment variables (TS_AUTHKEY will be masked)
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Tailscale authentication logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|key' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Inform user to generate new auth key from Tailscale admin console
+        type: inform
+        command: ""
+      - id: step-5
+        description: Stop container to update TS_AUTHKEY
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Remove stale container to force fresh initialization
+        type: fix
+        command: "docker rm {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Display instructions to update compose file with new TS_AUTHKEY
+        type: inform
+        command: ""
+    resolution: |
+      Tailscale authentication requires a valid TS_AUTHKEY. Auth keys expire after 90 days of non-use. A new auth key has been generated and you must update the compose file environment variable with the new key, then restart the container. Visit your Tailscale admin console (https://login.tailscale.com/admin) to generate fresh auth keys and set expiration preferences.
+
+  - id: tun-device-unavailable
+    name: TUN device not available (required for WireGuard)
+    symptoms:
+      - "cannot open /dev/net/tun: No such file or directory"
+      - "cannot allocate memory"
+      - "operation not permitted"
+      - "tailscaled exiting: no tun device"
+    trigger_conditions:
+      - log_pattern: "no tun device|/dev/net/tun"
+    steps:
+      - id: step-1
+        description: Inform user that host kernel WireGuard support is required
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if /dev/net/tun exists on host
+        type: check
+        command: "test -c /dev/net/tun && echo 'TUN device exists' || echo 'TUN device missing'"
+        expected_output: "TUN device exists"
+        on_fail: step-3
+      - id: step-3
+        description: Display host kernel and supported WireGuard modules
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify docker compose includes /dev/net/tun device mount
+        type: check
+        command: "docker inspect {container_name} --format='{{range .HostConfig.Devices}}{{.PathOnHost}} {{end}}' | grep tun"
+        expected_output: "/dev/net/tun"
+        on_fail: step-5
+      - id: step-5
+        description: Display current device mounts (TUN not present)
+        type: inform
+        command: ""
+      - id: step-6
+        description: Explain how to add /dev/net/tun device to docker compose
+        type: inform
+        command: ""
+    resolution: |
+      Tailscale requires /dev/net/tun device access for WireGuard tunneling. Your container or host does not have access to it. Ensure docker compose includes `devices: ['/dev/net/tun:/dev/net/tun']` and that your host kernel has WireGuard support (most Linux kernels 5.6+). If running in a VM, verify the hypervisor provides TUN device access.
+
+  - id: cap-net-admin-missing
+    name: CAP_NET_ADMIN capability missing
+    symptoms:
+      - "operation not permitted"
+      - "cannot configure interface"
+      - "failed to create wireguard interface"
+      - "netlink socket permission denied"
+    trigger_conditions:
+      - log_pattern: "operation not permitted|permission denied.*net"
+    steps:
+      - id: step-1
+        description: Inform user that NET_ADMIN capability is required
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check container capabilities
+        type: check
+        command: "docker inspect {container_name} --format='{{.HostConfig.CapAdd}}' | grep -i admin"
+        expected_output: "NET_ADMIN"
+        on_fail: step-3
+      - id: step-3
+        description: Display current container capabilities
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if container runs with --privileged flag
+        type: check
+        command: "docker inspect {container_name} --format='{{.HostConfig.Privileged}}'"
+        expected_output: "true"
+      - id: step-5
+        description: Stop container to apply capability changes
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Display instructions to add CAP_NET_ADMIN to docker compose
+        type: inform
+        command: ""
+    resolution: |
+      Tailscale requires CAP_NET_ADMIN Linux capability to configure WireGuard network interfaces. Update your docker compose file to include `cap_add: ['NET_ADMIN']` under the tailscale service. If you prefer, you can use `privileged: true` (less secure but simpler). Restart the container after making changes.
+
+  - id: connectivity-timeout
+    name: No connectivity to Tailscale network
+    symptoms:
+      - "cannot reach other nodes"
+      - "ping to tailscale IP times out"
+      - "Connected but cannot communicate"
+      - "node appears in network but no packets reaching it"
+    trigger_conditions:
+      - log_pattern: "connected|joined network"
+    steps:
+      - id: step-1
+        description: Check if container is authenticated and connected
+        type: check
+        command: "docker exec {container_name} tailscale status"
+        expected_output: "Logged in"
+        on_fail: step-2
+      - id: step-2
+        description: Display Tailscale connection status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Tailscale IP address allocation
+        type: check
+        command: "docker exec {container_name} tailscale ip -4"
+        expected_output: "100\\."
+        on_fail: step-4
+      - id: step-4
+        description: Display current Tailscale IP (or error if not assigned)
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check if TS_STATE_DIR is persisted across container restarts
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep state"
+        expected_output: "state"
+        on_fail: step-6
+      - id: step-6
+        description: Display mounted volumes (TS_STATE_DIR missing)
+        type: inform
+        command: ""
+      - id: step-7
+        description: Check container network and DNS resolution
+        type: check
+        command: "docker exec {container_name} nslookup derpapi.tailscale.com 8.8.8.8 | grep -i address"
+        expected_output: "Address"
+        on_fail: step-8
+      - id: step-8
+        description: Test if container can reach Tailscale infrastructure
+        type: inform
+        command: ""
+    resolution: |
+      Container is connected to Tailscale but not passing traffic. Common causes: 1) TS_STATE_DIR not persisted (state lost on restart), 2) container network isolation preventing traffic, 3) subnet router configuration incomplete. Ensure TS_STATE_DIR volume is mounted to preserve state. Check that container is on a bridge network that allows inter-container communication, or use `--net=host` for full host network access.
+
+  - id: subnet-router-not-advertising
+    name: Subnet router not advertising routes
+    symptoms:
+      - "Subnet routes not appearing in admin console"
+      - "Other nodes cannot access container subnet"
+      - "TS_ROUTES not taking effect"
+      - "Warning: subnet router disabled in Tailscale settings"
+    trigger_conditions:
+      - log_pattern: "subnet router|routes"
+    steps:
+      - id: step-1
+        description: Inform user that subnet router mode requires explicit authorization
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check TS_ROUTES environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep TS_ROUTES"
+        expected_output: "TS_ROUTES="
+        on_fail: step-3
+      - id: step-3
+        description: Display environment (TS_ROUTES not set or empty)
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check Tailscale logs for subnet router startup message
+        type: check
+        command: "docker logs {container_name} | grep -i 'subnet\\|route' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Check if subnet router is enabled in admin console
+        type: inform
+        command: ""
+      - id: step-6
+        description: Stop container to update TS_ROUTES
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Display instructions for configuring TS_ROUTES and approving subnet router
+        type: inform
+        command: ""
+    resolution: |
+      Subnet router mode requires two steps: 1) Set TS_ROUTES in docker compose (e.g., `TS_ROUTES=10.0.0.0/24`), 2) Approve the subnet router in your Tailscale admin console under the node's settings. Without admin approval, routes are advertised but blocked by default. Restart the container after updating TS_ROUTES.
+
+default_config:
+  compose_template: |
+    services:
+      tailscale:
+        image: tailscale/tailscale:latest
+        container_name: tailscale
+        restart: unless-stopped
+        network_mode: host
+        cap_add:
+          - NET_ADMIN
+        devices:
+          - /dev/net/tun:/dev/net/tun
+        volumes:
+          - ${STATE_DIR:-./tailscale-state}:/var/lib/tailscale
+          - /dev/net/tun:/dev/net/tun
+        environment:
+          TS_AUTHKEY: ${TS_AUTHKEY}
+          TS_STATE_DIR: /var/lib/tailscale
+          TS_ROUTES: ${TS_ROUTES:-}
+          TS_ACCEPT_DNS: "true"
+          TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+  required_vars:
+    - name: TS_AUTHKEY
+      description: Tailscale authentication key (generate at https://login.tailscale.com/admin/authkeys)
+      default: ""
+    - name: STATE_DIR
+      description: Host path for /var/lib/tailscale (preserves state across restarts)
+      default: "./tailscale-state"
+    - name: TS_ROUTES
+      description: Comma-separated subnet routes to advertise (e.g., 10.0.0.0/24,192.168.1.0/24)
+      default: ""
+    - name: TS_EXTRA_ARGS
+      description: Additional Tailscale flags (e.g., --hostname=mynode)
+      default: ""
+  known_mounts:
+    - container_path: /var/lib/tailscale
+      purpose: Tailscale state, keys, and TUN device configuration
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Tailscale is a zero-config VPN using WireGuard. It automates key distribution and IP assignment, making setup trivial compared to raw WireGuard.
+
+  Key facts:
+  - network_mode: host is recommended for Tailscale to avoid double-NAT
+  - /dev/net/tun device is required for WireGuard tunneling (most Linux kernels 5.6+ support this)
+  - CAP_NET_ADMIN capability is required to configure network interfaces
+  - TS_STATE_DIR must be persisted to host volume to prevent re-authentication on restart
+  - Auth keys can be generated with custom expiration times and tags in the admin console
+  - Subnet router mode allows advertising container or host subnets to other Tailscale devices (requires admin approval)
+  - Exit node mode allows routing all traffic through this node (for remote access scenarios)
+
+  First-run gotchas:
+  - Auth key must be valid; expired keys will cause immediate container exit
+  - TUN device missing on host will cause "no tun device" error (VM hypervisor or container runtime issue)
+  - State not persisted = fresh authentication on every restart (wasted auth key uses)
+  - Network mode matters: `host` for Tailscale, `bridge` for other containers; choose based on your architecture
+
+  Advanced:
+  - TS_EXTRA_ARGS can pass flags like `--hostname=custom-name`, `--advertise-exit-node`, `--advertise-routes=10.0.0.0/8`
+  - Check node status with: `docker exec tailscale tailscale status`
+  - See connected peers with: `docker exec tailscale tailscale peer list`
+  - Generate fresh auth key only if absolutely necessary (they are one-time use per key)

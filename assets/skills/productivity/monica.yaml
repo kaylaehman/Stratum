@@ -1,0 +1,244 @@
+id: monica
+name: Monica Personal CRM
+version: "1.0"
+container_match:
+  image_patterns:
+    - "monicahq/monicahq"
+  port_hints: [80]
+category: productivity
+description: Personal CRM for managing relationships, contacts, and life events
+docs_url: https://hub.docker.com/r/monicahq/monicahq
+
+common_issues:
+  - id: app-key-not-set
+    name: Application key not configured
+    symptoms:
+      - "RuntimeException: No application encryption key has been specified"
+      - "The application key is not set"
+      - "Blank page or 500 error on first load"
+      - "Cannot access Monica dashboard"
+    trigger_conditions:
+      - log_pattern: "No application encryption key"
+      - log_pattern: "APP_KEY"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if APP_KEY environment variable is set
+        type: check
+        command: "docker inspect {container_name} | grep APP_KEY"
+        expected_output: "APP_KEY"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about generating APP_KEY
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a new 32-character base64 APP_KEY
+        type: fix
+        command: "docker exec {container_name} php artisan key:generate --show"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Update compose or env file with generated APP_KEY
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Monica container to apply APP_KEY
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Monica is running and accessible
+        type: check
+        command: "docker logs {container_name} | grep -i 'started\\|listening' | tail -3"
+    resolution: |
+      Monica requires an application encryption key (APP_KEY) for security. The key was generated and the container was restarted. Monica should now be accessible. Store the APP_KEY in your compose environment or secrets manager for future deployments.
+
+  - id: database-connection-failed
+    name: Database connection failed
+    symptoms:
+      - "SQLSTATE connection error"
+      - "Connection refused"
+      - "Unknown database"
+      - "Cannot connect to MariaDB"
+      - "Blank screen or 500 error"
+    trigger_conditions:
+      - log_pattern: "SQLSTATE.*connection"
+      - log_pattern: "Connection refused"
+      - log_pattern: "FATAL.*database"
+    steps:
+      - id: step-1
+        description: Check MariaDB container is running
+        type: check
+        command: "docker ps | grep mariadb"
+        expected_output: "mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display MariaDB status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database credentials in Monica environment
+        type: check
+        command: "docker inspect {container_name} | grep -E 'DB_HOST|DB_USER|DB_PASSWORD'"
+        expected_output: "DB_HOST"
+        on_fail: step-4
+      - id: step-4
+        description: Test connectivity to MariaDB from Monica container
+        type: check
+        command: "docker exec {container_name} mysql -h {db_host} -u {db_user} -p{db_password} -e 'SELECT 1'"
+        expected_output: "1"
+        on_fail: step-5
+      - id: step-5
+        description: Check MariaDB logs for connection errors
+        type: check
+        command: "docker logs mariadb | tail -20"
+      - id: step-6
+        description: Restart both MariaDB and Monica containers
+        type: fix
+        command: "docker restart mariadb {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify database connection after restart
+        type: check
+        command: "docker logs {container_name} | grep -i 'connected\\|database' | tail -5"
+    resolution: |
+      Database connectivity was restored. The containers were restarted to reinitialize the connection. If the issue persists, verify that DB_HOST, DB_USER, DB_PASSWORD, and DB_DATABASE match your MariaDB configuration. Ensure the MariaDB container is on the same Docker network as Monica.
+
+  - id: config-mount-permission
+    name: Permission denied on /var/www/html/storage
+    symptoms:
+      - "Permission denied writing to storage"
+      - "Cannot write cache files"
+      - "Session storage failure"
+      - "Log file permission error"
+    trigger_conditions:
+      - log_pattern: "permission denied.*storage"
+      - log_pattern: "EACCES.*storage"
+    steps:
+      - id: step-1
+        description: Check ownership of storage directory on host
+        type: check
+        command: "stat {config_path}/storage"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current storage directory ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively fix permissions on storage and bootstrap directories
+        type: fix
+        command: "chown -R 33:33 {config_path}/storage {config_path}/bootstrap"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Set correct directory permissions
+        type: fix
+        command: "chmod -R 755 {config_path}/storage {config_path}/bootstrap"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Monica container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify storage directory is writable
+        type: check
+        command: "ls -la {config_path}/storage | head -5"
+    resolution: |
+      Storage and bootstrap directory permissions were corrected to match Monica's requirements (UID 33, which is www-data). The container was restarted and should now be able to write logs, cache, and session files without permission errors.
+
+default_config:
+  compose_template: |
+    services:
+      monica:
+        image: monicahq/monicahq:latest
+        container_name: monica
+        restart: unless-stopped
+        environment:
+          APP_KEY: ${APP_KEY:-base64:xxx}
+          DB_HOST: ${DB_HOST:-mariadb}
+          DB_PORT: ${DB_PORT:-3306}
+          DB_DATABASE: ${DB_DATABASE:-monica}
+          DB_USERNAME: ${DB_USERNAME:-monica}
+          DB_PASSWORD: ${DB_PASSWORD:-strongpassword}
+          APP_URL: ${APP_URL:-http://localhost}
+          REDIS_PASSWORD: ${REDIS_PASSWORD:-null}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/var/www/html/storage
+        ports:
+          - "80:80"
+        depends_on:
+          - mariadb
+
+      mariadb:
+        image: mariadb:latest
+        container_name: mariadb
+        restart: unless-stopped
+        environment:
+          MYSQL_DATABASE: ${DB_DATABASE:-monica}
+          MYSQL_USER: ${DB_USERNAME:-monica}
+          MYSQL_PASSWORD: ${DB_PASSWORD:-strongpassword}
+          MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+        volumes:
+          - ${DB_PATH:-./database}:/var/lib/mysql
+  required_vars:
+    - name: APP_KEY
+      description: Application encryption key (generate with 'php artisan key:generate --show', must start with 'base64:')
+      default: "base64:xxx"
+    - name: DB_HOST
+      description: MariaDB host (use service name if in same network)
+      default: "mariadb"
+    - name: DB_DATABASE
+      description: MariaDB database name
+      default: "monica"
+    - name: DB_USERNAME
+      description: MariaDB username
+      default: "monica"
+    - name: DB_PASSWORD
+      description: MariaDB password for monica user
+      default: "strongpassword"
+    - name: MYSQL_ROOT_PASSWORD
+      description: MariaDB root password
+      default: "rootpassword"
+    - name: APP_URL
+      description: URL where Monica is accessed
+      default: "http://localhost"
+    - name: CONFIG_PATH
+      description: Host path for /var/www/html/storage (configuration and uploads)
+      default: "./config"
+    - name: DB_PATH
+      description: Host path for MariaDB data directory
+      default: "./database"
+  known_mounts:
+    - container_path: /var/www/html/storage
+      purpose: Monica configuration, cache, logs, and uploads
+      recommended_permissions: "755"
+      owner: "33:33"
+    - container_path: /var/lib/mysql
+      purpose: MariaDB data files
+      recommended_permissions: "755"
+      owner: "999:999"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Monica is a personal CRM application built with Laravel. It requires a relational database (MariaDB recommended) and proper application key encryption.
+
+  APP_KEY generation: The key must be base64-encoded and start with "base64:". Generate it using: docker run --rm monicahq/monicahq:latest php artisan key:generate --show
+
+  Database: Monica uses Laravel migrations. The database is automatically set up on first run if DB_* credentials are correct.
+
+  Storage directory: Monica stores cache, logs, sessions, and uploaded files in /var/www/html/storage. This must be writable by the web server (UID 33, www-data).
+
+  MariaDB sidecar: The compose template includes a MariaDB service. You can substitute with an external database by updating DB_HOST and credentials.
+
+  First run: After starting Monica, access the web UI to complete the initial setup and create an admin account.
+
+  Backup: Regularly backup both the /var/www/html/storage directory (for uploads) and the MariaDB database.

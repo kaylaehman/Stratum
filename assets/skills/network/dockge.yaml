@@ -1,0 +1,205 @@
+id: dockge
+name: Dockge Compose Stack Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "louislam/dockge"
+  port_hints: [5001]
+category: network
+description: Lightweight Docker Compose stack manager and editor with UI
+docs_url: https://hub.docker.com/r/louislam/dockge
+
+common_issues:
+  - id: docker-socket-permission
+    name: Docker socket permission denied
+    symptoms:
+      - "Cannot connect to Docker daemon"
+      - "permission denied while trying to connect to Docker daemon"
+      - "Failed to list stacks"
+      - "docker.sock: permission denied"
+    trigger_conditions:
+      - log_pattern: "permission denied.*docker.sock"
+      - log_pattern: "Cannot connect to Docker"
+    steps:
+      - id: step-1
+        description: Inform about Docker socket requirement
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check docker.sock permissions on host
+        type: check
+        command: "ls -la /var/run/docker.sock"
+        expected_output: "root"
+        on_fail: step-3
+      - id: step-3
+        description: Verify docker.sock is mounted into Dockge
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}' | grep docker.sock"
+        expected_output: "docker.sock"
+      - id: step-4
+        description: Check Dockge container user ID
+        type: check
+        command: "docker inspect {container_name} --format='{{.Config.User}}'"
+        expected_output: ""
+      - id: step-5
+        description: Restart Dockge to reset socket connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Dockge requires read/write access to /var/run/docker.sock to create, start, and manage Docker Compose stacks. The container has been restarted to re-establish the socket connection. If the issue persists, verify the host docker group permissions and that /var/run/docker.sock is readable by the container.
+
+  - id: stacks-directory-mount
+    name: Stacks directory not mounted or inaccessible
+    symptoms:
+      - "No stacks appear in UI"
+      - "Cannot save new stack"
+      - "permission denied on /opt/stacks"
+      - "Stacks created but not persisted"
+    trigger_conditions:
+      - log_pattern: "permission denied.*stacks"
+      - log_pattern: "no such file or directory.*stacks"
+    steps:
+      - id: step-1
+        description: Verify /opt/stacks is mounted from host
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if contains .Destination \"stacks\"}}{{.Source}}:{{.Destination}} {{end}}{{end}}'"
+        expected_output: "stacks"
+        on_fail: step-2
+      - id: step-2
+        description: Check if /opt/stacks directory exists inside container
+        type: check
+        command: "docker exec {container_name} ls -ld /opt/stacks"
+        expected_output: "drwxr"
+        on_fail: step-3
+      - id: step-3
+        description: Check host stacks directory ownership and permissions
+        type: check
+        command: "stat {stacks_path} | grep -E 'Access|Uid'"
+        expected_output: "Uid"
+      - id: step-4
+        description: Inform about stacks directory ownership
+        type: inform
+        command: ""
+      - id: step-5
+        description: Fix stacks directory permissions
+        type: fix
+        command: "chmod 755 {stacks_path} && chown root:root {stacks_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Dockge to reload stacks
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      The /opt/stacks directory is where Dockge stores compose files. It must be mounted as a host bind mount and have proper permissions. The directory permissions have been corrected and Dockge has been restarted. Any previously created stacks should now be visible in the UI.
+
+  - id: ui-not-loading
+    name: UI not loading or returns 404
+    symptoms:
+      - "Cannot load Dockge web interface"
+      - "404 page not found"
+      - "Connection refused on port 5001"
+      - "Blank page or infinite loading"
+    trigger_conditions:
+      - log_pattern: "listen.*error"
+      - log_pattern: "port.*in use"
+    steps:
+      - id: step-1
+        description: Verify Dockge container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check Dockge logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Verify port 5001 is open and listening
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 5001"
+        expected_output: "LISTEN.*5001"
+        on_fail: step-4
+      - id: step-4
+        description: Check if port 5001 is bound on host
+        type: check
+        command: "ss -tlnp | grep 5001"
+        expected_output: "5001"
+      - id: step-5
+        description: Restart Dockge container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait and verify UI loads on port 5001
+        type: check
+        command: "sleep 5 && curl -s http://localhost:5001 | head -20"
+    resolution: |
+      Dockge has been restarted. The web UI should now be accessible on port 5001. If the issue persists, check container logs (docker logs) for startup errors or verify that no other service is bound to port 5001 on the host.
+
+default_config:
+  compose_template: |
+    services:
+      dockge:
+        image: louislam/dockge:latest
+        container_name: dockge
+        restart: unless-stopped
+        networks:
+          - dockge-net
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - ${DATA_PATH:-./data}:/app/data
+          - ${STACKS_PATH:-./stacks}:/opt/stacks
+        ports:
+          - "5001:5001/tcp"
+        environment:
+          DOCKGE_STACKS_DIR: /opt/stacks
+    networks:
+      dockge-net:
+        driver: bridge
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for Dockge app data and database (/app/data)
+      default: "./data"
+    - name: STACKS_PATH
+      description: Host path for Docker Compose stack files (/opt/stacks)
+      default: "./stacks"
+  known_mounts:
+    - container_path: /app/data
+      purpose: Dockge database and application state
+      recommended_permissions: "755"
+      owner: "0:0"
+    - container_path: /opt/stacks
+      purpose: Docker Compose stack files (compose.yml, .env, etc)
+      recommended_permissions: "755"
+      owner: "0:0"
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket (read/write)
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Dockge is a lightweight, user-friendly Docker Compose stack manager. It provides a web UI for creating, editing, and managing Docker Compose stacks without needing to edit files on the command line.
+
+  Default port: 5001
+
+  Stacks directory: /opt/stacks must be a host mount so Dockge can persist compose files and projects. Each stack is stored as a subdirectory with compose.yml.
+
+  Docker socket: Read/write access required to start, stop, and manage containers. The socket must be mounted directly into Dockge.
+
+  Compose editor: Dockge includes an integrated editor for compose files with syntax highlighting and validation.
+
+  Stack deployment: Click "Deploy" to create containers from a compose file. Dockge wraps the compose CLI and manages the compose project directory.
+
+  Common gotchas:
+  - Stacks directory not mounted: Stacks won't persist across container restart.
+  - Docker socket missing: Cannot create or manage any containers.
+  - Port 5001 conflict: Check if another service is already bound to port 5001.
+  - Permissions: Ensure stacks directory has proper ownership (typically root:root or docker:docker).

@@ -1,0 +1,260 @@
+id: grocy
+name: Grocy Household Management
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/grocy"
+  port_hints: [80]
+category: productivity
+description: Self-hosted groceries and household management system
+docs_url: https://hub.docker.com/r/linuxserver/grocy
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied writing to config"
+      - "EACCES error"
+      - "Cannot write configuration files"
+      - "Database locked error"
+      - "Web interface loading but cannot save data"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+      - log_pattern: "database.*lock"
+    steps:
+      - id: step-1
+        description: Check current ownership of host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Set correct directory permissions (755) and file permissions (644)
+        type: fix
+        command: "find {config_path} -type d -exec chmod 755 {} + ; find {config_path} -type f -exec chmod 644 {} +"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Grocy to verify permissions
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Grocy is running and config is writable
+        type: check
+        command: "docker logs {container_name} | grep -i 'started\\|listening\\|error' | tail -3"
+    resolution: |
+      The /config directory ownership and permissions were corrected to match LinuxServer's UID/GID settings. Grocy runs as UID {puid} (typically abc:abc). The container was restarted and should now be able to read/write configuration and database files without errors.
+
+  - id: uid-gid-mismatch
+    name: UID/GID mismatch between host and container
+    symptoms:
+      - "Files owned by different UID on host vs container"
+      - "Cannot edit groceries or checklists"
+      - "Database file shows different owners in ls vs docker exec"
+      - "Inconsistent file permissions when mounting from multiple hosts"
+    trigger_conditions:
+      - log_pattern: "stat.*UID"
+    steps:
+      - id: step-1
+        description: Check UID/GID Grocy is running as inside container
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: "uid="
+        on_fail: step-2
+      - id: step-2
+        description: Display container process UID/GID
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check config directory ownership on host
+        type: check
+        command: "stat -c '%U:%G (%u:%g)' {config_path}"
+        expected_output: ""
+      - id: step-4
+        description: Inform about LinuxServer UID/GID defaults
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify PUID and PGID environment variables match host ownership
+        type: check
+        command: "docker inspect {container_name} | grep -E 'PUID|PGID'"
+        expected_output: "PUID"
+        on_fail: step-6
+      - id: step-6
+        description: Update PUID and PGID if they don't match host user
+        type: inform
+        command: ""
+    resolution: |
+      UID/GID mismatch occurs when the container's PUID/PGID don't match the host directory ownership. LinuxServer images expect PUID and PGID to be set to match the user who owns the config directory on the host. Ensure PUID and PGID in your compose file match your host user (e.g., `id -u` for UID). If you change PUID/PGID, you must also chown the config directory to match.
+
+  - id: database-lock-error
+    name: Database locked or cannot write
+    symptoms:
+      - "database is locked"
+      - "Error updating stock"
+      - "Cannot save purchases or recipes"
+      - "503 Service Unavailable"
+      - "Multiple errors on busy pages"
+    trigger_conditions:
+      - log_pattern: "database.*locked"
+      - log_pattern: "SQLITE_BUSY"
+    steps:
+      - id: step-1
+        description: Check if multiple Grocy containers are accessing same database
+        type: check
+        command: "docker ps | grep grocy"
+        expected_output: ""
+      - id: step-2
+        description: Verify database file exists and is readable
+        type: check
+        command: "ls -la {config_path}/data/grocerius.db"
+        expected_output: ".db"
+        on_fail: step-3
+      - id: step-3
+        description: Display database file details
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check for database lock files or journal remnants
+        type: check
+        command: "ls -la {config_path}/data/ | grep -E '*.db|*.lock|*.journal'"
+      - id: step-5
+        description: Stop Grocy container to release database locks
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait a few seconds then restart the container
+        type: fix
+        command: "sleep 3 && docker start {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify database is accessible after restart
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|locked' | tail -3"
+    resolution: |
+      SQLite database lock was cleared by stopping and restarting Grocy. This flushes any incomplete transactions and resets the database connection pool. If this error recurs frequently, check for: multiple Grocy containers sharing the same database file, permission issues on the database file, or insufficient storage space on the mount. Ensure only one Grocy instance accesses each database.
+
+  - id: web-interface-inaccessible
+    name: Web interface not loading or returns error
+    symptoms:
+      - "Blank page or infinite loading"
+      - "404 Not Found"
+      - "500 Internal Server Error"
+      - "Connection refused on port 80"
+      - "Page loads but no styling or functions"
+    trigger_conditions:
+      - log_pattern: "500 Internal Server"
+      - log_pattern: "Fatal error"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if Grocy container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "grocy"
+        on_fail: step-2
+      - id: step-2
+        description: Display container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Grocy application logs for errors
+        type: check
+        command: "docker logs {container_name} | tail -30"
+        expected_output: ""
+      - id: step-4
+        description: Verify Grocy is listening on port 80 inside container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 80"
+        expected_output: "LISTEN"
+        on_fail: step-5
+      - id: step-5
+        description: Check if port 80 is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '80/tcp'"
+      - id: step-6
+        description: Restart Grocy container to clear any application state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for container to fully start and check logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'ready\\|listening\\|started' | tail -3"
+    resolution: |
+      Grocy container was restarted to clear the application state. The web interface should now be accessible at http://<host>:80. If the error persists, check the container logs for PHP errors, database connection issues, or permission problems on the config directory. Ensure the /config mount is properly writable and all required environment variables are set.
+
+default_config:
+  compose_template: |
+    services:
+      grocy:
+        image: linuxserver/grocy:latest
+        container_name: grocy
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "80:80"
+  required_vars:
+    - name: PUID
+      description: User ID to run Grocy as (should match config directory owner)
+      default: "1000"
+    - name: PGID
+      description: Group ID to run Grocy as
+      default: "1000"
+    - name: TZ
+      description: Timezone for the application
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (configuration and database)
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: Grocy configuration, SQLite database, and application data
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Grocy is a self-hosted web application for managing groceries, checklists, and household tasks. LinuxServer.io maintains the official Docker image with PUID/PGID support.
+
+  UID/GID critical: PUID and PGID must match the host user who owns the /config directory. If mismatched, Grocy cannot write to its database. Set PUID=$(id -u) and PGID=$(id -g) for your current user.
+
+  Database: Grocy uses SQLite stored in /config/data/grocerius.db. Keep this directory backed up regularly. Do not share the same database file between multiple Grocy instances.
+
+  First run: On first start, Grocy initializes the database and creates default tables. This may take a few seconds.
+
+  Web interface: Accessible at http://<host>:80. No default credentials — create your account on first login.
+
+  Recipes and stock: Grocy allows tracking groceries, recipes, meal plans, checklists, and inventory with expiration dates.
+
+  Gotchas:
+  - PUID/PGID mismatch: Most common cause of permission denied errors. Always verify with `id` on the host.
+  - Database locked: Occurs if multiple instances access the same file, or if a previous process didn't shut down cleanly. Restart the container to clear locks.
+  - Port conflict: Ensure port 80 is not already in use, or change the published port in the compose file.

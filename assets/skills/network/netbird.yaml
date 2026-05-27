@@ -1,0 +1,420 @@
+id: netbird
+name: NetBird Self-Hosted Mesh VPN
+version: "1.0"
+container_match:
+  image_patterns:
+    - "netbirdio/management"
+    - "netbirdio/dashboard"
+    - "netbirdio/signal"
+    - "netbirdio/coturn"
+  port_hints: [443, 8080, 50051, 3478]
+category: network
+description: Open-source, self-hosted WireGuard mesh VPN with management dashboard, signal server, and TURN relay
+docs_url: https://hub.docker.com/r/netbirdio/management
+
+common_issues:
+  - id: management-api-unreachable
+    name: Management API unreachable or TLS certificate error
+    symptoms:
+      - "connection refused"
+      - "certificate verify failed"
+      - "TLS handshake failure"
+      - "cannot connect to management server"
+      - "failed to dial management API"
+    trigger_conditions:
+      - log_pattern: "certificate|TLS|handshake"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if management service is running and responding
+        type: check
+        command: "docker exec {container_name} curl -k https://localhost:443/api/version -v 2>&1 | head -20"
+        expected_output: "HTTP"
+        on_fail: step-2
+      - id: step-2
+        description: Display management service health status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check management container logs for TLS/certificate errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'cert\\|tls\\|ssl' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify NETBIRD_DOMAIN environment variable is set correctly
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep NETBIRD_DOMAIN"
+        expected_output: "NETBIRD_DOMAIN="
+        on_fail: step-5
+      - id: step-5
+        description: Display environment variables (NETBIRD_DOMAIN check)
+        type: inform
+        command: ""
+      - id: step-6
+        description: Check if self-signed certificate exists in /etc/netbird
+        type: check
+        command: "docker exec {container_name} ls -la /etc/netbird/*.crt 2>&1 | head -5"
+        expected_output: ".crt"
+        on_fail: step-7
+      - id: step-7
+        description: Display certificate directory (self-signed cert missing)
+        type: inform
+        command: ""
+      - id: step-8
+        description: Regenerate self-signed certificate
+        type: fix
+        command: "docker exec {container_name} netbird-mgmt generate-cert"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Restart management service to apply new certificate
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Management API certificate was regenerated and the service restarted. Self-signed certificates are auto-generated on first run and stored in /etc/netbird/. If you have a valid domain with proper HTTPS certificates, update NETBIRD_DOMAIN and mount the certificates into the container. Clients will trust the new certificate after restart.
+
+  - id: signal-server-connection-failed
+    name: Signal server connection failed (peer discovery)
+    symptoms:
+      - "cannot connect to signal server"
+      - "signal server unreachable"
+      - "peer discovery failed"
+      - "signal.example.com: connection refused"
+      - "timeout waiting for signal handshake"
+    trigger_conditions:
+      - log_pattern: "signal.*unreachable|peer.*discovery"
+    steps:
+      - id: step-1
+        description: Check signal service is running
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:50051/health -v 2>&1 | grep -i 'connected\\|response' | head -3"
+        expected_output: ""
+      - id: step-2
+        description: Display signal service health
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify SIGNAL_SERVER environment variable is set and reachable
+        type: check
+        command: "docker exec {container_name} nslookup signal.example.com 8.8.8.8 2>&1 | grep -i address"
+        expected_output: "Address"
+        on_fail: step-4
+      - id: step-4
+        description: Display DNS resolution result for signal server
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check if signal server port is exposed and listening
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 50051"
+        expected_output: "50051"
+        on_fail: step-6
+      - id: step-6
+        description: Display listening ports on signal service
+        type: inform
+        command: ""
+      - id: step-7
+        description: Test connectivity to signal server from management
+        type: check
+        command: "docker exec {container_name} timeout 5 nc -zv signal.example.com 50051 2>&1 | head -5"
+        expected_output: "open"
+        on_fail: step-8
+      - id: step-8
+        description: Inform user to check signal server is running and network accessible
+        type: inform
+        command: ""
+    resolution: |
+      Signal server is responsible for peer discovery in NetBird. Ensure the signal service container is running (separate from management) and accessible on port 50051. Verify SIGNAL_SERVER environment variable points to the correct hostname/IP. If signal server is on the same Docker network, use the service name. If external, use the FQDN and ensure port 50051 is open in firewalls.
+
+  - id: coturn-relay-not-working
+    name: TURN relay not working (peer-to-peer fallback failed)
+    symptoms:
+      - "Cannot traverse NAT"
+      - "Peer connection failed, no relay available"
+      - "Candidates gathering failed"
+      - "All candidates exhausted"
+      - "Direct connection failed, no relay server"
+    trigger_conditions:
+      - log_pattern: "relay|TURN|NAT"
+    steps:
+      - id: step-1
+        description: Inform user that TURN/relay is required when direct peer connections fail
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if COTURN service is running
+        type: check
+        command: "docker ps | grep coturn"
+        expected_output: "coturn"
+        on_fail: step-3
+      - id: step-3
+        description: Display running containers (coturn not found)
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check COTURN is listening on UDP 3478
+        type: check
+        command: "docker exec {container_name} ss -tlnpu | grep 3478"
+        expected_output: "3478"
+        on_fail: step-5
+      - id: step-5
+        description: Display listening UDP ports
+        type: inform
+        command: ""
+      - id: step-6
+        description: Test STUN/TURN connectivity with turnutils
+        type: check
+        command: "docker exec {container_name} turnutils_stunclient turn.example.com 3478 2>&1 | head -10"
+        expected_output: ""
+      - id: step-7
+        description: Verify COTURN is configured with correct realm and credentials
+        type: check
+        command: "docker exec {container_name} cat /etc/coturn/turnserver.conf | grep -i 'realm\\|user' | head -5"
+        expected_output: ""
+      - id: step-8
+        description: Restart COTURN service to ensure it picks up configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify COTURN is listening after restart
+        type: check
+        command: "sleep 2 && docker exec {container_name} ss -tlnpu | grep 3478"
+    resolution: |
+      TURN relay (COTURN) enables peer connections when direct peer-to-peer fails due to NAT or firewall. The service has been restarted. Ensure UDP port 3478 is exposed to the internet and reachable from all client locations. COTURN requires: 1) External IP address reachable from clients, 2) UDP 3478 open in firewall, 3) Credentials configured matching management server's TURN configuration.
+
+  - id: database-initialization-failed
+    name: Database initialization failed or corrupted
+    symptoms:
+      - "database connection error"
+      - "migration failed"
+      - "cannot create tables"
+      - "database is locked"
+      - "SQLITE_CANTOPEN"
+    trigger_conditions:
+      - log_pattern: "database|migration|sqlite"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if database file exists and is accessible
+        type: check
+        command: "docker exec {container_name} ls -la /var/lib/netbird/management.db 2>&1"
+        expected_output: ".db"
+        on_fail: step-2
+      - id: step-2
+        description: Display database directory contents
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check database file permissions and ownership
+        type: check
+        command: "docker exec {container_name} stat /var/lib/netbird/management.db 2>&1 | grep -i 'access\\|uid'"
+        expected_output: ""
+      - id: step-4
+        description: Check management logs for migration errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'migration\\|database' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Verify /var/lib/netbird is mounted to persistent host volume
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep netbird"
+        expected_output: "netbird"
+        on_fail: step-6
+      - id: step-6
+        description: Display volume mounts (netbird data dir not persisted)
+        type: inform
+        command: ""
+      - id: step-7
+        description: Stop container to prepare database backup
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Inform user to backup database before attempting recovery
+        type: inform
+        command: ""
+      - id: step-9
+        description: Remove corrupted database to force re-initialization
+        type: fix
+        command: "docker exec {container_name} rm -f /var/lib/netbird/management.db"
+        requires_approval: true
+        on_success: step-10
+      - id: step-10
+        description: Restart management service to create fresh database
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+    resolution: |
+      Management database was corrupted or uninitialized. A fresh database has been created. If you had existing peers and configuration, you will need to re-register them. Always ensure /var/lib/netbird is mounted to a persistent host volume (bind mount or named volume) to prevent data loss on container restart. Database file management.db should never be ephemeral.
+
+  - id: dashboard-not-accessible
+    name: Dashboard web UI not accessible
+    symptoms:
+      - "404 Not Found on dashboard"
+      - "Cannot connect to dashboard port"
+      - "Dashboard returns blank page"
+      - "Connection refused on 443 or 8080"
+    trigger_conditions:
+      - log_pattern: "dashboard|http|listen"
+    steps:
+      - id: step-1
+        description: Check if dashboard service is running
+        type: check
+        command: "docker ps | grep 'dashboard'"
+        expected_output: "dashboard"
+        on_fail: step-2
+      - id: step-2
+        description: Display all running NetBird services
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify dashboard is listening on port 443 or 8080
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep -E '443|8080'"
+        expected_output: "LISTEN"
+        on_fail: step-4
+      - id: step-4
+        description: Display listening ports on dashboard container
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test dashboard health endpoint
+        type: check
+        command: "docker exec {container_name} curl -k https://localhost:443/health 2>&1 | head -5"
+        expected_output: "200"
+      - id: step-6
+        description: Check dashboard logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-7
+        description: Restart dashboard service
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Wait and verify dashboard is accessible
+        type: check
+        command: "sleep 3 && docker exec {container_name} curl -s -k https://localhost:443/ | head -50 | grep -i 'html\\|dashboard'"
+    resolution: |
+      Dashboard service has been restarted. Access the NetBird dashboard at https://{NETBIRD_DOMAIN}:443 (or port 8080 if configured). The dashboard is the primary UI for user management, peer setup, and network configuration. If still not accessible, check that port 443 or 8080 is published in docker compose and firewall allows external access.
+
+default_config:
+  compose_template: |
+    services:
+      management:
+        image: netbirdio/management:latest
+        container_name: netbird-management
+        restart: unless-stopped
+        expose:
+          - "443"
+          - "50051"
+        ports:
+          - "443:443/tcp"
+          - "50051:50051/tcp"
+        environment:
+          NETBIRD_DOMAIN: ${NETBIRD_DOMAIN:-netbird.example.com}
+          MANAGEMENT_ALLOW_INSECURE_CRT: "false"
+        volumes:
+          - ${DATA_DIR:-./netbird-data}:/var/lib/netbird
+          - ${CONFIG_DIR:-./netbird-config}:/etc/netbird
+
+      signal:
+        image: netbirdio/signal:latest
+        container_name: netbird-signal
+        restart: unless-stopped
+        expose:
+          - "50051"
+        ports:
+          - "50051:50051/tcp"
+        environment:
+          SIGNAL_LOG_LEVEL: info
+        volumes:
+          - ${SIGNAL_DATA_DIR:-./netbird-signal}:/var/lib/netbird
+
+      coturn:
+        image: netbirdio/coturn:latest
+        container_name: netbird-coturn
+        restart: unless-stopped
+        expose:
+          - "3478/udp"
+        ports:
+          - "3478:3478/udp"
+        environment:
+          COTURN_REALM: ${NETBIRD_DOMAIN:-netbird.example.com}
+        volumes:
+          - ${COTURN_CONFIG_DIR:-./netbird-coturn}:/etc/coturn
+
+      dashboard:
+        image: netbirdio/dashboard:latest
+        container_name: netbird-dashboard
+        restart: unless-stopped
+        expose:
+          - "443"
+        ports:
+          - "8443:443/tcp"
+        environment:
+          NETBIRD_MANAGEMENT_API_URL: https://${NETBIRD_DOMAIN:-netbird.example.com}:443
+        depends_on:
+          - management
+        volumes:
+          - ${DASHBOARD_CONFIG_DIR:-./netbird-dashboard}:/etc/netbird
+
+  required_vars:
+    - name: NETBIRD_DOMAIN
+      description: FQDN for NetBird (e.g., netbird.example.com); used in certificates and configuration
+      default: "netbird.example.com"
+    - name: DATA_DIR
+      description: Host path for /var/lib/netbird (management database)
+      default: "./netbird-data"
+    - name: CONFIG_DIR
+      description: Host path for /etc/netbird (management configuration and certificates)
+      default: "./netbird-config"
+    - name: SIGNAL_DATA_DIR
+      description: Host path for signal server state
+      default: "./netbird-signal"
+    - name: COTURN_CONFIG_DIR
+      description: Host path for COTURN relay configuration
+      default: "./netbird-coturn"
+    - name: DASHBOARD_CONFIG_DIR
+      description: Host path for dashboard configuration
+      default: "./netbird-dashboard"
+
+  known_mounts:
+    - container_path: /var/lib/netbird
+      purpose: Management server database and state
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /etc/netbird
+      purpose: Management configuration and self-signed certificates
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  NetBird is a self-hosted, open-source mesh VPN built on WireGuard. It provides similar functionality to Tailscale but with complete control over infrastructure.
+
+  Multi-container architecture:
+  - management: REST API + user/peer management (port 443)
+  - signal: gRPC signal server for peer discovery (port 50051)
+  - coturn: TURN relay for NAT traversal (UDP 3478)
+  - dashboard: Web UI for configuration (port 443 or 8080)
+
+  NETBIRD_DOMAIN is critical—it must be set to your actual domain or IP and used in all client configurations.
+
+  Self-signed certificates are auto-generated on first run. For production, replace with valid certificates.
+
+  Database must be persisted: /var/lib/netbird contains the SQLite database that stores all peers, networks, and configuration. Loss of this volume means losing all data.
+
+  TURN relay (COTURN) is essential for peer connections when direct connectivity fails. Ensure UDP 3478 is reachable from all client locations.
+
+  First-run gotchas:
+  - Signal server must be running before management can start peer discovery
+  - COTURN requires external IP and open UDP port
+  - Dashboard connects to management API; ensure management is healthy before accessing dashboard
+  - Self-signed certificate warnings are normal for fresh installs
+  - Database initialization may take 30-60 seconds on first run (schema creation)

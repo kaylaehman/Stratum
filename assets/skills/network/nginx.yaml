@@ -1,0 +1,107 @@
+id: nginx
+name: nginx
+version: "1.0"
+container_match:
+  image_patterns:
+    - "nginx"
+  port_hints: [80, 443]
+category: network
+description: High-performance HTTP server and reverse proxy
+docs_url: https://hub.docker.com/_/nginx
+
+common_issues:
+  - id: config-syntax-error
+    name: nginx fails to start due to config syntax error
+    symptoms:
+      - "nginx: configuration file /etc/nginx/nginx.conf test failed"
+      - "emerg"
+      - "unexpected"
+    trigger_conditions:
+      - log_pattern: "emerg"
+    steps:
+      - id: step-1
+        description: Run nginx -t inside the container to surface the error
+        type: check
+        command: "docker exec {container_name} nginx -t 2>&1"
+        expected_output: "syntax is ok"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about config syntax checking workflow
+        type: inform
+        command: ""
+    resolution: |
+      `nginx -t` validates the active configuration without restarting. Fix
+      the error in the mounted `conf.d/*.conf` or `nginx.conf`, then either
+      send SIGHUP to the running container (`docker kill -s HUP {container_name}`)
+      or restart it.
+
+  - id: upstream-unreachable
+    name: nginx returns 502 Bad Gateway from upstream
+    symptoms:
+      - "502 Bad Gateway"
+      - "upstream connect failed"
+      - "connection refused"
+    trigger_conditions:
+      - log_pattern: "upstream.*failed"
+    steps:
+      - id: step-1
+        description: Surface recent upstream error log lines
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'upstream|connect.*refused' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Test reachability from nginx to the configured upstream
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {upstream_host} {upstream_port}' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about Docker network requirements
+        type: inform
+        command: ""
+    resolution: |
+      nginx and its upstream must share a Docker network and reference each
+      other by container name. localhost from inside nginx is the nginx
+      container itself, not the host or another container.
+
+default_config:
+  compose_template: |
+    services:
+      nginx:
+        image: nginx:latest
+        container_name: nginx
+        restart: unless-stopped
+        volumes:
+          - ${CONFIG_PATH:-./conf.d}:/etc/nginx/conf.d:ro
+          - ${HTML_PATH:-./html}:/usr/share/nginx/html:ro
+        ports:
+          - "80:80"
+          - "443:443"
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for /etc/nginx/conf.d (server block configs)
+      default: "./conf.d"
+    - name: HTML_PATH
+      description: Host path for /usr/share/nginx/html (static files)
+      default: "./html"
+  known_mounts:
+    - container_path: /etc/nginx/conf.d
+      purpose: Per-site server block configuration files
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /usr/share/nginx/html
+      purpose: Static document root
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  For most homelab use cases nginx-proxy-manager, traefik, or caddy provide
+  the same reverse-proxy capability with auto-TLS and a UI. Use raw nginx
+  when you need exact control over the config or are migrating an existing
+  setup.
+
+  Reload without downtime: `docker kill -s HUP nginx` reloads the config
+  without dropping connections.

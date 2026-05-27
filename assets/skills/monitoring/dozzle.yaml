@@ -1,0 +1,96 @@
+id: dozzle
+name: Dozzle
+version: "1.0"
+container_match:
+  image_patterns:
+    - "amir20/dozzle"
+  port_hints: [8080]
+category: monitoring
+description: Lightweight web-based real-time Docker container log viewer
+docs_url: https://dozzle.dev/
+
+common_issues:
+  - id: docker-socket-permission-denied
+    name: Dozzle cannot read container logs
+    symptoms:
+      - "permission denied"
+      - "/var/run/docker.sock: connect: permission denied"
+      - "Dozzle shows no containers"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Verify the docker socket mount and its permissions
+        type: check
+        command: "ls -l /var/run/docker.sock"
+        expected_output: "srw"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about Docker socket group access
+        type: inform
+        command: ""
+    resolution: |
+      Dozzle needs read access to /var/run/docker.sock. On most distros the
+      socket is owned by root:docker — Dozzle's container user must be in
+      that group, or you must mount the socket via a docker-socket-proxy
+      sidecar (more secure).
+
+  - id: too-many-containers-high-memory
+    name: Dozzle memory grows when tailing many containers
+    symptoms:
+      - "Container OOM-killed"
+      - "Dozzle slow to load"
+    trigger_conditions:
+      - log_pattern: "OOMKilled"
+    steps:
+      - id: step-1
+        description: Check Dozzle memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream"
+        expected_output: ""
+      - id: step-2
+        description: Inform about per-container buffer sizing
+        type: inform
+        command: ""
+    resolution: |
+      Dozzle keeps a per-container in-memory ring buffer. With many busy
+      containers the buffer can dominate memory. Tune DOZZLE_TAIL_SIZE to
+      a smaller value (default is 300 lines per container) or restrict the
+      Dozzle host to a subset of containers via labels and DOZZLE_FILTER.
+
+default_config:
+  compose_template: |
+    services:
+      dozzle:
+        image: amir20/dozzle:latest
+        container_name: dozzle
+        restart: unless-stopped
+        environment:
+          DOZZLE_LEVEL: info
+          DOZZLE_TAIL_SIZE: "300"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+        ports:
+          - "8080:8080/tcp"
+  required_vars:
+    - name: DOZZLE_LEVEL
+      description: Dozzle's own log level
+      default: "info"
+    - name: DOZZLE_TAIL_SIZE
+      description: Lines retained per container in memory
+      default: "300"
+  known_mounts:
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket (read-only)
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Mounting the socket read-only is sufficient — Dozzle never writes to it.
+
+  For multi-host setups (Swarm or just remote daemons), Dozzle can connect
+  to remote Docker hosts via DOZZLE_REMOTE_AGENT env. The agent binary is
+  the same image launched with `agent` command on each remote host.

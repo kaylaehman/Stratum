@@ -1,0 +1,204 @@
+id: documenso
+name: Documenso
+version: "1.0"
+container_match:
+  image_patterns:
+    - "documenso/documenso"
+  port_hints: [3000]
+category: productivity
+description: Open-source document signing and agreement platform alternative to DocuSign
+docs_url: https://hub.docker.com/r/documenso/documenso
+
+common_issues:
+  - id: auth-secret-missing
+    name: Container fails to start due to missing NEXTAUTH_SECRET
+    symptoms:
+      - "Container exits immediately on startup"
+      - "Error: NEXTAUTH_SECRET is required"
+      - "Authentication initialization failed"
+      - "Container restart loop"
+    trigger_conditions:
+      - log_pattern: "NEXTAUTH_SECRET"
+      - log_pattern: "authentication.*required"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if NEXTAUTH_SECRET environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep NEXTAUTH_SECRET"
+        expected_output: "NEXTAUTH_SECRET="
+        on_fail: step-2
+      - id: step-2
+        description: Display requirement for NEXTAUTH_SECRET
+        type: inform
+        command: ""
+      - id: step-3
+        description: Confirm generation of new secret
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Generate a secure random NEXTAUTH_SECRET value
+        type: inform
+        command: ""
+    resolution: |
+      Documenso requires NEXTAUTH_SECRET to be set for authentication to function. This is a security requirement for NextAuth.js. Generate a secure random string (minimum 32 characters) and add it to your docker-compose environment variables as NEXTAUTH_SECRET=<your-secret>. Restart the container after updating the environment.
+
+  - id: database-connection-failed
+    name: Database connection error or schema migration fails
+    symptoms:
+      - "Error: Could not connect to database"
+      - "Database migration failed"
+      - "Prisma schema validation error"
+      - "No tables in database"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "migration.*failed"
+      - log_pattern: "connection.*refused"
+    steps:
+      - id: step-1
+        description: Check if DATABASE_URL is properly configured
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep DATABASE_URL"
+        expected_output: "DATABASE_URL="
+        on_fail: step-2
+      - id: step-2
+        description: Display database configuration requirements
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database service is running and reachable
+        type: check
+        command: "docker exec {container_name} nc -zv <db-host> <db-port> 2>&1 | head -5"
+        expected_output: ""
+      - id: step-4
+        description: Inform about schema migration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart container to retry database initialization
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check logs for successful database connection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i -E 'database|connected|migration' | tail -5"
+    resolution: |
+      Documenso requires a PostgreSQL or MySQL database to function. Ensure DATABASE_URL is set to a valid connection string pointing to a running database server. The format should be: postgresql://user:password@host:port/dbname or mysql://user:password@host:port/dbname. The container has been restarted to retry database initialization.
+
+  - id: webapp-url-not-set
+    name: Web application URL not configured, links or redirects broken
+    symptoms:
+      - "Redirect loops after login"
+      - "Broken callback URLs"
+      - "Email links don't work"
+      - "CORS or redirect errors"
+    trigger_conditions:
+      - log_pattern: "redirect.*error"
+      - log_pattern: "callback.*failed"
+    steps:
+      - id: step-1
+        description: Check NEXT_PUBLIC_WEBAPP_URL environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep NEXT_PUBLIC_WEBAPP_URL"
+        expected_output: "NEXT_PUBLIC_WEBAPP_URL="
+        on_fail: step-2
+      - id: step-2
+        description: Display webapp URL configuration requirement
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify the configured URL matches your actual access point
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart container after configuration update
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Test web application accessibility
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:3000 | head -20"
+    resolution: |
+      Documenso requires NEXT_PUBLIC_WEBAPP_URL to be set to the external URL where users access the application (e.g., https://documenso.yourdom.com or http://localhost:3000). This is used for email links, OAuth callbacks, and redirect URLs. Update this environment variable to match your public URL and restart the container.
+
+default_config:
+  compose_template: |
+    services:
+      documenso:
+        image: documenso/documenso:latest
+        container_name: documenso
+        restart: unless-stopped
+        environment:
+          NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Required - generate with: openssl rand -base64 32}
+          DATABASE_URL: ${DATABASE_URL:?Required - postgresql://user:pass@postgres:5432/documenso}
+          NEXT_PUBLIC_WEBAPP_URL: ${NEXT_PUBLIC_WEBAPP_URL:-http://localhost:3000}
+        ports:
+          - "3000:3000/tcp"
+        depends_on:
+          postgres:
+            condition: service_healthy
+      postgres:
+        image: postgres:15-alpine
+        container_name: documenso-db
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-documenso}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+          POSTGRES_DB: ${POSTGRES_DB:-documenso}
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-documenso}"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+    volumes:
+      postgres_data:
+  required_vars:
+    - name: NEXTAUTH_SECRET
+      description: NextAuth.js secret for session signing (generate with openssl rand -base64 32)
+      default: ""
+    - name: DATABASE_URL
+      description: PostgreSQL connection string (format: postgresql://user:password@host:port/dbname)
+      default: ""
+    - name: NEXT_PUBLIC_WEBAPP_URL
+      description: Public URL where Documenso is accessed (used in email links and OAuth callbacks)
+      default: "http://localhost:3000"
+    - name: POSTGRES_USER
+      description: PostgreSQL database user
+      default: "documenso"
+    - name: POSTGRES_PASSWORD
+      description: PostgreSQL database password
+      default: "changeme"
+    - name: POSTGRES_DB
+      description: PostgreSQL database name
+      default: "documenso"
+  known_mounts:
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database persistence
+      recommended_permissions: "700"
+      owner: "postgres:postgres"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Documenso is a self-hosted document signing platform built with Next.js. It requires PostgreSQL as a backing database and several security-related environment variables.
+
+  NEXTAUTH_SECRET: Generate a secure random value (minimum 32 characters). Example: openssl rand -base64 32. This is mandatory and used to sign session tokens.
+
+  DATABASE_URL: Must point to a running PostgreSQL instance. The provided compose template includes a PostgreSQL service for convenience.
+
+  NEXT_PUBLIC_WEBAPP_URL: This is critical for OAuth callbacks and email links. Set to the URL users will use to access Documenso (e.g., https://sign.yourcompany.com). If not set correctly, redirects after login will fail.
+
+  Security: Always use strong random values for NEXTAUTH_SECRET and POSTGRES_PASSWORD. Consider using a secrets manager in production.
+
+  Persistence: Database data is persisted in the postgres_data volume. Back this up regularly.
+
+  Initial setup: After first start, access http://localhost:3000 and complete the initial user setup wizard.
+
+  Email integration: For production, configure SMTP settings within the Documenso UI for email notifications.

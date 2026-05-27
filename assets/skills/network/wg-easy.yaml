@@ -1,0 +1,193 @@
+id: wg-easy
+name: WireGuard Easy (wg-easy)
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/wg-easy/wg-easy"
+  port_hints: [51820, 51821]
+category: network
+description: Self-hosted WireGuard VPN with easy web UI for peer management
+docs_url: https://github.com/WireGuard-Easy/WireGuard-Easy
+
+common_issues:
+  - id: web-ui-inaccessible
+    name: Web UI not accessible on port 51821
+    symptoms:
+      - "Cannot connect to web UI"
+      - "Connection refused on port 51821"
+      - "Web UI returns 403 or 404"
+      - "Blank page or timeout accessing WireGuard UI"
+    trigger_conditions:
+      - log_pattern: "listen|connection"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Verify container is running
+        type: check
+        command: "docker ps -f name={container_name} --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check if container exited with error
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify port 51821 is bound in container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 51821"
+        expected_output: "51821"
+        on_fail: step-4
+      - id: step-4
+        description: Display port binding status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check container logs for startup errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Restart wg-easy container to reinitialize web UI
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for web UI to become responsive
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:51821 || echo 'UI not responding'"
+        expected_output: "200"
+    resolution: |
+      The web UI on port 51821 was not responding. The container has been restarted. The web UI should now be accessible at http://<your-host>:51821. If the issue persists, check your firewall rules and ensure port 51821 is not blocked by the host or any upstream firewall.
+
+  - id: wireguard-tunnel-not-working
+    name: WireGuard tunnel not working, peers cannot connect
+    symptoms:
+      - "Peers added but cannot establish connection"
+      - "Tunnel offline or disconnected"
+      - "Peers show as connected in UI but no traffic passes"
+      - "Handshake failures in logs"
+    trigger_conditions:
+      - log_pattern: "handshake|connected|peer"
+    steps:
+      - id: step-1
+        description: Verify WireGuard kernel module is loaded on host
+        type: check
+        command: "lsmod | grep wireguard"
+        expected_output: "wireguard"
+        on_fail: step-2
+      - id: step-2
+        description: WireGuard kernel module not loaded, attempting load
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if NET_ADMIN capability is granted to container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .HostConfig.CapAdd}}{{.}}{{println}}{{end}}' | grep NET_ADMIN"
+        expected_output: "NET_ADMIN"
+        on_fail: step-4
+      - id: step-4
+        description: Display container capabilities status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify WG_HOST is set to your public IP or hostname
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"WG_HOST\"}}{{.}}{{end}}{{end}}'"
+        expected_output: "WG_HOST"
+        on_fail: step-6
+      - id: step-6
+        description: Display WG_HOST environment variable
+        type: inform
+        command: ""
+      - id: step-7
+        description: Inform user to configure WG_HOST correctly in UI or env
+        type: inform
+        command: ""
+      - id: step-8
+        description: Restart wg-easy to apply configuration changes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify tunnel is operational in logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      WireGuard requires the kernel module (wireguard), NET_ADMIN capability, and correct WG_HOST configuration. WG_HOST must be set to the public IP address or FQDN where peers will connect (e.g., your home's public IP or dynamic DNS hostname). Peers will fail to handshake if WG_HOST points to localhost or a private IP. The container has been restarted with current configuration. Verify peers can now establish a handshake by checking the web UI.
+
+default_config:
+  compose_template: |
+    services:
+      wg-easy:
+        image: ghcr.io/wg-easy/wg-easy:latest
+        container_name: wg-easy
+        restart: unless-stopped
+        network_mode: bridge
+        cap_add:
+          - NET_ADMIN
+          - SYS_MODULE
+        environment:
+          WG_HOST: ${WG_HOST}
+          PASSWORD: ${PASSWORD}
+          WG_PORT: 51820
+          WG_MTU: 1420
+          WG_PRIVATE_KEY: ${WG_PRIVATE_KEY:-}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/etc/wireguard
+          - /lib/modules:/lib/modules:ro
+        ports:
+          - "51820:51820/udp"
+          - "51821:51821/tcp"
+  required_vars:
+    - name: WG_HOST
+      description: Public IP address or FQDN where peers will connect (e.g., home.example.com or 203.0.113.42)
+      default: ""
+    - name: PASSWORD
+      description: Web UI login password
+      default: "changeme"
+    - name: WG_PRIVATE_KEY
+      description: WireGuard private key (leave blank for auto-generation on first run)
+      default: ""
+    - name: CONFIG_PATH
+      description: Host path to store WireGuard configuration and keys
+      default: "./config"
+  known_mounts:
+    - container_path: /etc/wireguard
+      purpose: WireGuard configuration, private keys, peer configs
+      recommended_permissions: "700"
+      owner: "root:root"
+    - container_path: /lib/modules
+      purpose: Access to host kernel modules (read-only)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  WireGuard Easy is a self-hosted VPN server with an intuitive web UI for adding and removing peers (clients). It abstracts away low-level WireGuard configuration while maintaining full VPN functionality.
+
+  **Critical setup:**
+  - WG_HOST must be set to your public IP address or fully-qualified domain name (FQDN). Peers use this to establish the initial connection. If WG_HOST is localhost, 127.0.0.1, or a private IP (192.168.x.x), peers cannot connect.
+  - PASSWORD is the web UI login password. Change it immediately on first deploy.
+  - Requires NET_ADMIN and SYS_MODULE capabilities to manage WireGuard kernel module.
+  - Requires /dev/net/tun to be accessible (handled by container runtime; some restrictive environments may need explicit device mount).
+
+  **Kernel module requirement:**
+  WireGuard requires the kernel module on the host. If `lsmod | grep wireguard` returns nothing:
+  - Ubuntu/Debian: `sudo apt install wireguard-tools` (module usually built-in in recent kernels)
+  - Alpine: `apk add wireguard-tools`
+  - Arch: `sudo pacman -S wireguard-tools`
+
+  **Configuration persistence:**
+  The /etc/wireguard volume stores all keys and peer configurations. Backup this directory to preserve peer access if the container is removed.
+
+  **Peer routing (optional):**
+  Containers or VMs can be routed through the wg-easy tunnel by joining its network (`network_mode: "service:wg-easy"`) or by adding a custom route in their network config. See gluetun.yaml for an example pattern of routing traffic through a VPN container.
+
+  **Common issues:**
+  - Handshake failures: Verify WG_HOST is reachable from peer networks; check firewall allows UDP 51820
+  - Web UI blank or no response: Container may be restarting; check logs for errors and NET_ADMIN capability
+  - Peers disappear after container restart: Ensure /etc/wireguard volume is mounted and persisted on host

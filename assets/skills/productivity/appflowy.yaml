@@ -1,0 +1,269 @@
+id: appflowy
+name: AppFlowy Cloud
+version: "1.0"
+container_match:
+  image_patterns:
+    - "appflowyio/appflowy_cloud"
+  port_hints: [8000]
+category: productivity
+description: Self-hosted Notion-like collaborative workspace backend
+docs_url: https://hub.docker.com/r/appflowyio/appflowy_cloud
+
+common_issues:
+  - id: postgres-connection-failed
+    name: Database connection refused
+    symptoms:
+      - "connection refused"
+      - "ECONNREFUSED"
+      - "postgres.*not running"
+      - "Failed to connect to database"
+    trigger_conditions:
+      - log_pattern: "connection refused.*postgres"
+      - log_pattern: "could not connect to database"
+    steps:
+      - id: step-1
+        description: Check if Postgres container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "appflowy.*postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers in this compose stack
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Postgres logs for errors
+        type: check
+        command: "docker logs appflowy-postgres-1 2>&1 | tail -20"
+        expected_output: ""
+      - id: step-4
+        description: Restart the Postgres container
+        type: fix
+        command: "docker restart appflowy-postgres-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify database is accessible from AppFlowy
+        type: check
+        command: "docker exec appflowy-appflowy-1 nc -zv appflowy-postgres-1 5432"
+        expected_output: "succeeded"
+    resolution: |
+      The Postgres database container has been restarted. AppFlowy should now establish a connection to the database. If the issue persists, check that DATABASE_URL environment variable is correctly set and that the postgres hostname resolves within the Docker network.
+
+  - id: redis-cache-unavailable
+    name: Redis cache is unavailable
+    symptoms:
+      - "Redis connection failed"
+      - "ERR NOAUTH"
+      - "cache.*disconnected"
+      - "Session storage unavailable"
+    trigger_conditions:
+      - log_pattern: "redis.*connection"
+      - log_pattern: "cache.*error"
+    steps:
+      - id: step-1
+        description: Verify Redis container is running
+        type: check
+        command: "docker ps | grep redis"
+        expected_output: "appflowy.*redis"
+        on_fail: step-2
+      - id: step-2
+        description: List all containers in AppFlowy stack
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Redis connectivity from AppFlowy
+        type: check
+        command: "docker exec appflowy-appflowy-1 redis-cli -h appflowy-redis-1 ping"
+        expected_output: "PONG"
+        on_fail: step-4
+      - id: step-4
+        description: Restart Redis to reinitialize cache
+        type: fix
+        command: "docker restart appflowy-redis-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify AppFlowy can reach Redis after restart
+        type: check
+        command: "docker logs appflowy-appflowy-1 2>&1 | grep -i 'redis.*success\\|cache.*ok' | tail -3"
+    resolution: |
+      Redis has been restarted. AppFlowy uses Redis for session storage and real-time collaboration caching. The application should now reconnect to the cache. If issues persist, verify that REDIS_URL environment variable is correctly set in the AppFlowy container.
+
+  - id: auth-service-unreachable
+    name: GoTrue authentication service not responding
+    symptoms:
+      - "Authentication failed"
+      - "401 Unauthorized"
+      - "Cannot sign in or sign up"
+      - "GoTrue service unreachable"
+    trigger_conditions:
+      - log_pattern: "auth.*failed"
+      - log_pattern: "401.*unauthorized"
+    steps:
+      - id: step-1
+        description: Check GoTrue container status
+        type: check
+        command: "docker ps -a | grep gotrue"
+        expected_output: "gotrue"
+        on_fail: step-2
+      - id: step-2
+        description: Display current container states
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test connectivity to GoTrue service
+        type: check
+        command: "docker exec appflowy-appflowy-1 curl -s -o /dev/null -w '%{http_code}' http://appflowy-gotrue-1:9999/health"
+        expected_output: "200"
+        on_fail: step-4
+      - id: step-4
+        description: Restart GoTrue authentication service
+        type: fix
+        command: "docker restart appflowy-gotrue-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify authentication service is responding
+        type: check
+        command: "docker logs appflowy-gotrue-1 2>&1 | tail -10"
+    resolution: |
+      The GoTrue authentication service has been restarted. AppFlowy should now be able to authenticate users. If login continues to fail, verify that GOTRUE_JWT_SECRET is set correctly and that the service can reach the database.
+
+  - id: mount-permission-config
+    name: Permission denied accessing configuration files
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot read config"
+      - "Failed to initialize configuration"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of config mount on host
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Fix ownership of config directory
+        type: fix
+        command: "chown -R 1000:1000 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify permissions were corrected
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: 1000"
+    resolution: |
+      The configuration directory ownership has been corrected. AppFlowy should now be able to read and write configuration files. Restart the container for changes to take effect.
+
+default_config:
+  compose_template: |
+    version: "3.8"
+    services:
+      appflowy:
+        image: appflowyio/appflowy_cloud:latest
+        container_name: appflowy
+        restart: unless-stopped
+        depends_on:
+          - appflowy-postgres
+          - appflowy-redis
+          - appflowy-gotrue
+        environment:
+          POSTGRES_HOST: appflowy-postgres
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: ${POSTGRES_DB:-appflowy}
+          POSTGRES_USER: ${POSTGRES_USER:-appflowy}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+          REDIS_URL: redis://appflowy-redis:6379
+          GOTRUE_URL: http://appflowy-gotrue:9999
+          GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET:-your-secret-jwt-key}
+          DATABASE_URL: postgresql://${POSTGRES_USER:-appflowy}:${POSTGRES_PASSWORD:-changeme}@appflowy-postgres:5432/${POSTGRES_DB:-appflowy}
+        ports:
+          - "8000:8000"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+
+      appflowy-postgres:
+        image: postgres:15-alpine
+        container_name: appflowy-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${POSTGRES_DB:-appflowy}
+          POSTGRES_USER: ${POSTGRES_USER:-appflowy}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./postgres_data}:/var/lib/postgresql/data
+
+      appflowy-redis:
+        image: redis:7-alpine
+        container_name: appflowy-redis
+        restart: unless-stopped
+        ports:
+          - "6379:6379"
+        volumes:
+          - ${REDIS_DATA_PATH:-./redis_data}:/data
+
+      appflowy-gotrue:
+        image: supabase/gotrue:latest
+        container_name: appflowy-gotrue
+        restart: unless-stopped
+        environment:
+          GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET:-your-secret-jwt-key}
+          GOTRUE_DB_DRIVER: postgres
+          DB_NAMESPACE: auth
+          DATABASE_URL: postgresql://${POSTGRES_USER:-appflowy}:${POSTGRES_PASSWORD:-changeme}@appflowy-postgres:5432/${POSTGRES_DB:-appflowy}
+        ports:
+          - "9999:9999"
+        depends_on:
+          - appflowy-postgres
+
+  required_vars:
+    - name: POSTGRES_DB
+      description: Postgres database name
+      default: "appflowy"
+    - name: POSTGRES_USER
+      description: Postgres username
+      default: "appflowy"
+    - name: POSTGRES_PASSWORD
+      description: Postgres password (strong)
+      default: "changeme"
+    - name: GOTRUE_JWT_SECRET
+      description: JWT secret for GoTrue authentication
+      default: "your-secret-jwt-key"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for Postgres data
+      default: "./postgres_data"
+    - name: REDIS_DATA_PATH
+      description: Host path for Redis data
+      default: "./redis_data"
+
+  known_mounts:
+    - container_path: /config
+      purpose: AppFlowy configuration and working files
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  AppFlowy Cloud is a self-hosted collaborative document platform. It consists of multiple services: the main AppFlowy application, Postgres for data storage, Redis for caching, and GoTrue for user authentication.
+
+  All services are interconnected via a Docker network. Ensure DATABASE_URL, REDIS_URL, and GOTRUE_URL environment variables are correctly set to allow AppFlowy to communicate with its dependencies.
+
+  Data persistence: Postgres and Redis data are stored in their respective volumes. Regular backups are recommended.
+
+  JWT Secret: Change GOTRUE_JWT_SECRET to a strong random value in production.
+
+  Common gotchas:
+  - Database connection failures: Verify Postgres is running and initialized before AppFlowy starts.
+  - Redis unavailable: Cache failures are non-fatal but degrade performance; restart Redis service.
+  - Authentication issues: Ensure GoTrue container is running and DATABASE_URL is correctly configured.

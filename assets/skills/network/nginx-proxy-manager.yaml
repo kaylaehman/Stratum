@@ -1,0 +1,285 @@
+id: nginx-proxy-manager
+name: Nginx Proxy Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "jc21/nginx-proxy-manager"
+  port_hints: [80, 81, 443]
+category: network
+description: User-friendly reverse proxy and SSL certificate manager with web-based UI
+docs_url: https://hub.docker.com/r/jc21/nginx-proxy-manager
+
+common_issues:
+  - id: admin-ui-unreachable
+    name: Admin dashboard not accessible
+    symptoms:
+      - "Cannot reach admin panel at port 81"
+      - "Connection refused on port 81"
+      - "Admin page returns 502 or 503"
+      - "Nginx Proxy Manager UI not loading"
+    trigger_conditions:
+      - log_pattern: "502|503"
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Verify admin port 81 is exposed in container
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '81'"
+        expected_output: "81"
+        on_fail: step-2
+      - id: step-2
+        description: Check if admin UI service is running
+        type: check
+        command: "docker exec {container_name} ps aux | grep 'backend\\|node' | grep -v grep"
+        expected_output: ""
+      - id: step-3
+        description: Display admin service status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check logs for admin service errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+      - id: step-5
+        description: Restart Nginx Proxy Manager to restore admin UI
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify admin UI is now responsive
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:81/"
+        expected_output: "200|301|302"
+    resolution: |
+      Nginx Proxy Manager has been restarted and the admin UI should now be accessible at port 81. The default login credentials are: email: admin@example.com, password: changeme. We strongly recommend changing these credentials immediately after first login. If the UI still does not load, check that port 81 is not blocked by your firewall and that the container has sufficient resources.
+
+  - id: default-admin-credentials
+    name: Default admin credentials still active (security risk)
+    symptoms:
+      - "Admin interface accessible with default credentials"
+      - "Default password not changed"
+      - "Security warning about weak authentication"
+    trigger_conditions:
+      - log_pattern: ""
+    steps:
+      - id: step-1
+        description: Confirm admin login with default credentials
+        type: check
+        command: "echo 'Attempting login with default credentials (admin@example.com / changeme)...'"
+        expected_output: ""
+      - id: step-2
+        description: Display password change instructions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Acknowledge security risk of default credentials
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Log in to admin UI and change default password
+        type: inform
+        command: ""
+      - id: step-5
+        description: Alternative: reset admin user via Docker command
+        type: fix
+        command: "docker exec {container_name} npm run reset:admin"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify admin credentials have been reset
+        type: check
+        command: "docker logs {container_name} | grep -i 'admin\\|reset' | tail -3"
+    resolution: |
+      Default admin credentials have been reset. The new admin user will have a secure password. Log in to the web UI to verify access and configure your preferred credentials. Store these credentials securely—the admin account has full control over all proxy configurations and SSL certificates.
+
+  - id: letsencrypt-certificate-renewal-failing
+    name: Let's Encrypt certificate renewal failing
+    symptoms:
+      - "Certificate renewal error in logs"
+      - "Certificate about to expire warning"
+      - "ACME challenge failed"
+      - "SSL certificate validation error"
+    trigger_conditions:
+      - log_pattern: "renewal.*fail"
+      - log_pattern: "ACME.*error"
+      - log_pattern: "certificate.*expire"
+    steps:
+      - id: step-1
+        description: Check certificate status in database
+        type: check
+        command: "docker exec {container_name} ls -la /data/ssl/certs/ | head -10"
+        expected_output: ""
+      - id: step-2
+        description: Review renewal logs for error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'certbot\\|acme\\|renewal' | tail -15"
+      - id: step-3
+        description: Verify firewall allows port 80 for HTTP-01 challenge
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if /etc/letsencrypt is mounted persistently
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 'letsencrypt'"
+        expected_output: "letsencrypt"
+        on_fail: step-5
+      - id: step-5
+        description: Display volume mount configuration
+        type: inform
+        command: ""
+      - id: step-6
+        description: Force certificate renewal by restarting service
+        type: fix
+        command: "docker exec {container_name} /bin/bash -c 'rm -f /data/ssl/certs/*/renewal-error-*.log' && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor renewal progress
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'certbot\\|success\\|issued' | tail -5"
+    resolution: |
+      Certificate renewal has been reset and the service restarted. Nginx Proxy Manager will now attempt renewal on the next scheduled run or immediately if the certificate is within the renewal window. Ensure port 80 is accessible from the internet for HTTP-01 ACME challenges. If renewal continues to fail, check firewall rules, DNS resolution, and verify the certificate in the web UI.
+
+  - id: proxy-rules-not-working
+    name: Proxy hosts not routing traffic correctly
+    symptoms:
+      - "Proxy host returns 502 Bad Gateway"
+      - "Proxy host not responding"
+      - "Upstream connection refused"
+      - "SSL handshake fails for proxied service"
+    trigger_conditions:
+      - log_pattern: "502|upstream.*refused"
+      - log_pattern: "ssl_error_rx_record_too_long"
+    steps:
+      - id: step-1
+        description: Check configured proxy rules in database
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:81/api/nginx/proxy-hosts"
+        expected_output: ""
+      - id: step-2
+        description: Verify backend service is reachable from Nginx container
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://{upstream_host}:{upstream_port}/"
+        expected_output: "200|301|302|401|403"
+        on_fail: step-3
+      - id: step-3
+        description: Display backend connectivity details
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test DNS resolution for backend hostname
+        type: check
+        command: "docker exec {container_name} nslookup {upstream_host} 8.8.8.8"
+        expected_output: ""
+      - id: step-5
+        description: Reload Nginx configuration to apply rule changes
+        type: fix
+        command: "docker exec {container_name} nginx -t && docker exec {container_name} nginx -s reload"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify proxy is now responding
+        type: check
+        command: "docker logs {container_name} | grep -i 'reload\\|success' | tail -3"
+    resolution: |
+      Nginx proxy configuration has been reloaded. Verify that your proxy host backend service is running and reachable from the Nginx container's perspective. Common causes: backend service is down, IP/hostname is incorrect, port is wrong, or firewall is blocking access. Check the proxy host configuration in the admin UI to ensure all settings are correct.
+
+default_config:
+  compose_template: |
+    services:
+      nginx-proxy-manager:
+        image: jc21/nginx-proxy-manager:latest
+        container_name: nginx-proxy-manager
+        restart: unless-stopped
+        ports:
+          - "80:80/tcp"
+          - "81:81/tcp"
+          - "443:443/tcp"
+        environment:
+          DB_MYSQL_HOST: db
+          DB_MYSQL_PORT: 3306
+          DB_MYSQL_USER: ${DB_USER:-npm}
+          DB_MYSQL_PASSWORD: ${DB_PASSWORD:-npm}
+          DB_MYSQL_NAME: ${DB_NAME:-npm}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+          - ${LETSENCRYPT_PATH:-./letsencrypt}:/etc/letsencrypt
+        depends_on:
+          - db
+      db:
+        image: mysql:8.0
+        container_name: npm-database
+        restart: unless-stopped
+        environment:
+          MYSQL_DATABASE: ${DB_NAME:-npm}
+          MYSQL_USER: ${DB_USER:-npm}
+          MYSQL_PASSWORD: ${DB_PASSWORD:-npm}
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+        volumes:
+          - ${DB_PATH:-./database}:/var/lib/mysql
+  required_vars:
+    - name: DB_USER
+      description: MySQL database user for Nginx Proxy Manager
+      default: "npm"
+    - name: DB_PASSWORD
+      description: MySQL database password
+      default: "npm"
+    - name: DB_NAME
+      description: MySQL database name
+      default: "npm"
+    - name: DB_ROOT_PASSWORD
+      description: MySQL root password
+      default: "rootpassword"
+    - name: DATA_PATH
+      description: Host path for Nginx Proxy Manager data and config
+      default: "./data"
+    - name: LETSENCRYPT_PATH
+      description: Host path for Let's Encrypt certificates
+      default: "./letsencrypt"
+    - name: DB_PATH
+      description: Host path for MySQL database files
+      default: "./database"
+  known_mounts:
+    - container_path: /data
+      purpose: Nginx Proxy Manager configuration, access logs, and database (SQLite fallback)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /etc/letsencrypt
+      purpose: Let's Encrypt certificate storage (persistent)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/mysql
+      purpose: MySQL database files (when using external MySQL)
+      recommended_permissions: "755"
+      owner: "999:999"
+
+notes: |
+  Nginx Proxy Manager provides an easy-to-use web interface for managing reverse proxy configurations and SSL certificates. It includes built-in support for Let's Encrypt with automatic renewal.
+
+  Default credentials:
+  - Email: admin@example.com
+  - Password: changeme
+  Change these immediately after first login for security.
+
+  Database: Requires either external MySQL or MariaDB. The included compose template sets up a MySQL service. Ensure the database container is healthy before starting Nginx Proxy Manager.
+
+  Let's Encrypt: Certificates are stored in /etc/letsencrypt and must be persistent across container restarts. NPM handles renewal automatically.
+
+  Access log locations:
+  - Proxy access logs: /data/logs/proxy/*.log
+  - Admin UI logs: /data/logs/npm/*.log
+
+  Upstream configuration:
+  - Forward Host: Set to the backend service address (hostname or IP)
+  - Forward Port: The port the backend service listens on
+  - Use SSL: Enable if backend uses HTTPS
+  - Block Common Exploits: Enable for additional security
+  - Websocket Support: Enable for websocket proxying (Nextcloud, etc.)
+
+  Common gotchas:
+  - 502 Bad Gateway: Backend service unreachable (check network, IP, port, firewall)
+  - Default credentials not changed: Security risk; change immediately
+  - Certificate renewal fails: Verify port 80 is open and DNS is correct
+  - Admin UI unavailable: Check port 81 is exposed and database is running
+  - Proxy host intermittently unreachable: May indicate database issues; check MySQL container

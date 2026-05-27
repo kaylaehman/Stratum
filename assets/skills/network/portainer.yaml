@@ -1,0 +1,255 @@
+id: portainer
+name: Portainer Community Edition
+version: "1.0"
+container_match:
+  image_patterns:
+    - "portainer/portainer-ce"
+    - "portainer/portainer"
+  port_hints: [9443, 8000]
+category: network
+description: Docker/Kubernetes container management UI with edge agent support
+docs_url: https://hub.docker.com/r/portainer/portainer-ce
+
+common_issues:
+  - id: docker-socket-permission
+    name: Docker socket permission denied
+    symptoms:
+      - "Cannot connect to Docker daemon"
+      - "permission denied /var/run/docker.sock"
+      - "Failed to retrieve Docker information"
+      - "Unable to list containers"
+    trigger_conditions:
+      - log_pattern: "permission denied.*docker.sock"
+      - log_pattern: "Cannot connect to Docker daemon"
+    steps:
+      - id: step-1
+        description: Inform about Docker socket exposure
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check docker.sock ownership and permissions on host
+        type: check
+        command: "ls -la /var/run/docker.sock"
+        expected_output: "root"
+        on_fail: step-3
+      - id: step-3
+        description: Verify docker.sock is mounted into Portainer container
+        type: check
+        command: "docker inspect {container_name} | grep -A 2 'docker.sock'"
+        expected_output: "docker.sock"
+      - id: step-4
+        description: Check if host docker group exists
+        type: check
+        command: "getent group docker"
+        expected_output: "docker"
+        on_fail: step-5
+      - id: step-5
+        description: Add Portainer container user to host docker group
+        type: fix
+        command: "docker exec {container_name} usermod -aG docker portainer"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Portainer to apply group membership
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Portainer requires access to the Docker socket (/var/run/docker.sock) to communicate with the Docker daemon. The container was granted docker group membership and restarted. Portainer should now be able to list containers, images, and networks. Note: exposing the Docker socket grants root-equivalent access; use a socket proxy (e.g. tecnativa/docker-socket-proxy) for production isolation.
+
+  - id: admin-password-init
+    name: Admin password not initialized or lost
+    symptoms:
+      - "Admin user not created"
+      - "Cannot log in with any password"
+      - "Forced password reset on every restart"
+      - "Authentication fails immediately"
+    trigger_conditions:
+      - log_pattern: "admin.*password.*not.*set"
+      - log_pattern: "initial setup"
+    steps:
+      - id: step-1
+        description: Check Portainer initialization status
+        type: check
+        command: "docker logs {container_name} | tail -20 | grep -i 'password\\|admin\\|initialization'"
+        expected_output: ""
+      - id: step-2
+        description: Verify data volume is persisted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}' | grep data"
+        expected_output: "data"
+        on_fail: step-3
+      - id: step-3
+        description: Display mount configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if initial admin must be set via environment variable or API
+        type: check
+        command: "docker exec {container_name} env | grep -i 'admin\\|password\\|portainer'"
+        expected_output: ""
+      - id: step-5
+        description: Set admin password via Portainer API
+        type: fix
+        command: "curl -X POST 'http://localhost:9000/api/users/admin/init' -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"CHANGE_ME_IMMEDIATELY\"}'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify admin user was created
+        type: check
+        command: "curl -s 'http://localhost:9000/api/users' | grep admin"
+    resolution: |
+      Portainer requires initial admin setup. The admin user has been created with a temporary password. Log in immediately and change the password to a secure value in Settings → Users. For future deployments, set ADMIN_PASSWORD environment variable or use stdin to initialize on first run.
+
+  - id: edge-agent-connection
+    name: Edge agent fails to connect or disconnects
+    symptoms:
+      - "Edge agent marked as unreachable"
+      - "Connection lost to remote edge agent"
+      - "Agent token expired or invalid"
+      - "Cannot pull agent logs from edge host"
+    trigger_conditions:
+      - log_pattern: "edge.*disconn"
+      - log_pattern: "agent.*offline"
+    steps:
+      - id: step-1
+        description: Verify Portainer is accessible on port 9000/8000
+        type: check
+        command: "ss -tlnp | grep -E '9000|8000'"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check edge compute environment in Portainer
+        type: check
+        command: "curl -s 'http://localhost:9000/api/edge/environments' | grep -i 'connected\\|status'"
+        expected_output: ""
+      - id: step-3
+        description: Display edge agent connection status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Regenerate edge agent token
+        type: fix
+        command: "curl -X POST 'http://localhost:9000/api/edge/registries' -H 'Content-Type: application/json' -d '{\"action\":\"regenerate\"}'"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Display new agent token for re-deployment
+        type: inform
+        command: ""
+      - id: step-6
+        description: Verify agent reconnection in logs
+        type: check
+        command: "docker logs {container_name} | tail -5 | grep -i 'agent.*connected'"
+    resolution: |
+      Edge agent tokens can expire or become invalid. A new token has been generated. If the agent remains unreachable, redeploy the agent on the edge host using the new token. Verify network connectivity between the edge host and Portainer (ports 8000 and 9000 must be reachable).
+
+  - id: https-certificate-error
+    name: HTTPS certificate error or self-signed cert warning
+    symptoms:
+      - "Certificate validation failed"
+      - "Cannot load Portainer in browser"
+      - "Your connection is not private"
+      - "Certificate expired"
+      - "ERR_SSL_PROTOCOL_ERROR"
+    trigger_conditions:
+      - log_pattern: "certificate.*error"
+      - log_pattern: "SSL.*failed"
+    steps:
+      - id: step-1
+        description: Verify HTTPS is enabled in Portainer
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if contains .Source \"ssl\"}}{{.Source}} {{end}}{{end}}'"
+        expected_output: ""
+      - id: step-2
+        description: Check certificate expiration date
+        type: check
+        command: "docker exec {container_name} openssl x509 -in /certs/portainer.crt -text -noout | grep -E 'Not Before|Not After'"
+        expected_output: "Not After"
+        on_fail: step-3
+      - id: step-3
+        description: Display certificate status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Regenerate self-signed certificate
+        type: fix
+        command: "docker exec {container_name} openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /certs/portainer.key -out /certs/portainer.crt -subj '/CN={container_name}'"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Portainer to load new certificate
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      A new self-signed HTTPS certificate has been generated. Portainer has been restarted. Your browser will warn about the self-signed cert; this is normal for self-hosted installations. For production, use a trusted CA certificate mounted at /certs/portainer.crt and /certs/portainer.key before startup.
+
+default_config:
+  compose_template: |
+    services:
+      portainer:
+        image: portainer/portainer-ce:latest
+        container_name: portainer
+        restart: unless-stopped
+        security_opt:
+          - no-new-privileges:true
+        networks:
+          - portainer-net
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - ${DATA_PATH:-./data}:/data
+          - ${CERTS_PATH:-./certs}:/certs
+        ports:
+          - "9443:9443/tcp"
+          - "8000:8000/tcp"
+        environment:
+          INITIAL_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+    networks:
+      portainer-net:
+        driver: bridge
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for persistent Portainer data (/data)
+      default: "./data"
+    - name: CERTS_PATH
+      description: Host path for SSL certificates (/certs)
+      default: "./certs"
+    - name: ADMIN_PASSWORD
+      description: Initial admin password (change immediately after first login)
+      default: "admin"
+  known_mounts:
+    - container_path: /data
+      purpose: Portainer configuration, database, and settings
+      recommended_permissions: "755"
+      owner: "0:0"
+    - container_path: /certs
+      purpose: HTTPS certificate and key files
+      recommended_permissions: "700"
+      owner: "0:0"
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket (read-only)
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Portainer is a lightweight management UI for Docker and Kubernetes. The Community Edition (CE) is free and supports single-host and edge deployments.
+
+  Default HTTPS port: 9443. Edge compute agent port: 8000.
+
+  Initial admin setup: The INITIAL_ADMIN_PASSWORD env var allows scripted first-run setup. If not set, Portainer will block access until admin is initialized via the API or UI.
+
+  Docker socket access: Portainer requires read access to /var/run/docker.sock. This grants significant privilege — consider using a socket proxy in production for better isolation.
+
+  Certificates: Self-signed by default. For production, mount valid certs at /certs/portainer.crt and /certs/portainer.key.
+
+  Edge agents: Use port 8000 for agent communication. Agents are deployed on remote Docker hosts and registered with the central Portainer instance.
+
+  Common gotchas:
+  - Docker socket permission: Ensure docker.sock is readable by the container user.
+  - Admin password: Set INITIAL_ADMIN_PASSWORD before first start; once created, it cannot be changed via env var.
+  - Certificate errors: Check certificate expiration or use a trusted CA cert in production.
+  - Edge agent offline: Verify network connectivity and regenerate token if needed.

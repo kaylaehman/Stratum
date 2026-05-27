@@ -1,0 +1,89 @@
+id: uptime-kuma
+name: Uptime Kuma
+version: "1.0"
+container_match:
+  image_patterns:
+    - "louislam/uptime-kuma"
+  port_hints: [3001]
+category: monitoring
+description: Self-hosted uptime monitoring with status pages and notifications
+docs_url: https://github.com/louislam/uptime-kuma
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on /app/data
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "SQLITE_CANTOPEN"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the data mount
+        type: check
+        command: "stat {data_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Chown data path to root (Uptime Kuma image runs as root by default)
+        type: fix
+        command: "chown -R root:root {data_path}"
+        requires_approval: true
+    resolution: |
+      Uptime Kuma stores its SQLite DB at /app/data. The directory must be
+      writable by the container's runtime user (root by default).
+
+  - id: notification-not-firing
+    name: Configured notifications are not sent
+    symptoms:
+      - "No notifications received on downtime"
+      - "Test notification returns 200 but no message arrives"
+    trigger_conditions:
+      - log_pattern: "notification.*failed"
+    steps:
+      - id: step-1
+        description: Surface recent notification errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'notification|webhook|smtp' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Inform about notification configuration
+        type: inform
+        command: ""
+    resolution: |
+      Verify the notification provider config inside Uptime Kuma's UI
+      (Settings → Notifications). For webhook-based providers, ensure the
+      target URL is reachable from the container's network — outbound HTTPS
+      may be blocked by firewall policy.
+
+default_config:
+  compose_template: |
+    services:
+      uptime-kuma:
+        image: louislam/uptime-kuma:latest
+        container_name: uptime-kuma
+        restart: unless-stopped
+        volumes:
+          - ${DATA_PATH:-./data}:/app/data
+        ports:
+          - "3001:3001"
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for /app/data (SQLite DB + uploads)
+      default: "./data"
+  known_mounts:
+    - container_path: /app/data
+      purpose: SQLite database, uploaded TLS certs, screenshots
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  First boot creates an admin user via the web wizard at port 3001 — keep
+  the UI behind a reverse proxy with auth or restrict to LAN.
+
+  For TLS monitoring of internal services, mount the trust store and add
+  certs to /etc/ssl/certs inside the container.

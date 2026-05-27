@@ -1,0 +1,157 @@
+id: beszel
+name: Beszel Server Monitoring Hub
+version: "1.0"
+container_match:
+  image_patterns:
+    - "henrygd/beszel"
+  port_hints: [8090]
+category: monitoring
+description: Lightweight centralized server monitoring hub for aggregating metrics from Beszel agents
+docs_url: https://hub.docker.com/r/henrygd/beszel
+
+common_issues:
+  - id: agent-connection-failure
+    name: Agent fails to connect to hub
+    symptoms:
+      - "Agent shows as offline in hub UI"
+      - "Connection refused or timeout errors in agent logs"
+      - "Agent unable to reach hub URL"
+      - "Metrics not appearing for registered agent"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "failed.*connect"
+      - log_pattern: "timeout"
+    steps:
+      - id: step-1
+        description: Check if Beszel hub is running and listening on port 8090
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8090"
+        expected_output: "LISTEN.*8090"
+        on_fail: step-2
+      - id: step-2
+        description: Display Beszel hub status and port binding
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify hub is reachable from agent host
+        type: check
+        command: "curl -s -I http://localhost:8090 | head -1"
+        expected_output: "HTTP"
+        on_fail: step-4
+      - id: step-4
+        description: Check firewall and network connectivity between agent and hub
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify agent key matches hub configuration
+        type: check
+        command: "docker logs {container_name} | grep -i 'key\\|auth' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Restart Beszel hub to reinitialize agent connections
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor hub logs for agent reconnection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'agent\\|connect' | tail -5"
+    resolution: |
+      Beszel hub has been restarted to reinitialize agent connections. Ensure all agents have the correct HUB_URL environment variable pointing to this hub's address (http://<hub-host>:8090) and that the KEY environment variable matches the key configured in the hub. Verify network connectivity from agent hosts to the hub host on port 8090.
+
+  - id: metrics-not-persisting
+    name: Metrics data is lost after container restart
+    symptoms:
+      - "Historical metrics disappear after restart"
+      - "Data point gaps in graphs"
+      - "Metrics reset to zero on restart"
+      - "No data older than restart time"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "data.*loss"
+    steps:
+      - id: step-1
+        description: Check if /beszel_data volume is mounted and persisting
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 'beszel_data'"
+        expected_output: "beszel_data"
+        on_fail: step-2
+      - id: step-2
+        description: Verify host path for /beszel_data has write permissions
+        type: check
+        command: "ls -ld {beszel_data_path} | awk '{print $1}'"
+        expected_output: "d"
+        on_fail: step-3
+      - id: step-3
+        description: Display /beszel_data mount and permissions
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check available disk space in /beszel_data mount
+        type: check
+        command: "df -h {beszel_data_path} | tail -1 | awk '{print $4}'"
+        expected_output: ""
+      - id: step-5
+        description: Verify database file exists and is not corrupted
+        type: check
+        command: "docker exec {container_name} ls -lh /beszel_data/ | grep -E 'db|database|sqlite'"
+        expected_output: ""
+      - id: step-6
+        description: Enable volume persistence by recreating container with correct mount
+        type: fix
+        command: "docker run -d --name beszel-new -p 8090:8090 -v beszel_data:/beszel_data henrygd/beszel:latest"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify metrics are now persisting across restarts
+        type: check
+        command: "docker logs beszel-new | tail -10"
+    resolution: |
+      Metrics persistence requires the /beszel_data directory to be mounted as a volume or bind mount on the host. The container has been configured to use a named volume for persistence. All metrics will now be preserved across container restarts. Ensure regular backups of the /beszel_data directory to prevent data loss.
+
+default_config:
+  compose_template: |
+    services:
+      beszel:
+        image: henrygd/beszel:latest
+        container_name: beszel
+        restart: unless-stopped
+        environment:
+          BESZEL_VERSION: latest
+        volumes:
+          - beszel_data:/beszel_data
+        ports:
+          - "8090:8090/tcp"
+    volumes:
+      beszel_data:
+  required_vars:
+    - name: BESZEL_VERSION
+      description: Beszel version tag to use
+      default: "latest"
+  known_mounts:
+    - container_path: /beszel_data
+      purpose: Metrics database and configuration persistence
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Beszel is a lightweight server monitoring hub designed to aggregate metrics from Beszel agents installed on remote nodes. It provides a centralized dashboard for CPU, memory, disk, and network metrics.
+
+  Architecture: One hub instance receives metrics from multiple agents. Each agent connects to the hub via HTTP and sends periodic metric snapshots. The hub stores metrics in a time-series database within /beszel_data.
+
+  Data persistence: All metrics are stored in /beszel_data. Use a named volume or bind mount on fast local storage (SSD preferred) to ensure metrics survive container restarts and for consistent performance.
+
+  Agent connection: Agents require HUB_URL (pointing to http://<hub-host>:8090) and KEY (a shared secret configured in the hub) environment variables. Verify network connectivity between agent and hub hosts on port 8090.
+
+  Port: Default port is 8090. Ensure this port is exposed and accessible from agent hosts.
+
+  Backup: The /beszel_data directory contains the metrics database. Include it in regular backups to protect historical data.
+
+  Common gotchas:
+  - Agents showing offline: Check HUB_URL, KEY, and network connectivity.
+  - Metrics missing after restart: Ensure /beszel_data is a persistent volume, not a container-local directory.
+  - Disk space issues: Monitor /beszel_data size; older metrics may need to be pruned if storage is limited.

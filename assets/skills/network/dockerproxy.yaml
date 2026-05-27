@@ -1,0 +1,290 @@
+id: dockerproxy
+name: Docker Socket Proxy
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/tecnativa/docker-socket-proxy"
+    - "tecnativa/docker-socket-proxy"
+  port_hints: [2375]
+category: network
+description: Security layer restricting Docker socket access via whitelist of allowed endpoints
+docs_url: https://hub.docker.com/r/tecnativa/docker-socket-proxy
+
+common_issues:
+  - id: socket-not-accessible
+    name: Docker socket not accessible to proxy
+    symptoms:
+      - "Cannot connect to Docker daemon"
+      - "permission denied /var/run/docker.sock"
+      - "docker-socket-proxy fails to start"
+      - "socket: permission denied"
+    trigger_conditions:
+      - log_pattern: "permission denied.*docker.sock"
+      - log_pattern: "dial unix.*permission denied"
+    steps:
+      - id: step-1
+        description: Verify /var/run/docker.sock exists and has correct permissions
+        type: check
+        command: "ls -la /var/run/docker.sock"
+        expected_output: "rw"
+        on_fail: step-2
+      - id: step-2
+        description: Check docker.sock is mounted into proxy container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if contains .Source \"docker.sock\"}}{{.Source}} {{end}}{{end}}'"
+        expected_output: "docker.sock"
+      - id: step-3
+        description: Verify docker.sock ownership
+        type: check
+        command: "stat /var/run/docker.sock | grep Uid"
+        expected_output: "root"
+      - id: step-4
+        description: Check docker group exists
+        type: check
+        command: "getent group docker"
+        expected_output: "docker"
+        on_fail: step-5
+      - id: step-5
+        description: Verify proxy container user
+        type: check
+        command: "docker inspect {container_name} --format='{{.Config.User}}'"
+        expected_output: ""
+      - id: step-6
+        description: Restart proxy container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Docker Socket Proxy requires read/write access to /var/run/docker.sock. The socket is owned by root:docker and must be mounted as-is into the proxy. The container has been restarted. If the issue persists, ensure the host docker group exists and docker.sock is readable by the container.
+
+  - id: permissive-socket-exposure
+    name: Over-permissive endpoint access configured
+    symptoms:
+      - "Security audit warns about open endpoints"
+      - "Clients have more Docker permissions than intended"
+      - "All Docker API endpoints exposed despite DENY defaults"
+      - "Sensitive operations (delete, remove) accidentally allowed"
+    trigger_conditions:
+      - log_pattern: "ALLOW.*true"
+    steps:
+      - id: step-1
+        description: Inform about Docker socket exposure risk
+        type: inform
+        command: ""
+      - id: step-2
+        description: List currently enabled endpoints in proxy configuration
+        type: check
+        command: "docker exec {container_name} env | grep -E '^(CONTAINERS|IMAGES|NETWORKS|VOLUMES|SERVICES|TASKS|EXEC|SWARM|NODES)=' | sort"
+        expected_output: ""
+      - id: step-3
+        description: Display current endpoint allowlist
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restrict to read-only operations: disable mutating endpoints
+        type: fix
+        command: "docker exec {container_name} sed -i 's/^DELETE=.*/DELETE=0/' /etc/environment && docker exec {container_name} sed -i 's/^POST=.*/POST=0/' /etc/environment"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart proxy with restricted permissions
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify restricted endpoints are applied
+        type: check
+        command: "docker exec {container_name} env | grep -E '^(DELETE|POST)='"
+    resolution: |
+      Docker Socket Proxy endpoints have been restricted. By default, all mutating operations (DELETE, POST, PUT) are now denied. Only reading operations (GET) are allowed for whitelisted endpoints. This reduces the attack surface if a client is compromised. Update connected clients to use read-only operations or explicitly enable only the endpoints they require.
+
+  - id: clients-unable-to-connect
+    name: Clients cannot connect to proxy or receive permission denied
+    symptoms:
+      - "Client fails to connect to proxy on port 2375"
+      - "connection refused"
+      - "403 Forbidden when calling Docker API through proxy"
+      - "Endpoint not allowed"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+      - log_pattern: "endpoint not allowed"
+    steps:
+      - id: step-1
+        description: Verify proxy is running and listening on port 2375
+        type: check
+        command: "docker ps | grep {container_name} | grep Up"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check proxy logs for errors
+        type: check
+        command: "docker logs {container_name} | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Verify port 2375 is published on host
+        type: check
+        command: "docker inspect {container_name} --format='{{range .PortBindings}}{{.}}{{end}}'"
+        expected_output: "2375"
+        on_fail: step-4
+      - id: step-4
+        description: Check if port 2375 is accessible from another container
+        type: check
+        command: "docker run --rm --network bridge alpine wget -qO- http://host.docker.internal:2375/version 2>&1 | head -5"
+        expected_output: ""
+      - id: step-5
+        description: Verify client has access to enabled endpoints
+        type: check
+        command: "docker logs {container_name} | grep -i 'allowed\\|denied' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Display endpoint configuration for client
+        type: inform
+        command: ""
+      - id: step-7
+        description: Restart proxy container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      The Docker Socket Proxy has been restarted. Verify your client is using the correct endpoint (http://dockerproxy:2375) and that the required API endpoints are enabled in the proxy environment variables. Check proxy logs to see which endpoints are being called and whether they are denied.
+
+  - id: endpoint-whitelist-misconfig
+    name: Required API endpoint is blocked
+    symptoms:
+      - "Specific Docker API call returns 403"
+      - "Cannot list containers: endpoint not allowed"
+      - "Cannot access volumes or networks"
+      - "403 Forbidden for /containers/json"
+    trigger_conditions:
+      - log_pattern: "403.*Forbidden"
+      - log_pattern: "endpoint not allowed"
+    steps:
+      - id: step-1
+        description: Identify which endpoint is blocked
+        type: check
+        command: "docker logs {container_name} | grep -i '403\\|forbidden\\|denied' | tail -5"
+        expected_output: ""
+      - id: step-2
+        description: Display proxy endpoint allowlist configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{.Config.Env}}' | tr ',' '\\n' | grep -E '^(CONTAINERS|IMAGES|NETWORKS|VOLUMES|SERVICES|TASKS|EXEC)=' | sort"
+        expected_output: ""
+      - id: step-3
+        description: Inform about endpoint requirements
+        type: inform
+        command: ""
+      - id: step-4
+        description: Enable required endpoint in proxy configuration
+        type: fix
+        command: "docker exec {container_name} env | grep CONTAINERS"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Update proxy environment variable
+        type: fix
+        command: "docker update --env-file /dev/stdin {container_name} <<< 'CONTAINERS=1' && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify endpoint is now accessible
+        type: check
+        command: "docker exec {container_name} wget -qO- http://localhost:2375/containers/json | head -5"
+    resolution: |
+      The required Docker API endpoint has been enabled in the proxy. The proxy has been restarted. The client can now access that endpoint. Review the Docker Socket Proxy documentation to understand which endpoints your application needs and enable only those required for operation.
+
+default_config:
+  compose_template: |
+    services:
+      dockerproxy:
+        image: ghcr.io/tecnativa/docker-socket-proxy:latest
+        container_name: dockerproxy
+        restart: unless-stopped
+        networks:
+          - docker-proxy-net
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+        ports:
+          - "2375:2375/tcp"
+        environment:
+          CONTAINERS: ${CONTAINERS:-1}
+          IMAGES: ${IMAGES:-1}
+          NETWORKS: ${NETWORKS:-1}
+          VOLUMES: ${VOLUMES:-0}
+          SERVICES: ${SERVICES:-0}
+          TASKS: ${TASKS:-0}
+          EXEC: ${EXEC:-0}
+          POST: ${POST:-0}
+          DELETE: ${DELETE:-0}
+          PUT: ${PUT:-0}
+    networks:
+      docker-proxy-net:
+        driver: bridge
+  required_vars:
+    - name: CONTAINERS
+      description: Allow /containers/* endpoints (1=allow, 0=deny)
+      default: "1"
+    - name: IMAGES
+      description: Allow /images/* endpoints
+      default: "1"
+    - name: NETWORKS
+      description: Allow /networks/* endpoints
+      default: "1"
+    - name: VOLUMES
+      description: Allow /volumes/* endpoints (dangerous if set to 1)
+      default: "0"
+    - name: SERVICES
+      description: Allow /services/* endpoints (Swarm mode)
+      default: "0"
+    - name: TASKS
+      description: Allow /tasks/* endpoints (Swarm mode)
+      default: "0"
+    - name: EXEC
+      description: Allow /exec/* endpoints (container shell access)
+      default: "0"
+    - name: POST
+      description: Allow POST/CREATE operations globally (dangerous)
+      default: "0"
+    - name: DELETE
+      description: Allow DELETE operations globally (dangerous)
+      default: "0"
+    - name: PUT
+      description: Allow PUT/UPDATE operations globally (dangerous)
+      default: "0"
+  known_mounts:
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket (read-only)
+      recommended_permissions: "660"
+      owner: "root:docker"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Docker Socket Proxy provides a security layer between clients and the Docker daemon. It uses an allowlist model: by default, all operations are DENIED, and only whitelisted endpoints are exposed.
+
+  Port: 2375 (unencrypted HTTP). For production, use a reverse proxy with TLS.
+
+  Endpoint environment variables:
+  - CONTAINERS=1 allows /containers/* GET operations
+  - IMAGES=1 allows /images/* GET operations
+  - NETWORKS=1 allows /networks/* GET operations
+  - VOLUMES=1 allows /volumes/* GET operations (DANGEROUS for untrusted clients)
+  - SERVICES=1, TASKS=1 enable Swarm mode endpoints
+  - EXEC=1 allows /exec/* (container shell access) — DANGEROUS
+  - POST=1, DELETE=1, PUT=1 enable mutating operations globally (DANGEROUS)
+
+  Security model: This proxy is designed for internal Docker networks where clients are somewhat trusted. Do NOT expose port 2375 to the internet. Clients connecting to the proxy still need appropriate permissions; compromised clients can still perform all allowed operations.
+
+  Per-endpoint blocking: For fine-grained control, build a custom proxy or use authentication on the proxy endpoint.
+
+  Use cases:
+  - Portainer: needs CONTAINERS, IMAGES, NETWORKS, VOLUMES, SERVICES, TASKS
+  - Log aggregators (e.g., Loki): needs CONTAINERS only
+  - Health check scripts: need CONTAINERS only
+
+  Common gotchas:
+  - Socket not mounted: Proxy cannot communicate with Docker.
+  - Over-permissive: All endpoints enabled defeats the purpose; be explicit.
+  - No TLS: Use behind a reverse proxy with valid certificate for production.
+  - Endpoint misconfiguration: Check proxy logs if clients see "403 Forbidden".

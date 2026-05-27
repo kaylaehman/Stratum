@@ -1,0 +1,157 @@
+id: excalidraw
+name: Excalidraw
+version: "1.0"
+container_match:
+  image_patterns:
+    - "excalidraw/excalidraw"
+  port_hints: [80]
+category: productivity
+description: Virtual whiteboard application for collaborative drawing and diagramming
+docs_url: https://hub.docker.com/r/excalidraw/excalidraw
+
+common_issues:
+  - id: container-not-responding
+    name: Container fails to start or returns 404 errors
+    symptoms:
+      - "Connection refused on configured port"
+      - "404 Not Found"
+      - "Container exits immediately"
+      - "Service unavailable"
+    trigger_conditions:
+      - log_pattern: "exit.*code"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check container logs for errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-2
+        description: Verify container is running
+        type: check
+        command: "docker ps -a | grep {container_name}"
+        expected_output: "{container_name}.*Up"
+        on_fail: step-3
+      - id: step-3
+        description: Display container state
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart the container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify container stability after restart
+        type: check
+        command: "sleep 3 && docker ps | grep {container_name} | grep Up"
+        expected_output: "Up"
+    resolution: |
+      The Excalidraw container has been restarted. Excalidraw is a stateless web application, so most startup issues resolve with a container restart. Verify you can access the application at the configured port (default 80). If the container continues to fail, check for port conflicts or resource constraints.
+
+  - id: collaboration-not-working
+    name: Real-time collaboration not working or room server unavailable
+    symptoms:
+      - "Cannot create collaboration room"
+      - "Room link doesn't work"
+      - "Cannot share drawings with others"
+      - "WebSocket connection errors in console"
+    trigger_conditions:
+      - log_pattern: "websocket"
+      - log_pattern: "room.*error"
+    steps:
+      - id: step-1
+        description: Display information about collaboration setup
+        type: inform
+        command: ""
+      - id: step-2
+        description: Verify Excalidraw is accessible
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost 2>&1 | head -5"
+        expected_output: ""
+      - id: step-3
+        description: Check for collaboration room server configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i room"
+        expected_output: ""
+      - id: step-4
+        description: Inform about optional collaboration server
+        type: inform
+        command: ""
+    resolution: |
+      Excalidraw supports real-time collaboration via an optional room server. The base container provides full drawing functionality but without a room server backend, live collaboration over shared links is limited. To enable collaboration, deploy an additional Excalidraw Server container and configure it. Alternatively, Excalidraw.com provides free collaboration, or Excalidraw can work in local-only (same-device) mode without server.
+
+  - id: interface-displays-incorrectly
+    name: UI broken, missing assets, or styling issues
+    symptoms:
+      - "Layout looks broken or misaligned"
+      - "Missing icons or toolbars"
+      - "Blank canvas or UI elements"
+      - "CSS or JavaScript errors in browser console"
+    trigger_conditions:
+      - log_pattern: "404"
+    steps:
+      - id: step-1
+        description: Clear browser cache and reload page
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check container health
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+      - id: step-3
+        description: Verify static assets are being served
+        type: check
+        command: "docker exec {container_name} ls -la /app/public 2>&1 | head -5"
+        expected_output: ""
+      - id: step-4
+        description: Restart container to reset application state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify application is serving correctly
+        type: check
+        command: "sleep 2 && docker exec {container_name} curl -s http://localhost | grep -q 'Excalidraw' && echo 'OK' || echo 'Still initializing'"
+    resolution: |
+      The Excalidraw container has been restarted. Hard refresh your browser (Ctrl+Shift+R or Cmd+Shift+R) to clear any stale assets. Since Excalidraw is a stateless client-side application, styling issues typically resolve after a full page reload and restart. If problems persist, check reverse proxy (if used) configuration for proper content type headers.
+
+default_config:
+  compose_template: |
+    services:
+      excalidraw:
+        image: excalidraw/excalidraw:latest
+        container_name: excalidraw
+        restart: unless-stopped
+        ports:
+          - "80:80/tcp"
+  required_vars: []
+  known_mounts: []
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Excalidraw is a lightweight, stateless virtual whiteboard application. No database or persistent storage is required—all drawings are stored client-side in browser local storage or user exports.
+
+  Features: Freehand drawing, shape insertion (rectangle, circle, diamond, arrow), text, image embedding, dark mode, multiple export formats (PNG, SVG, JSON), and optional real-time collaboration.
+
+  Collaboration: By default, Excalidraw provides limited collaboration without an external server. To enable live real-time collaboration with room sharing:
+  1. Deploy excalidraw-server as a separate container.
+  2. Configure Excalidraw client to point to your server instance.
+  3. Users can then create shareable room links.
+
+  Local mode: Users can still collaborate by manually importing/exporting .excalidraw files or exporting snapshots, without any server.
+
+  Performance: Extremely lightweight; runs on minimal resources. Suitable for any host size.
+
+  Security: All drawing data stays on the client (browser) by default. When collaboration server is deployed, ensure it is behind HTTPS and firewall as appropriate.
+
+  Browser support: Works on any modern browser supporting Canvas and local storage.
+
+  Updates: Pull latest image tag for bug fixes and new features.
+
+  Use case: Quick diagram sketching, architecture design, wireframing, brainstorming—ideal for teams needing a simple, self-hosted drawing tool.

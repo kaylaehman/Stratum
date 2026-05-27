@@ -1,0 +1,311 @@
+id: loki
+name: Loki Log Aggregator
+version: "1.0"
+container_match:
+  image_patterns:
+    - "grafana/loki"
+    - "loki"
+  port_hints: [3100]
+category: monitoring
+description: Scalable log aggregation system with label-based indexing and efficient storage
+docs_url: https://hub.docker.com/r/grafana/loki
+
+common_issues:
+  - id: config-not-found
+    name: Loki fails to start; configuration file not found or invalid
+    symptoms:
+      - "failed to load config"
+      - "config.yml not found"
+      - "YAML unmarshal error"
+      - "Cannot read configuration"
+    trigger_conditions:
+      - log_pattern: "failed to load.*config"
+      - log_pattern: "YAML.*error"
+    steps:
+      - id: step-1
+        description: Check if loki-config.yaml is mounted into the container
+        type: check
+        command: "docker inspect {container_name} | grep -A 10 'Mounts' | grep config"
+        expected_output: "/etc/loki"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume mounts
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify the config file exists on the host
+        type: check
+        command: "test -f {config_path}/loki-config.yaml && echo 'File exists' || echo 'File not found'"
+        expected_output: "exists"
+        on_fail: step-4
+      - id: step-4
+        description: Display config file location and status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check for YAML syntax errors in the config file
+        type: check
+        command: "docker run --rm -v {config_path}:/config influxdb:latest yaml-lint /config/loki-config.yaml 2>&1 || echo 'Install yaml-lint or check manually'"
+        expected_output: ""
+      - id: step-6
+        description: Create a minimal valid loki-config.yaml if missing
+        type: fix
+        command: "cat > {config_path}/loki-config.yaml << 'EOF'\nauth_enabled: false\ningester:\n  chunk_idle_period: 5m\n  max_chunk_age: 1h\nschema_config:\n  configs:\n    - from: 2020-05-15\n      store: boltdb\n      object_store: filesystem\n      schema: v11\n      index:\n        prefix: index_\n        period: 24h\nstorage_config:\n  boltdb:\n    directory: /loki/boltdb-shipper-cache\n  filesystem:\n    directory: /loki/chunks\nserver:\n  http_listen_port: 3100\nEOF"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Loki with the corrected configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify Loki started successfully
+        type: check
+        command: "sleep 3 && docker logs {container_name} | tail -10"
+    resolution: |
+      A minimal loki-config.yaml has been created or verified. The configuration uses the filesystem backend for local storage (suitable for single-node setups) and defaults to boltdb for indexing. Loki should now start without configuration errors. For production or distributed setups, configure alternative storage backends (S3, GCS, or distributed object stores).
+
+  - id: permission-denied-storage
+    name: Permission denied writing to /loki/chunks or /loki/boltdb-shipper-cache
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to /loki"
+      - "Failed to create index directory"
+    trigger_conditions:
+      - log_pattern: "permission denied.*loki"
+      - log_pattern: "EACCES.*chunks"
+    steps:
+      - id: step-1
+        description: Check current ownership of the Loki data directories
+        type: check
+        command: "stat {mount_path} | head -10"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display directory ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check which user Loki runs as inside container
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: "uid="
+      - id: step-4
+        description: Inform about Loki user requirements
+        type: inform
+        command: ""
+      - id: step-5
+        description: Recursively fix ownership of the data directories
+        type: fix
+        command: "chown -R 10001:10001 {mount_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Set appropriate permissions on the data directories
+        type: fix
+        command: "chmod -R 755 {mount_path}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart Loki to confirm write access
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify successful startup and write access
+        type: check
+        command: "sleep 3 && docker logs {container_name} | grep -i 'ready\\|started' | head -5"
+    resolution: |
+      The /loki data directories ownership was corrected to match the Loki process user (UID 10001). Loki can now write index and chunk data to the storage backend. Ensure all bind-mounted storage directories on the host have consistent ownership for smooth operation across container restarts.
+
+  - id: connection-refused
+    name: Unable to connect to Loki on port 3100
+    symptoms:
+      - "Connection refused on port 3100"
+      - "Cannot connect to Loki HTTP API"
+      - "curl: (7) Failed to connect"
+      - "Promtail unable to reach Loki"
+    trigger_conditions:
+      - log_pattern: "address already in use"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if Loki is listening on port 3100
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 3100"
+        expected_output: "LISTEN.*3100"
+        on_fail: step-2
+      - id: step-2
+        description: Verify port 3100 is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '3100'"
+        expected_output: "3100"
+        on_fail: step-3
+      - id: step-3
+        description: Display port configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if another process is using port 3100 on the host
+        type: check
+        command: "ss -tlnp | grep 3100"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Display process using port 3100
+        type: inform
+        command: ""
+      - id: step-6
+        description: Verify Loki container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+        on_fail: step-7
+      - id: step-7
+        description: Display container status
+        type: inform
+        command: ""
+      - id: step-8
+        description: Check Loki logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-9
+        description: Restart Loki to restore connectivity
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-10
+      - id: step-10
+        description: Wait for startup and verify Loki API is responding
+        type: check
+        command: "sleep 3 && docker exec {container_name} curl -s http://localhost:3100/ready || echo 'API not ready yet'"
+    resolution: |
+      Loki has been restarted and the HTTP API on port 3100 should now be accepting connections. If the connection is still refused, verify your docker-compose port mapping is correct (ports: - "3100:3100") and that no other service on the host is already using port 3100. Check Loki logs for any configuration or storage backend errors.
+
+  - id: logs-not-persisting
+    name: Logs are not being stored or persisted between restarts
+    symptoms:
+      - "Logs disappear after container restart"
+      - "Historical logs not available"
+      - "Only recent logs visible"
+      - "Log queries return empty results"
+    trigger_conditions:
+      - log_pattern: "no data"
+      - log_pattern: "query returned empty"
+    steps:
+      - id: step-1
+        description: Verify Loki storage directory is mounted as a persistent volume
+        type: check
+        command: "docker inspect {container_name} | grep -A 10 'Mounts' | grep loki"
+        expected_output: "/loki"
+        on_fail: step-2
+      - id: step-2
+        description: Display current volume configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if /loki/chunks directory exists and contains data
+        type: check
+        command: "test -d {mount_path}/chunks && find {mount_path}/chunks -type f | wc -l"
+        expected_output: ""
+      - id: step-4
+        description: Display storage directory contents
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check Loki storage config in configuration file
+        type: check
+        command: "grep -A 5 'storage_config:' {config_path}/loki-config.yaml"
+        expected_output: ""
+      - id: step-6
+        description: Ensure config specifies filesystem or other persistent backend
+        type: inform
+        command: ""
+      - id: step-7
+        description: Verify retention policy is not set to 0 or very short
+        type: check
+        command: "grep -i 'retention' {config_path}/loki-config.yaml || echo 'No explicit retention found'"
+        expected_output: ""
+      - id: step-8
+        description: Check ingester chunk idle period in config
+        type: check
+        command: "grep -i 'chunk_idle_period' {config_path}/loki-config.yaml"
+        expected_output: ""
+      - id: step-9
+        description: Restart Loki to ensure clean startup with persistent storage
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-10
+      - id: step-10
+        description: Verify logs are being indexed and stored
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'storage\\|ingester\\|ready' | tail -5"
+    resolution: |
+      Loki has been restarted with persistent storage verified. Logs should now be retained between container restarts if a persistent volume is properly mounted at /loki. Verify that:
+      1. The /loki mount is a named volume or bind mount (not ephemeral)
+      2. The storage_config backend in loki-config.yaml matches the mount type (filesystem for local, S3/GCS for cloud)
+      3. Retention policies allow logs to persist long enough for your use case
+      4. Promtail or other log shippers are configured to send logs to the Loki server
+
+default_config:
+  compose_template: |
+    services:
+      loki:
+        image: grafana/loki:latest
+        container_name: loki
+        restart: unless-stopped
+        ports:
+          - "3100:3100/tcp"
+        volumes:
+          - ${LOKI_CONFIG_PATH:-./loki-config.yaml}:/etc/loki/local-config.yaml
+          - ${LOKI_DATA_PATH:-./loki}:/loki
+        command: -config.file=/etc/loki/local-config.yaml
+        environment:
+          LOKI_RETENTION_ENABLED: "true"
+  required_vars:
+    - name: LOKI_CONFIG_PATH
+      description: Host path to loki-config.yaml configuration file
+      default: "./loki-config.yaml"
+    - name: LOKI_DATA_PATH
+      description: Host path for /loki (chunks, index, and WAL storage)
+      default: "./loki"
+  known_mounts:
+    - container_path: /etc/loki
+      purpose: Loki configuration directory
+      recommended_permissions: "755"
+      owner: "10001:10001"
+    - container_path: /loki
+      purpose: Log storage (chunks, index, and boltdb-shipper cache for filesystem backend)
+      recommended_permissions: "755"
+      owner: "10001:10001"
+
+notes: |
+  Loki is a lightweight, scalable log aggregation system designed to be used with Grafana. It uses label-based indexing rather than full-text indexing to keep storage and performance efficient.
+
+  Storage backends: This skill assumes filesystem-based storage (boltdb index + filesystem object store) suitable for single-node or small deployments. For distributed setups, configure:
+  - S3 or S3-compatible object stores (MinIO, DigitalOcean Spaces) for chunks
+  - DynamoDB or other distributed index backend for larger scale
+  - Consul for distributed coordination
+
+  Configuration: Loki requires a config file (usually YAML). The file must be mounted into /etc/loki/ and referenced via the -config.file command line argument. A minimal config includes:
+  - auth_enabled: false (for local setups)
+  - schema_config with store and object_store backend definitions
+  - ingester settings for chunk idle period and max age
+  - storage_config with backend path or credentials
+
+  Labels: Unlike traditional logs, Loki queries are based on label matching (e.g., {job="my-app"}). Logs are indexed by labels, not full-text. Configure Promtail or other shippers to apply meaningful labels like job, service, pod, etc.
+
+  Retention: Logs can be automatically deleted after a retention period via table retention settings. For filesystem backend, set per-table retention in the config. For distributed backends (S3, etc.), retention is applied at table creation time.
+
+  Promtail: Pair Loki with Promtail (log shipper) to collect logs from Docker containers, systemd, or files. Configure Promtail to scrape Docker logs and forward to http://loki:3100/loki/api/v1/push.
+
+  Performance: For high-volume log ingestion, tune:
+  - chunk_idle_period: Time before flushing idle chunks (default 5m)
+  - max_chunk_age: Maximum age before forcefully flushing (default 1h)
+  - ingester replicas for HA
+  - Query parallelization and caching in Grafana

@@ -1,0 +1,289 @@
+id: healthchecks
+name: Healthchecks Self-Hosted Service Monitoring
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/healthchecks"
+  port_hints: [8000]
+category: monitoring
+description: Self-hosted status page and monitoring service (healthchecks.io alternative)
+docs_url: https://hub.docker.com/r/linuxserver/healthchecks
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied errors in logs"
+      - "Cannot write to config directory"
+      - "Database initialization fails"
+      - "EACCES errors on startup"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership has been corrected to match the container's running UID/GID. Healthchecks should now be able to write configuration and database files. The service may need to be restarted for changes to take full effect.
+
+  - id: database-connection-failure
+    name: Database connection error or initialization failure
+    symptoms:
+      - "Database connection refused"
+      - "Unable to initialize database"
+      - "Postgres connection failed"
+      - "SQLite database locked errors"
+      - "Service cannot start due to database error"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "connection.*refused"
+      - log_pattern: "sqlite.*locked"
+    steps:
+      - id: step-1
+        description: Check if database environment variables are configured
+        type: check
+        command: "docker inspect {container_name} | grep -E 'DB_|DATABASE'"
+        expected_output: "DB_"
+        on_fail: step-2
+      - id: step-2
+        description: Display database configuration in use
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database service is running (for PostgreSQL/MySQL)
+        type: check
+        command: "docker ps | grep -E 'postgres|mysql|mariadb'"
+        expected_output: ""
+      - id: step-4
+        description: Test database connectivity from healthchecks container
+        type: check
+        command: "docker exec {container_name} python manage.py migrate --check 2>&1"
+        expected_output: "migrate"
+        on_fail: step-5
+      - id: step-5
+        description: Attempt to run database migrations
+        type: fix
+        command: "docker exec {container_name} python manage.py migrate"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Create database superuser if needed
+        type: fix
+        command: "docker exec {container_name} python manage.py createsuperuser --noinput --email admin@healthchecks.local"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart healthchecks to apply database changes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify database initialization was successful
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      Database migrations have been applied and the healthchecks service has been restarted. If using SQLite (default), ensure the /config volume has sufficient disk space and is not corrupted. For PostgreSQL/MySQL, verify the database server is reachable from the healthchecks container and that DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASSWORD are correctly configured in environment variables.
+
+  - id: uid-gid-mismatch
+    name: UID/GID mismatch causing permission and ownership issues
+    symptoms:
+      - "Files in /config owned by wrong user"
+      - "Permission denied on config files"
+      - "Cannot delete or modify files via web UI"
+      - "Database file ownership incorrect"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "no such file"
+    steps:
+      - id: step-1
+        description: Check container's running UID/GID
+        type: check
+        command: "docker exec {container_name} id"
+        expected_output: "uid="
+      - id: step-2
+        description: Display files in /config and their ownership
+        type: check
+        command: "ls -ln {config_path} | head -10"
+        expected_output: ""
+      - id: step-3
+        description: Compare container UID with file ownership
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify PUID and PGID environment variables match intended ownership
+        type: check
+        command: "docker inspect {container_name} | grep -E 'PUID|PGID'"
+        expected_output: "PUID"
+      - id: step-5
+        description: Recursively change /config ownership to match container UID/GID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Update file permissions for read/write access
+        type: fix
+        command: "chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify ownership and permissions are now correct
+        type: check
+        command: "ls -ln {config_path} | grep {puid}"
+    resolution: |
+      The /config directory and all files have been updated to be owned by the container's UID:GID (PUID:PGID). This ensures the healthchecks service has proper read/write access to configuration files and the database. If you plan to modify files on the host directly, ensure your user account has appropriate permissions to the /config directory.
+
+  - id: web-ui-not-loading
+    name: Web UI returns errors or fails to load
+    symptoms:
+      - "502 Bad Gateway or 500 Internal Server Error"
+      - "Static files not loading (CSS/JS)"
+      - "Login page doesn't appear"
+      - "Stuck on loading screen"
+    trigger_conditions:
+      - log_pattern: "500"
+      - log_pattern: "error"
+      - log_pattern: "static.*not found"
+    steps:
+      - id: step-1
+        description: Check if container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Display container status and recent logs
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify port 8000 is listening in container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8000"
+        expected_output: "LISTEN"
+        on_fail: step-4
+      - id: step-4
+        description: Display port binding status
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check for Python/Django application errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|traceback' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Collect static files for web UI
+        type: fix
+        command: "docker exec {container_name} python manage.py collectstatic --noinput"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart healthchecks service
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Wait and verify web UI is now accessible
+        type: check
+        command: "sleep 5 && curl -s -o /dev/null -w '%{http_code}' http://localhost:8000"
+        expected_output: "200"
+    resolution: |
+      Static files have been collected and the healthchecks service has been restarted. The web UI should now be accessible at http://localhost:8000. If you continue to see errors, check the container logs for Django application errors and verify that the database is properly initialized and accessible.
+
+default_config:
+  compose_template: |
+    services:
+      healthchecks:
+        image: linuxserver/healthchecks:latest
+        container_name: healthchecks
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          SECRET_KEY: ${SECRET_KEY:-changeme-generate-secure-key}
+          DEBUG: ${DEBUG:-False}
+          ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+          DB_TARGET: ${DB_TARGET:-sqlite}
+          CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8000}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "8000:8000/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run healthchecks as
+      default: "1000"
+    - name: PGID
+      description: Group ID for healthchecks
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: SECRET_KEY
+      description: Django secret key (generate securely)
+      default: "changeme-generate-secure-key"
+    - name: DEBUG
+      description: Django debug mode (False for production)
+      default: "False"
+    - name: ALLOWED_HOSTS
+      description: Comma-separated list of allowed hosts
+      default: "localhost,127.0.0.1"
+    - name: DB_TARGET
+      description: Database backend (sqlite, postgres, mysql)
+      default: "sqlite"
+    - name: CONFIG_PATH
+      description: Host path for /config (database and settings)
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: Database, configuration, and uploaded files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Healthchecks is a self-hosted status page and uptime monitoring service compatible with healthchecks.io. It enables teams to monitor periodic tasks, scheduled jobs, and services without relying on external services.
+
+  Database setup: By default uses SQLite stored in /config. For multi-user or high-traffic deployments, configure PostgreSQL or MySQL using DB_TARGET and related environment variables.
+
+  LinuxServer.io conventions: Uses PUID/PGID for proper file ownership. Ensure /config is owned by the specified UID:GID to prevent permission issues.
+
+  Secret key: Generate a secure SECRET_KEY and store it safely. This key is used for password hashing and session encryption. Never commit or share this key.
+
+  Web UI configuration: Set ALLOWED_HOSTS to include your domain or IP. For HTTPS behind a reverse proxy, set CSRF_TRUSTED_ORIGINS to your public URL.
+
+  First run: On first start, the database will be initialized and you can access the web UI at http://localhost:8000. Use the web interface to create an account and configure checks.
+
+  Backup: The /config directory contains all data including the database. Back it up regularly to preserve check history and configuration.
+
+  Common gotchas:
+  - Permission denied: Ensure /config ownership matches PUID:PGID (UID/GID mismatch is the most common LinuxServer issue).
+  - Database locked: If using SQLite, ensure only one instance is running; running multiple containers against the same SQLite database causes locking.
+  - Static files missing: Run `python manage.py collectstatic` if CSS/JS don't load; may happen after updates.
+  - SECRET_KEY not set: Always set a unique SECRET_KEY; default changeme value is not secure.

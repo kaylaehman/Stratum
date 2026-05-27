@@ -1,0 +1,294 @@
+id: adguardhome
+name: AdGuard Home DNS Blocker
+version: "1.0"
+container_match:
+  image_patterns:
+    - "adguard/adguardhome"
+  port_hints: [53, 80, 3000]
+category: network
+description: Network-wide DNS ad blocker and parental control solution with web interface
+docs_url: https://hub.docker.com/r/adguard/adguardhome
+
+common_issues:
+  - id: setup-wizard-unreachable
+    name: Cannot access AdGuard Home setup wizard on port 3000
+    symptoms:
+      - "Cannot connect to http://host:3000"
+      - "Connection refused on port 3000"
+      - "First-run setup wizard not responding"
+      - "Port 3000 unreachable"
+    trigger_conditions:
+      - log_pattern: "listen.*error"
+      - log_pattern: "Address already in use"
+    steps:
+      - id: step-1
+        description: Check if AdGuard Home process is running
+        type: check
+        command: "docker exec {container_name} ps aux | grep AdGuardHome | grep -v grep"
+        expected_output: "AdGuardHome"
+        on_fail: step-2
+      - id: step-2
+        description: Display AdGuard Home process status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if port 3000 is bound in the container
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 3000"
+        expected_output: "LISTEN.*3000"
+        on_fail: step-4
+      - id: step-4
+        description: Display listening ports in container
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check if port 3000 is published by the container
+        type: check
+        command: "docker ps --filter 'name={container_name}' --format 'table {{.Ports}}' | grep 3000"
+        expected_output: "3000"
+        on_fail: step-6
+      - id: step-6
+        description: Restart AdGuard Home container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for AdGuard Home to start and verify port 3000 is open
+        type: check
+        command: "sleep 5 && curl -s http://localhost:3000 | head -5"
+    resolution: |
+      Port 3000 is where AdGuard Home runs its initial setup wizard. The container has been restarted. You should now be able to access the setup wizard at http://<host-ip>:3000. Complete the setup wizard to configure your admin password and DNS settings. After setup completes, the admin dashboard will be available on port 80.
+
+  - id: dns-port-53-conflict
+    name: DNS port 53 conflict or DNS not resolving
+    symptoms:
+      - "Port 53 already in use"
+      - "Cannot resolve DNS queries"
+      - "DNS requests timing out"
+      - "Listen error on port 53"
+    trigger_conditions:
+      - log_pattern: "Address already in use"
+      - log_pattern: "failed.*53"
+      - log_pattern: "REFUSED"
+    steps:
+      - id: step-1
+        description: Check what service is listening on port 53
+        type: check
+        command: "ss -tlnp | grep 53 | grep -v docker"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display services listening on port 53
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if systemd-resolved is listening on port 53
+        type: check
+        command: "systemctl status systemd-resolved 2>&1 | grep -i active"
+        expected_output: ""
+      - id: step-4
+        description: Disable systemd-resolved stub listener
+        type: fix
+        command: "mkdir -p /etc/systemd/resolved.conf.d && echo '[Resolve]' > /etc/systemd/resolved.conf.d/adguard.conf && echo 'DNSStubListener=no' >> /etc/systemd/resolved.conf.d/adguard.conf && systemctl restart systemd-resolved"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify systemd-resolved is no longer listening on port 53
+        type: check
+        command: "sleep 2 && ss -tlnp | grep 53 | grep -v adguard"
+        expected_output: ""
+      - id: step-6
+        description: Restart AdGuard Home to bind to port 53
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify DNS resolution is working
+        type: check
+        command: "sleep 3 && nslookup google.com 127.0.0.1 | grep -i address"
+    resolution: |
+      systemd-resolved was listening on port 53, preventing AdGuard Home from providing DNS service. The stub listener has been disabled. AdGuard Home has been restarted and should now be accepting DNS queries on port 53. Your network's DNS queries will be routed through AdGuard Home for ad blocking.
+
+  - id: admin-password-not-set
+    name: Cannot log into AdGuard Home admin panel
+    symptoms:
+      - "Admin login fails"
+      - "Password reset not working"
+      - "Cannot access admin settings"
+      - "Unauthorized or forbidden"
+    trigger_conditions:
+      - log_pattern: "auth.*failed"
+      - log_pattern: "unauthorized"
+    steps:
+      - id: step-1
+        description: Check if AdGuard Home is still in first-run setup mode
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:80/control/install/get_addresses 2>&1 | head -3"
+        expected_output: ""
+      - id: step-2
+        description: Display setup status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Access the setup wizard on port 3000 if not yet configured
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check AdGuard Home logs for auth errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|password' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Display auth-related log entries
+        type: inform
+        command: ""
+      - id: step-6
+        description: Reset AdGuard Home configuration to re-run setup wizard
+        type: fix
+        command: "docker exec {container_name} rm -f /opt/adguardhome/conf/AdGuardHome.yaml"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart AdGuard Home to trigger setup wizard
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Access setup wizard and create new admin credentials
+        type: inform
+        command: ""
+    resolution: |
+      The AdGuard Home configuration was reset to allow the setup wizard to run again. Access the setup wizard at http://<host-ip>:3000 to create a new admin password and reconfigure your DNS settings. Once setup is complete, you'll be able to log into the admin dashboard at http://<host-ip>:80.
+
+  - id: dot-tls-certificate-error
+    name: DoT (DNS over TLS) connection error or certificate issues
+    symptoms:
+      - "TLS handshake failed"
+      - "Certificate verification error"
+      - "DoT connections refused"
+      - "Cannot connect on port 853"
+    trigger_conditions:
+      - log_pattern: "TLS.*error"
+      - log_pattern: "certificate"
+      - log_pattern: "handshake failed"
+    steps:
+      - id: step-1
+        description: Check if DoT is enabled in AdGuard Home
+        type: check
+        command: "docker exec {container_name} grep -i 'tls_port\\|https_port' /opt/adguardhome/conf/AdGuardHome.yaml"
+        expected_output: ""
+      - id: step-2
+        description: Display DoT configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if TLS certificate files exist
+        type: check
+        command: "docker exec {container_name} ls -la /opt/adguardhome/conf/*.pem 2>&1"
+        expected_output: ""
+      - id: step-4
+        description: Verify TLS certificate validity
+        type: check
+        command: "docker exec {container_name} openssl x509 -in /opt/adguardhome/conf/AdGuardHome.crt -noout -dates 2>&1 | head -2"
+        expected_output: "notBefore"
+      - id: step-5
+        description: Display certificate status
+        type: inform
+        command: ""
+      - id: step-6
+        description: Generate new self-signed TLS certificate
+        type: fix
+        command: "docker exec {container_name} openssl req -x509 -newkey rsa:2048 -nodes -out /opt/adguardhome/conf/AdGuardHome.crt -keyout /opt/adguardhome/conf/AdGuardHome.key -days 365 -subj '/C=US/ST=State/L=City/O=AdGuard/CN=adguardhome'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart AdGuard Home to use new certificate
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify DoT is listening on port 853
+        type: check
+        command: "sleep 3 && docker exec {container_name} ss -tlnp | grep 853"
+    resolution: |
+      DoT (DNS over TLS) certificate was invalid or missing. A new self-signed certificate has been generated and AdGuard Home has been restarted. DoT should now be available on port 853. Note: Self-signed certificates will trigger browser warnings; for production use, consider obtaining a certificate from a trusted CA or using a reverse proxy with a valid certificate.
+
+notes: |
+  AdGuard Home is a network-wide ad blocker that provides DNS filtering, parental controls, and query logging.
+
+  Initial setup: The setup wizard runs on port 3000 on first access. Complete it to configure admin credentials and DNS settings.
+
+  Configuration file: /opt/adguardhome/conf/AdGuardHome.yaml contains all settings. Modifying it requires container restart.
+
+  Work directory: /opt/adguardhome/work/ stores logs and statistics. Keep this mounted for persistence.
+
+  TLS/HTTPS: AdGuard Home can serve DNS over TLS (port 853) and HTTPS (port 443). Self-signed certificates are auto-generated but should be replaced for production.
+
+  DoH (DNS over HTTPS): If enabled, accessible on port 443 (https://host/dns-query).
+
+  Filters and blocklists: Configure via Settings → Filters → DNS blocklists. Community lists available at:
+  https://filterlists.com
+  https://github.com/AdguardTeam/AdGuardHome/wiki/Hosts-Blocklists
+
+default_config:
+  compose_template: |
+    services:
+      adguardhome:
+        image: adguard/adguardhome:latest
+        container_name: adguardhome
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONF_PATH:-./conf}:/opt/adguardhome/conf
+          - ${WORK_PATH:-./work}:/opt/adguardhome/work
+        ports:
+          - "53:53/tcp"
+          - "53:53/udp"
+          - "80:80/tcp"
+          - "443:443/tcp"
+          - "853:853/tcp"
+          - "3000:3000/tcp"
+        cap_add:
+          - NET_ADMIN
+  required_vars:
+    - name: TZ
+      description: Timezone for logs
+      default: "UTC"
+    - name: CONF_PATH
+      description: Host path for /opt/adguardhome/conf
+      default: "./conf"
+    - name: WORK_PATH
+      description: Host path for /opt/adguardhome/work (logs and stats)
+      default: "./work"
+  known_mounts:
+    - container_path: /opt/adguardhome/conf
+      purpose: AdGuard Home configuration, TLS certificates, and admin credentials
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /opt/adguardhome/work
+      purpose: Query logs, statistics, and runtime data
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  AdGuard Home is a modern ad blocker that intercepts DNS queries and blocks known ad domains.
+
+  Setup workflow:
+  1. Start the container
+  2. Access http://<host>:3000 to run the setup wizard
+  3. Configure admin password and DNS settings
+  4. Dashboard moves to http://<host>:80 after setup
+
+  Upstream DNS: Configure in Settings → DNS Upstream Servers. Use Cloudflare (1.1.1.1), Google (8.8.8.8), or quad9 (9.9.9.9).
+
+  Port binding: Requires CAP_NET_ADMIN. If running behind a reverse proxy, configure AdGuard to listen on a different port and proxy externally.
+
+  Filter lists: Add community blocklists to improve ad blocking. https://filterlists.com has comprehensive curated lists.

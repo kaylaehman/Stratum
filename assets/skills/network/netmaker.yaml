@@ -1,0 +1,367 @@
+id: netmaker
+name: Netmaker Self-Hosted Mesh Network Controller
+version: "1.0"
+container_match:
+  image_patterns:
+    - "gravitl/netmaker"
+  port_hints: [8081, 50051]
+category: network
+description: Self-hosted mesh network controller with UI dashboard for WireGuard node registration and ACL-based policy
+docs_url: https://hub.docker.com/r/gravitl/netmaker
+
+common_issues:
+  - id: server-startup-failed
+    name: Netmaker server fails to start or crashes immediately
+    symptoms:
+      - "connection refused on port 8081"
+      - "failed to initialize database"
+      - "container exits with code 1"
+      - "panic: missing required environment variable"
+      - "listen error: address already in use"
+    trigger_conditions:
+      - exit_code: 1
+      - log_pattern: "panic|connection refused|database.*error|address already in use"
+    steps:
+      - id: step-1
+        description: Check Netmaker server logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -30"
+        expected_output: ""
+      - id: step-2
+        description: Verify required environment variables are set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'MASTER_KEY|NETMAKER_BASE_DOMAIN|NETMAKER_API_PORT'"
+        expected_output: "MASTER_KEY="
+        on_fail: step-3
+      - id: step-3
+        description: Display current environment variables (MASTER_KEY will be masked)
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if port 8081 is already in use on the host
+        type: check
+        command: "ss -tlnp | grep 8081"
+        expected_output: ""
+        on_fail: step-5
+      - id: step-5
+        description: Display port binding status
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart Netmaker container to force reinitialization
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and check if server is now responsive
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s http://localhost:8081/api/networks | head -c 20"
+        expected_output: ""
+    resolution: |
+      Netmaker server startup failed due to missing environment variables or port conflict. Ensure MASTER_KEY (secure random string), NETMAKER_BASE_DOMAIN (your domain), and NETMAKER_API_PORT (8081) are set. If port 8081 is already in use on the host, change NETMAKER_API_PORT to an available port. The container has been restarted; check that the API is now responding.
+
+  - id: peer-discovery-failed
+    name: Nodes not discovering or registering as peers
+    symptoms:
+      - "New node stuck in 'pending' state"
+      - "Nodes connected but cannot communicate"
+      - "gRPC connection timeout from node"
+      - "Nodes visible in dashboard but unreachable"
+      - "Mesh connectivity status shows 0 reachable peers"
+    trigger_conditions:
+      - log_pattern: "peer.*error|gRPC.*timeout|discovery.*failed"
+    steps:
+      - id: step-1
+        description: Check Netmaker server connectivity status
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:8081/api/nodes | grep -i 'status\\|error' | head -5"
+        expected_output: ""
+      - id: step-2
+        description: Verify gRPC port 50051 is exposed and accessible
+        type: check
+        command: "docker inspect {container_name} --format='{{range .NetworkSettings.Ports}}{{.}}{{end}}' | grep 50051"
+        expected_output: "50051"
+        on_fail: step-3
+      - id: step-3
+        description: Display current port mappings (gRPC port may not be exposed)
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if firewall is blocking gRPC traffic
+        type: check
+        command: "ss -tlnp | grep 50051"
+        expected_output: "LISTEN"
+        on_fail: step-5
+      - id: step-5
+        description: Display firewall rule suggestions
+        type: inform
+        command: ""
+      - id: step-6
+        description: Test gRPC connectivity from localhost
+        type: check
+        command: "docker exec {container_name} timeout 3 bash -c 'echo | nc -z localhost 50051' && echo 'Port accessible' || echo 'Port not accessible'"
+        expected_output: "Port accessible"
+        on_fail: step-7
+      - id: step-7
+        description: Verify docker-compose includes gRPC port mapping
+        type: inform
+        command: ""
+      - id: step-8
+        description: Restart Netmaker to force peer discovery refresh
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Monitor peer discovery status after restart
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'peer\\|discover' | tail -5"
+    resolution: |
+      Node peer discovery failed because gRPC port 50051 is not properly exposed or firewall rules are blocking peer connectivity. Ensure docker-compose includes `ports: ['50051:50051/tcp']` and that your firewall allows inbound traffic on port 50051 (from other mesh nodes). Nodes behind NAT may require NAT traversal configuration. The server has been restarted; allow 30 seconds for peers to re-register and connectivity to stabilize.
+
+  - id: wireguard-interface-error
+    name: WireGuard interface configuration fails on node
+    symptoms:
+      - "Cannot create wireguard interface"
+      - "wg0 interface missing or down"
+      - "failed to configure peer"
+      - "Device or resource busy"
+      - "Operation not permitted"
+    trigger_conditions:
+      - log_pattern: "wireguard.*error|wg0.*failed|CAP_NET_ADMIN"
+    steps:
+      - id: step-1
+        description: Check if WireGuard kernel module is loaded on host
+        type: check
+        command: "lsmod | grep wireguard"
+        expected_output: "wireguard"
+        on_fail: step-2
+      - id: step-2
+        description: Display kernel module status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify container has CAP_NET_ADMIN capability
+        type: check
+        command: "docker inspect {container_name} --format='{{.HostConfig.CapAdd}}' | grep -i admin"
+        expected_output: "NET_ADMIN"
+        on_fail: step-4
+      - id: step-4
+        description: Display current container capabilities
+        type: inform
+        command: ""
+      - id: step-5
+        description: Inform user that CAP_NET_ADMIN is required for WireGuard
+        type: inform
+        command: ""
+      - id: step-6
+        description: Stop container to apply capability changes
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Display instructions to add CAP_NET_ADMIN to docker-compose
+        type: inform
+        command: ""
+    resolution: |
+      Netmaker requires CAP_NET_ADMIN Linux capability to create and configure WireGuard network interfaces. Update your docker-compose file to include `cap_add: ['NET_ADMIN']` under the netmaker service. Ensure your host kernel has WireGuard support (kernel 5.6+ or wireguard-dkms package). Restart the container after making changes.
+
+  - id: dashboard-access-unavailable
+    name: Dashboard not accessible or returns 403/404 errors
+    symptoms:
+      - "Cannot access dashboard on port 8081"
+      - "Dashboard returns 403 Forbidden"
+      - "404 Not Found on /dashboard"
+      - "Timeout connecting to dashboard"
+      - "Connection refused on localhost:8081"
+    trigger_conditions:
+      - log_pattern: "dashboard.*error|HTTP 403|HTTP 404"
+    steps:
+      - id: step-1
+        description: Verify Netmaker server is listening on port 8081
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8081"
+        expected_output: "LISTEN.*8081"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 8081 is published in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '8081'"
+        expected_output: "8081"
+        on_fail: step-3
+      - id: step-3
+        description: Display current port mappings
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test API connectivity
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/api/networks"
+        expected_output: "200"
+        on_fail: step-5
+      - id: step-5
+        description: Display API response status
+        type: inform
+        command: ""
+      - id: step-6
+        description: Check dashboard files in container
+        type: check
+        command: "docker exec {container_name} test -d /app/gui && echo 'Dashboard files present' || echo 'Dashboard files missing'"
+        expected_output: "Dashboard files present"
+        on_fail: step-7
+      - id: step-7
+        description: Inform user about dashboard availability
+        type: inform
+        command: ""
+      - id: step-8
+        description: Restart Netmaker to reinitialize dashboard
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Wait and verify dashboard is accessible
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/"
+    resolution: |
+      Dashboard access failed due to server misconfiguration or missing files. Ensure port 8081 is properly exposed (`ports: ['8081:8081']` in docker-compose). Verify NETMAKER_BASE_DOMAIN is set to your public domain (required for API authentication). The container has been restarted; try accessing the dashboard at http://localhost:8081 (or your configured domain).
+
+  - id: master-key-invalid-or-missing
+    name: Master key validation fails; API returns 401 Unauthorized
+    symptoms:
+      - "401 Unauthorized on API requests"
+      - "Dashboard login fails with invalid credentials"
+      - "MASTER_KEY environment variable empty or invalid"
+      - "Token validation error in logs"
+      - "Cannot authenticate with Netmaker server"
+    trigger_conditions:
+      - log_pattern: "401|Unauthorized|MASTER_KEY|token.*invalid"
+    steps:
+      - id: step-1
+        description: Check if MASTER_KEY environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep MASTER_KEY"
+        expected_output: "MASTER_KEY="
+        on_fail: step-2
+      - id: step-2
+        description: Display environment variables (MASTER_KEY will be masked)
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Netmaker logs for auth errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'auth\\|key\\|token' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Inform user about MASTER_KEY requirements
+        type: inform
+        command: ""
+      - id: step-5
+        description: Explain how to generate a secure MASTER_KEY
+        type: inform
+        command: ""
+      - id: step-6
+        description: Stop container to update MASTER_KEY
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Display instructions to update docker-compose with new MASTER_KEY
+        type: inform
+        command: ""
+    resolution: |
+      Netmaker API authentication failed because MASTER_KEY is missing or invalid. MASTER_KEY is a secure random string used to authenticate API requests and must be set before initial startup. Generate a new key (e.g., `openssl rand -base64 32`) and update the environment variable in your docker-compose file. Restart the container after setting a new key. All dashboard and API requests use this key for authentication.
+
+default_config:
+  compose_template: |
+    services:
+      netmaker:
+        image: gravitl/netmaker:latest
+        container_name: netmaker
+        restart: unless-stopped
+        environment:
+          MASTER_KEY: ${MASTER_KEY}
+          NETMAKER_BASE_DOMAIN: ${NETMAKER_BASE_DOMAIN}
+          NETMAKER_API_PORT: ${NETMAKER_API_PORT:-8081}
+          NETMAKER_GRPC_PORT: ${NETMAKER_GRPC_PORT:-50051}
+          NETMAKER_API_HOST: 0.0.0.0
+          NETMAKER_SERVER_NAME: ${NETMAKER_SERVER_NAME:-netmaker-server}
+          NETMAKER_CORS_ALLOWED_ORIGINS: "${NETMAKER_BASE_DOMAIN},http://localhost:3000"
+          DB_ENGINE: ${DB_ENGINE:-sqlite}
+          SQLITE_PATH: ${SQLITE_PATH:-/var/lib/netmaker/data.db}
+        volumes:
+          - ${STATE_DIR:-./netmaker-state}:/var/lib/netmaker
+          - ${CONFIG_DIR:-./netmaker-config}:/etc/netmaker
+        ports:
+          - "8081:8081/tcp"
+          - "50051:50051/tcp"
+        cap_add:
+          - NET_ADMIN
+        networks:
+          - netmaker-net
+    networks:
+      netmaker-net:
+        driver: bridge
+  required_vars:
+    - name: MASTER_KEY
+      description: Secure random key for API authentication (generate with `openssl rand -base64 32`)
+      default: ""
+    - name: NETMAKER_BASE_DOMAIN
+      description: Public domain or IP where Netmaker is accessible (required for node registration)
+      default: ""
+    - name: NETMAKER_API_PORT
+      description: Port for HTTP API and dashboard
+      default: "8081"
+    - name: NETMAKER_GRPC_PORT
+      description: Port for gRPC mesh controller communication
+      default: "50051"
+    - name: NETMAKER_SERVER_NAME
+      description: Internal server identifier
+      default: "netmaker-server"
+    - name: STATE_DIR
+      description: Host path for /var/lib/netmaker (persistent state, database, node keys)
+      default: "./netmaker-state"
+    - name: CONFIG_DIR
+      description: Host path for /etc/netmaker (configuration, ACL files)
+      default: "./netmaker-config"
+  known_mounts:
+    - container_path: /var/lib/netmaker
+      purpose: Netmaker state, SQLite database, node signing keys, persistent node configuration
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /etc/netmaker
+      purpose: Netmaker configuration files, ACL policies, network definitions
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Netmaker is a self-hosted, open-source mesh network controller built on WireGuard. It provides a centralized dashboard for node registration, ACL-based policy, and mesh topology management.
+
+  Key facts:
+  - MASTER_KEY is critical and must be generated before first startup (e.g., `openssl rand -base64 32`)
+  - NETMAKER_BASE_DOMAIN must be set to a publicly resolvable FQDN or public IP for nodes to register from external networks
+  - CAP_NET_ADMIN is required to create and manage WireGuard interfaces
+  - gRPC port 50051 must be exposed and accessible to all mesh nodes for peer-to-peer communication
+  - Dashboard is served on port 8081 at the base domain
+  - Supports both SQLite (single-instance) and PostgreSQL (multi-instance) backends
+  - Node pre-registration keys allow authorized node enrollment via dashboard
+
+  First-run gotchas:
+  - MASTER_KEY left empty will cause immediate startup failure
+  - NETMAKER_BASE_DOMAIN set to localhost/127.0.0.1 prevents external nodes from registering
+  - gRPC port (50051) must not be behind a reverse proxy or load balancer; it needs direct connectivity
+  - Node network interface (wg0) creation requires host WireGuard kernel support and CAP_NET_ADMIN
+  - All nodes must be able to reach NETMAKER_BASE_DOMAIN:50051 for mesh connectivity
+  - SQLite database can be backed up by copying the single data.db file to another location
+  - ACL (Access Control List) policies restrict which nodes can communicate with which peers
+
+  Advanced:
+  - Check node connectivity: `docker exec netmaker curl http://localhost:8081/api/nodes`
+  - View mesh networks: `docker exec netmaker curl http://localhost:8081/api/networks`
+  - Monitor peer connectivity: `docker exec netmaker curl http://localhost:8081/api/peers`
+  - ACL syntax uses source/destination node names and network names to define allowed traffic
+  - Post-startup: generate pre-auth keys in dashboard and distribute to users for node registration
+  - Multi-region mesh: additional regional "relay" nodes can bridge separate network segments

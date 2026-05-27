@@ -1,0 +1,300 @@
+id: joplin
+name: Joplin Server Notes & Tasks
+version: "1.0"
+container_match:
+  image_patterns:
+    - "florider89/joplin-server"
+    - "joplin/server"
+  port_hints: [22300]
+category: productivity
+description: End-to-end encrypted note-taking and task management with sync server
+docs_url: https://hub.docker.com/r/florider89/joplin-server
+
+common_issues:
+  - id: database-connection-failed
+    name: Database connection failed or PostgreSQL not ready
+    symptoms:
+      - "Connection refused"
+      - "ECONNREFUSED"
+      - "Could not connect to database"
+      - "PostgreSQL service not available"
+      - "Blank page or error on startup"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "database.*error"
+      - log_pattern: "ECONNREFUSED"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running and healthy
+        type: check
+        command: "docker ps | grep -i postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check PostgreSQL logs for startup errors
+        type: check
+        command: "docker logs joplin-db 2>&1 | tail -20"
+        expected_output: "ready to accept connections"
+        on_fail: step-4
+      - id: step-4
+        description: Verify POSTGRES_* environment variables are correct
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify database exists and is accessible
+        type: check
+        command: "docker exec joplin-db psql -U {db_user} -d {db_name} -c '\\l' 2>&1 | grep {db_name}"
+        expected_output: "{db_name}"
+        on_fail: step-6
+      - id: step-6
+        description: Restart Joplin to reconnect to database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Check if connection was established
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'database\\|connected\\|listening' | tail -5"
+    resolution: |
+      Joplin Server requires a PostgreSQL database to store notes and user data. The container has been restarted to attempt reconnection. Verify that PostgreSQL is running, healthy, and that POSTGRES_* environment variables (POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB) match the database service configuration.
+
+  - id: app-base-url-mismatch
+    name: APP_BASE_URL mismatch causing sync failures or web client issues
+    symptoms:
+      - "Sync fails with 404 or redirect errors"
+      - "Web client cannot connect to API"
+      - "WebDAV sync not working"
+      - "Login redirects incorrectly"
+      - "Cross-origin (CORS) errors in browser console"
+    trigger_conditions:
+      - log_pattern: "redirect"
+      - log_pattern: "CORS"
+      - log_pattern: "APP_BASE_URL"
+    steps:
+      - id: step-1
+        description: Check the current APP_BASE_URL environment variable
+        type: check
+        command: "docker exec {container_name} printenv | grep APP_BASE_URL"
+        expected_output: "APP_BASE_URL="
+        on_fail: step-2
+      - id: step-2
+        description: Display Joplin Server configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Confirm the URL you use to access Joplin
+        type: confirm
+        description: "Please confirm: Are you accessing Joplin via http://localhost:22300 or another URL (reverse proxy, domain name, etc.)?"
+      - id: step-4
+        description: Update APP_BASE_URL to match access URL
+        type: fix
+        command: "docker exec {container_name} sed -i 's|APP_BASE_URL=.*|APP_BASE_URL={access_url}|' /app/.env"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Joplin Server to apply URL change
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify API is responding to requests
+        type: check
+        command: "curl -s {access_url}/status | grep -q 'status' && echo 'API responding'"
+    resolution: |
+      APP_BASE_URL must match the exact URL used to access Joplin Server, including protocol and port. Mismatches cause sync clients to fail with redirect errors and the web client to have CORS issues. The configuration has been updated and Joplin restarted. Sync clients may need to be reconnected.
+
+  - id: sync-client-unauthorized
+    name: Sync clients failing with 401 Unauthorized
+    symptoms:
+      - "401 Unauthorized on sync"
+      - "Cannot authenticate to server"
+      - "Sync fails with authentication error"
+      - "Web client login fails"
+      - "Invalid credentials error"
+    trigger_conditions:
+      - log_pattern: "401"
+      - log_pattern: "Unauthorized"
+      - log_pattern: "authentication.*failed"
+    steps:
+      - id: step-1
+        description: Verify Joplin Server is running and accessible
+        type: check
+        command: "curl -s http://{container_name}:22300/status"
+        expected_output: "status"
+        on_fail: step-2
+      - id: step-2
+        description: Check Joplin Server logs for auth errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'auth\\|fail' | tail -10"
+      - id: step-3
+        description: Verify database is initialized and contains user data
+        type: check
+        command: "docker exec joplin-db psql -U {db_user} -d {db_name} -c 'SELECT COUNT(*) FROM users;' 2>&1"
+        expected_output: "count"
+        on_fail: step-4
+      - id: step-4
+        description: Restart Joplin Server to reset authentication state
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait for startup and check auth logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'listening\\|ready' | tail -3"
+    resolution: |
+      Joplin Server authentication has been reset via container restart. Ensure your sync clients are using the correct credentials. On initial setup, navigate to the web interface at APP_BASE_URL to create the admin user, then configure sync clients with those credentials. If the problem persists, check the database to ensure the users table was initialized.
+
+  - id: disk-space-full
+    name: Disk space full or storage quota exceeded
+    symptoms:
+      - "ENOSPC: no space left on device"
+      - "Cannot save notes"
+      - "Sync fails with storage error"
+      - "Upload file fails"
+      - "Database errors on write"
+    trigger_conditions:
+      - log_pattern: "ENOSPC"
+      - log_pattern: "no space left"
+      - log_pattern: "quota exceeded"
+    steps:
+      - id: step-1
+        description: Check disk usage of PostgreSQL data volume
+        type: check
+        command: "du -sh {db_path}"
+        expected_output: ""
+      - id: step-2
+        description: Check disk usage of Joplin server directory
+        type: check
+        command: "du -sh {config_path}"
+        expected_output: ""
+      - id: step-3
+        description: Display available disk space on the host
+        type: check
+        command: "df -h | grep -E '(Filesystem|/)'  | head -5"
+        expected_output: ""
+      - id: step-4
+        description: Display PostgreSQL table sizes
+        type: check
+        command: "docker exec joplin-db psql -U {db_user} -d {db_name} -c '\\d+' 2>&1 | head -20"
+      - id: step-5
+        description: Inform about cleanup options
+        type: inform
+        command: ""
+    resolution: |
+      Joplin Server or PostgreSQL has run out of disk space. Check the size of both the {config_path} (Joplin data) and {db_path} (PostgreSQL data) directories. Delete old notes, attachments, or backups to free space. If the database is consuming most space, consider archiving or deleting old notes. Ensure the host has sufficient free disk space before restarting the service.
+
+default_config:
+  compose_template: |
+    services:
+      joplin:
+        image: florider89/joplin-server:latest
+        container_name: joplin
+        restart: unless-stopped
+        environment:
+          POSTGRES_HOST: ${POSTGRES_HOST:-joplin-db}
+          POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+          POSTGRES_USER: ${POSTGRES_USER:-joplin}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-joplin}
+          POSTGRES_DB: ${POSTGRES_DB:-joplin}
+          APP_BASE_URL: ${APP_BASE_URL:-http://localhost:22300}
+          APP_PORT: ${APP_PORT:-22300}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/home/joplin/data
+        ports:
+          - "22300:22300/tcp"
+        depends_on:
+          joplin-db:
+            condition: service_healthy
+        networks:
+          - joplin-net
+
+      joplin-db:
+        image: postgres:14-alpine
+        container_name: joplin-db
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-joplin}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-joplin}
+          POSTGRES_DB: ${POSTGRES_DB:-joplin}
+          POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:--c shared_buffers=256MB -c max_connections=200}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/postgresql/data
+        networks:
+          - joplin-net
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-joplin} -d ${POSTGRES_DB:-joplin}"]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+
+    networks:
+      joplin-net:
+        driver: bridge
+  required_vars:
+    - name: POSTGRES_HOST
+      description: PostgreSQL hostname (use service name if in same compose)
+      default: "joplin-db"
+    - name: POSTGRES_PORT
+      description: PostgreSQL port
+      default: "5432"
+    - name: POSTGRES_USER
+      description: PostgreSQL user
+      default: "joplin"
+    - name: POSTGRES_PASSWORD
+      description: PostgreSQL password
+      default: "joplin"
+    - name: POSTGRES_DB
+      description: PostgreSQL database name
+      default: "joplin"
+    - name: APP_BASE_URL
+      description: Full URL where Joplin is accessible (e.g., http://localhost:22300 or https://joplin.example.com)
+      default: "http://localhost:22300"
+    - name: APP_PORT
+      description: Internal port Joplin listens on
+      default: "22300"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /home/joplin/data (configuration and file storage)
+      default: "./config"
+    - name: DB_PATH
+      description: Host path for PostgreSQL data directory
+      default: "./db"
+  known_mounts:
+    - container_path: /home/joplin/data
+      purpose: Joplin configuration, file storage, and uploads
+      recommended_permissions: "755"
+      owner: "joplin:joplin"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Joplin Server is the backend for the Joplin note-taking ecosystem. It provides sync, WebDAV, and a web client for accessing notes.
+
+  Database: Requires PostgreSQL (included in the compose template). Must be initialized and healthy before Joplin starts.
+
+  APP_BASE_URL: Must be set to the exact URL where Joplin is accessed. Mismatches cause sync and web client failures.
+
+  Client sync: After server is running, open Joplin clients (desktop, mobile, web) and configure sync to point to this server with the admin credentials.
+
+  WebDAV: Joplin supports WebDAV for file-based note storage. Configure clients to use APP_BASE_URL/webdav as the WebDAV endpoint.
+
+  Web client: Access the web client at APP_BASE_URL. Create the admin user on first visit.
+
+  Backups: The /home/joplin/data directory contains the configuration. Regular database snapshots are recommended.
+
+  Common gotchas:
+  - Sync fails with 401: Check credentials and APP_BASE_URL match.
+  - Cannot reach server: Verify APP_BASE_URL and port 22300 are accessible.
+  - Database not initializing: Ensure PostgreSQL is healthy and credentials are correct.
+  - Disk full: Monitor database and file storage usage over time.

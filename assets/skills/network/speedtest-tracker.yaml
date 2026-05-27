@@ -1,0 +1,264 @@
+id: speedtest-tracker
+name: Speedtest Tracker
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/speedtest-tracker"
+  port_hints: [80]
+category: network
+description: Lightweight speedtest monitoring tool with persistent result tracking and UI dashboard
+docs_url: https://hub.docker.com/r/linuxserver/speedtest-tracker
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to /config"
+      - "Failed to create database"
+      - "Cannot save results"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES.*config"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents Speedtest Tracker from writing the database and configuration files. The fix changed ownership to match the container process. Speedtest Tracker should now be able to write to /config.
+
+  - id: app-key-missing-invalid
+    name: APP_KEY missing or invalid format
+    symptoms:
+      - "Encryption failed"
+      - "Invalid key format"
+      - "Laravel encryption key error"
+      - "Cannot encrypt speedtest results"
+      - "Application configuration error"
+    trigger_conditions:
+      - log_pattern: "APP_KEY.*missing"
+      - log_pattern: "encryption.*failed"
+      - log_pattern: "invalid.*key"
+    steps:
+      - id: step-1
+        description: Inform about APP_KEY requirement
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if APP_KEY is set in container environment
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{.}}{{end}}' | grep -i app_key"
+        expected_output: "base64:"
+        on_fail: step-3
+      - id: step-3
+        description: Display APP_KEY configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Generate a new random APP_KEY with base64: prefix
+        type: fix
+        command: "echo \"APP_KEY=base64:$(openssl rand -base64 32)\""
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Update container environment with new APP_KEY
+        type: fix
+        command: "docker update --env APP_KEY=base64:$(openssl rand -base64 32) {container_name} && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify container restarted successfully with new key
+        type: check
+        command: "sleep 5 && docker ps | grep {container_name} | grep Up"
+        expected_output: "Up"
+    resolution: |
+      Speedtest Tracker requires an APP_KEY environment variable in base64: format for Laravel encryption. A new encryption key has been generated and set. The container has been restarted with the new key. Speedtest results will now be encrypted and stored correctly in the database.
+
+  - id: ui-not-accessible
+    name: Web UI not accessible or returns errors
+    symptoms:
+      - "Cannot access UI on port 80"
+      - "Connection refused"
+      - "502 Bad Gateway"
+      - "500 Internal Server Error"
+      - "Blank page or spinning loader"
+    trigger_conditions:
+      - log_pattern: "error.*listening"
+      - log_pattern: "exception.*thrown"
+    steps:
+      - id: step-1
+        description: Verify Speedtest Tracker container is running
+        type: check
+        command: "docker ps | grep {container_name}"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check container logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -30"
+        expected_output: ""
+      - id: step-3
+        description: Verify port 80 is exposed and listening
+        type: check
+        command: "docker inspect {container_name} --format='{{range .PortBindings}}{{.}}{{end}}'"
+        expected_output: "80"
+        on_fail: step-4
+      - id: step-4
+        description: Check if port 80 is already in use by another service
+        type: check
+        command: "ss -tlnp | grep ':80 '"
+        expected_output: ""
+      - id: step-5
+        description: Verify /config directory is mounted and contains database
+        type: check
+        command: "docker exec {container_name} ls -la /config | head -10"
+        expected_output: ""
+      - id: step-6
+        description: Restart Speedtest Tracker container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify UI loads on port 80
+        type: check
+        command: "sleep 10 && curl -s http://localhost/api/speedtest | head -5"
+    resolution: |
+      Speedtest Tracker has been restarted. The web UI should now be accessible on port 80. If the issue persists, check container logs (docker logs) for startup errors, verify that /config is properly mounted and owned by the container's UID/GID, and ensure no other service is bound to port 80 on the host.
+
+  - id: speedtest-not-running
+    name: Speedtest jobs not running or failing silently
+    symptoms:
+      - "No speedtest results in database"
+      - "Last result is old or empty"
+      - "Speedtest never completes"
+      - "Results table shows 0 entries"
+      - "Scheduled jobs not executing"
+    trigger_conditions:
+      - log_pattern: "speedtest.*failed"
+      - log_pattern: "unable to run test"
+    steps:
+      - id: step-1
+        description: Verify speedtest-cli is available in container
+        type: check
+        command: "docker exec {container_name} which speedtest"
+        expected_output: "speedtest"
+        on_fail: step-2
+      - id: step-2
+        description: Check container logs for speedtest execution errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'speedtest\\|test.*failed\\|error' | tail -5"
+        expected_output: ""
+      - id: step-3
+        description: Display speedtest scheduling configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Trigger a manual speedtest run
+        type: fix
+        command: "docker exec {container_name} php artisan speedtest:run"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify result was recorded in database
+        type: check
+        command: "docker exec {container_name} sqlite3 /config/db.sqlite 'SELECT COUNT(*) FROM speedtest_results;'"
+        expected_output: ""
+      - id: step-6
+        description: Check cron job configuration
+        type: check
+        command: "docker exec {container_name} crontab -l | grep speedtest"
+        expected_output: ""
+    resolution: |
+      A manual speedtest has been triggered. Check the UI for new results within the next few minutes. If results do not appear, verify that speedtest-cli is working correctly (test manually via docker exec) and that the cron job is properly configured to run at your desired interval. Speedtest results require internet connectivity and may timeout on slow or unstable connections.
+
+default_config:
+  compose_template: |
+    services:
+      speedtest-tracker:
+        image: linuxserver/speedtest-tracker:latest
+        container_name: speedtest-tracker
+        restart: unless-stopped
+        networks:
+          - speedtest-net
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          APP_KEY: ${APP_KEY:-base64:xxxxxxxxxxxxxxxxxxxxxxxxxxxxx}
+          LOG_LEVEL: info
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "80:80/tcp"
+    networks:
+      speedtest-net:
+        driver: bridge
+  required_vars:
+    - name: PUID
+      description: User ID to run Speedtest Tracker as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Speedtest Tracker
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: APP_KEY
+      description: Laravel encryption key (must start with base64: followed by 32-byte base64 string)
+      default: "base64:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    - name: CONFIG_PATH
+      description: Host path for /config (database and configuration)
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: SQLite database, configuration, and speedtest results
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Speedtest Tracker is a lightweight PHP-based application for monitoring internet speed over time. Built on the LinuxServer.io base image with Apache and PHP pre-configured.
+
+  APP_KEY: Required for Laravel encryption. Must be in the format base64:<32-byte base64 string>. Generate with: echo "APP_KEY=base64:$(openssl rand -base64 32)"
+
+  Database: SQLite by default (stored in /config/db.sqlite). Suitable for single-instance deployments. No database setup required — auto-initialized on first run.
+
+  Speedtest scheduling: Uses cron for periodic speedtest runs. Default is every hour. Configure interval via UI or by editing /config/.env inside the container.
+
+  Port: 80 by default (HTTP, unencrypted). For production, run behind a reverse proxy with HTTPS/TLS.
+
+  Results tracking: All speedtest results stored in SQLite. UI dashboard shows historical trends, average speeds, and detailed result logs.
+
+  UID/GID: As a LinuxServer.io image, Speedtest Tracker runs with PUID/PGID. Ensure /config ownership matches or permission errors will occur.
+
+  Common gotchas:
+  - APP_KEY not set: Application will fail to start with encryption errors.
+  - /config ownership mismatch: Results cannot be written to database.
+  - Port 80 conflict: Another service already bound to port 80.
+  - No internet connectivity: Speedtest will fail; ensure container has outbound access to speedtest servers.
+  - Database locked: If /config is on network storage, concurrent writes may fail; use local bind mount.

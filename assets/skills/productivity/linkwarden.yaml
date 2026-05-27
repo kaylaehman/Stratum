@@ -1,0 +1,253 @@
+id: linkwarden
+name: Linkwarden
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/linkwarden"
+  port_hints: [3000]
+category: productivity
+description: Self-hosted bookmark manager with full-page web archive snapshots
+docs_url: https://hub.docker.com/r/linuxserver/linkwarden
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to database directory"
+      - "Failed to initialize configuration"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents Linkwarden from writing database and configuration files. The fix changed ownership to match the container process. Linkwarden should now be able to write to /config.
+
+  - id: postgres-connection-failed
+    name: Database connection refused
+    symptoms:
+      - "connection refused"
+      - "ECONNREFUSED"
+      - "postgres.*not running"
+      - "Failed to connect to database"
+    trigger_conditions:
+      - log_pattern: "connection refused.*postgres"
+      - log_pattern: "could not connect to database"
+    steps:
+      - id: step-1
+        description: Check if Postgres container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "linkwarden.*postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers in this compose stack
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Postgres logs for errors
+        type: check
+        command: "docker logs linkwarden-postgres-1 2>&1 | tail -20"
+        expected_output: ""
+      - id: step-4
+        description: Restart the Postgres container
+        type: fix
+        command: "docker restart linkwarden-postgres-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify database is accessible from Linkwarden
+        type: check
+        command: "docker exec linkwarden-linkwarden-1 nc -zv linkwarden-postgres-1 5432"
+        expected_output: "succeeded"
+    resolution: |
+      The Postgres database container has been restarted. Linkwarden should now establish a connection to the database. If the issue persists, check that DATABASE_URL environment variable is correctly set and that the postgres hostname resolves within the Docker network.
+
+  - id: nextauth-secret-missing
+    name: Missing or invalid NEXTAUTH_SECRET configuration
+    symptoms:
+      - "NEXTAUTH_SECRET not set"
+      - "authentication failed"
+      - "session validation failed"
+      - "Unable to sign in"
+    trigger_conditions:
+      - log_pattern: "NEXTAUTH_SECRET"
+      - log_pattern: "session.*invalid"
+    steps:
+      - id: step-1
+        description: Check if NEXTAUTH_SECRET is defined in environment
+        type: check
+        command: "docker exec linkwarden-linkwarden-1 env | grep NEXTAUTH_SECRET"
+        expected_output: "NEXTAUTH_SECRET="
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a new NEXTAUTH_SECRET
+        type: fix
+        command: "openssl rand -base64 32"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Update environment and restart services
+        type: fix
+        command: "docker-compose -f docker-compose.yml restart linkwarden-linkwarden-1"
+        requires_approval: true
+    resolution: |
+      A new NEXTAUTH_SECRET has been generated. Add it to your docker-compose.yml or .env file in the NEXTAUTH_SECRET environment variable. This key is used for session authentication and must be kept secure and consistent across restarts.
+
+  - id: snapshot-archive-timeout
+    name: Web snapshot archiving times out or fails
+    symptoms:
+      - "snapshot failed"
+      - "archive timeout"
+      - "Failed to capture page"
+      - "Connection timeout when archiving"
+    trigger_conditions:
+      - log_pattern: "snapshot.*timeout"
+      - log_pattern: "archive.*failed"
+    steps:
+      - id: step-1
+        description: Check Linkwarden logs for archive service errors
+        type: check
+        command: "docker logs linkwarden-linkwarden-1 2>&1 | grep -i 'snapshot\\|archive' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display container resource usage
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify network connectivity to external URLs
+        type: check
+        command: "docker exec linkwarden-linkwarden-1 curl -s -I -m 5 https://www.example.com | head -1"
+        expected_output: ""
+      - id: step-4
+        description: Restart Linkwarden service
+        type: fix
+        command: "docker restart linkwarden-linkwarden-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Check for archive service recovery
+        type: check
+        command: "docker logs linkwarden-linkwarden-1 2>&1 | tail -10"
+    resolution: |
+      Linkwarden's snapshot archiving service has been restarted. Web page archiving requires outbound network access and sufficient CPU/memory for rendering. If snapshots continue to timeout, increase memory limit in docker-compose.yml (consider 2GB+) and verify the host has stable internet connectivity for reaching external URLs.
+
+default_config:
+  compose_template: |
+    version: "3.8"
+    services:
+      linkwarden:
+        image: linuxserver/linkwarden:latest
+        container_name: linkwarden
+        restart: unless-stopped
+        depends_on:
+          - linkwarden-postgres
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-to-a-random-value}
+          NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+          DATABASE_URL: postgresql://${POSTGRES_USER:-linkwarden}:${POSTGRES_PASSWORD:-changeme}@linkwarden-postgres:5432/${POSTGRES_DB:-linkwarden}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "3000:3000"
+
+      linkwarden-postgres:
+        image: postgres:15-alpine
+        container_name: linkwarden-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${POSTGRES_DB:-linkwarden}
+          POSTGRES_USER: ${POSTGRES_USER:-linkwarden}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./postgres_data}:/var/lib/postgresql/data
+
+  required_vars:
+    - name: PUID
+      description: User ID to run Linkwarden as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Linkwarden
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: NEXTAUTH_SECRET
+      description: NextAuth secret key for session encryption (strong random value)
+      default: "change-me-to-a-random-value"
+    - name: NEXTAUTH_URL
+      description: Public URL of Linkwarden (for OAuth redirects)
+      default: "http://localhost:3000"
+    - name: POSTGRES_DB
+      description: Postgres database name
+      default: "linkwarden"
+    - name: POSTGRES_USER
+      description: Postgres username
+      default: "linkwarden"
+    - name: POSTGRES_PASSWORD
+      description: Postgres password (strong)
+      default: "changeme"
+    - name: CONFIG_PATH
+      description: Host path for /config (configuration and database)
+      default: "./config"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for Postgres data
+      default: "./postgres_data"
+
+  known_mounts:
+    - container_path: /config
+      purpose: Linkwarden configuration and working directory
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Linkwarden is a self-hosted bookmark manager with the ability to capture full-page web archives (snapshots). It uses Postgres for persistent storage and NextAuth for user authentication.
+
+  NEXTAUTH_SECRET: Generate a strong random value using `openssl rand -base64 32` and set it consistently across all restarts. Changing it will invalidate existing sessions.
+
+  NEXTAUTH_URL: Must be set to the public URL of Linkwarden for OAuth and session redirects to work correctly. In development use http://localhost:3000; in production use https://your-domain.com.
+
+  Database: Migrations run automatically on first startup. Initial startup may take longer as the schema is created and indexes built.
+
+  Web snapshots: Full-page archiving requires CPU and outbound network connectivity. Large snapshots may take several seconds per URL. Memory-constrained hosts may need 2GB+ allocated to Linkwarden for reliable archiving.
+
+  Common gotchas:
+  - Permission denied on /config: Check UID/GID match between host and container.
+  - Database connection errors: Verify Postgres is running and DATABASE_URL is correctly configured.
+  - Authentication failures: Ensure NEXTAUTH_SECRET is set and consistent across restarts.
+  - Snapshot failures: Verify outbound internet connectivity; increase memory limit if timeouts persist.

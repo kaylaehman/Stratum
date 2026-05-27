@@ -1,0 +1,308 @@
+id: plane
+name: Plane Project Management
+version: "1.0"
+container_match:
+  image_patterns:
+    - "makeplane/plane"
+  port_hints: [3000]
+category: productivity
+description: Open-source Jira/Linear alternative for team project management
+docs_url: https://hub.docker.com/r/makeplane/plane
+
+common_issues:
+  - id: web-api-connection-error
+    name: Web service cannot reach API service
+    symptoms:
+      - "API request failed"
+      - "Cannot fetch projects"
+      - "ECONNREFUSED"
+      - "API service unavailable"
+      - "Failed to load data"
+    trigger_conditions:
+      - log_pattern: "api.*error"
+      - log_pattern: "connection.*refused"
+      - log_pattern: "ECONNREFUSED.*3000"
+    steps:
+      - id: step-1
+        description: Verify all Plane services are running
+        type: check
+        command: "docker ps | grep makeplane"
+        expected_output: "plane-web.*plane-api.*plane-worker"
+        on_fail: step-2
+      - id: step-2
+        description: Check service container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test connectivity from web to API service
+        type: check
+        command: "docker exec plane-web-1 curl -s -o /dev/null -w '%{http_code}' http://plane-api-1:8000/api/health"
+        expected_output: "200"
+        on_fail: step-4
+      - id: step-4
+        description: Restart all Plane services in correct order
+        type: fix
+        command: "docker-compose -f docker-compose.yml restart plane-api plane-worker plane-web"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify web service can communicate with API
+        type: check
+        command: "docker logs plane-web-1 2>&1 | grep -i 'api.*connected\\|successfully' | tail -3"
+    resolution: |
+      The Plane services have been restarted. The web frontend should now be able to communicate with the API backend. If the issue persists, verify that APP_PROTOCOL and WEB_URL environment variables are correctly configured to match your deployment.
+
+  - id: postgres-initialization-failed
+    name: Database initialization or connection error
+    symptoms:
+      - "database connection refused"
+      - "FATAL: remaining connection slots are reserved"
+      - "psql: could not translate host name"
+      - "migrations failed"
+      - "table not found"
+    trigger_conditions:
+      - log_pattern: "postgres.*error"
+      - log_pattern: "migration.*failed"
+      - log_pattern: "database.*connection"
+    steps:
+      - id: step-1
+        description: Check Postgres container is running and healthy
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display all running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Postgres logs for initialization errors
+        type: check
+        command: "docker logs plane-postgres-1 2>&1 | tail -30"
+        expected_output: ""
+      - id: step-4
+        description: Verify DATABASE_URL is correctly set in API container
+        type: check
+        command: "docker exec plane-api-1 env | grep DATABASE_URL"
+        expected_output: "DATABASE_URL="
+        on_fail: step-5
+      - id: step-5
+        description: Restart Postgres to reinitialize database
+        type: fix
+        command: "docker restart plane-postgres-1"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify database is initialized
+        type: check
+        command: "docker exec plane-postgres-1 psql -U plane -d plane -c 'SELECT version();'"
+        expected_output: "PostgreSQL"
+    resolution: |
+      Postgres has been restarted. Database migrations will re-run on the next API service start. All Plane services should reconnect to the database. If issues continue, check that POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB are correctly set and match across all services.
+
+  - id: redis-cache-error
+    name: Redis cache service unavailable
+    symptoms:
+      - "redis.*connection.*refused"
+      - "cache.*error"
+      - "session storage failed"
+      - "socket.*hangup"
+    trigger_conditions:
+      - log_pattern: "redis.*error"
+      - log_pattern: "cache.*failed"
+    steps:
+      - id: step-1
+        description: Verify Redis container is running
+        type: check
+        command: "docker ps | grep redis"
+        expected_output: "redis"
+        on_fail: step-2
+      - id: step-2
+        description: Check containers in this stack
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test Redis connectivity from API service
+        type: check
+        command: "docker exec plane-api-1 redis-cli -h plane-redis-1 ping"
+        expected_output: "PONG"
+        on_fail: step-4
+      - id: step-4
+        description: Restart Redis to clear any hung connections
+        type: fix
+        command: "docker restart plane-redis-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify Redis is accepting connections
+        type: check
+        command: "docker logs plane-redis-1 2>&1 | tail -10"
+    resolution: |
+      Redis has been restarted. The cache service should now be available. Plane uses Redis for session storage and real-time features. Application performance may be temporarily slower until the cache is repopulated.
+
+  - id: secret-key-configuration-error
+    name: Missing or invalid SECRET_KEY configuration
+    symptoms:
+      - "SECRET_KEY not set"
+      - "cryptographic error"
+      - "session.*invalid"
+      - "authentication failed"
+      - "signature verification failed"
+    trigger_conditions:
+      - log_pattern: "SECRET_KEY"
+      - log_pattern: "cryptograph"
+    steps:
+      - id: step-1
+        description: Check if SECRET_KEY is defined in environment
+        type: check
+        command: "docker exec plane-api-1 env | grep SECRET_KEY"
+        expected_output: "SECRET_KEY="
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Inform about SECRET_KEY requirement
+        type: inform
+        command: "echo 'SECRET_KEY must be a strong random string set in docker-compose.yml or .env'"
+      - id: step-4
+        description: Generate a new SECRET_KEY
+        type: fix
+        command: "openssl rand -hex 32"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Update environment and restart services
+        type: fix
+        command: "docker-compose -f docker-compose.yml restart plane-api plane-worker plane-web"
+        requires_approval: true
+    resolution: |
+      A new SECRET_KEY has been generated. Add it to your docker-compose.yml or .env file in the SECRET_KEY environment variable. This key is used for session encryption and must be kept secure and consistent across all service restarts.
+
+default_config:
+  compose_template: |
+    version: "3.8"
+    services:
+      plane-web:
+        image: makeplane/plane:latest
+        container_name: plane-web
+        restart: unless-stopped
+        depends_on:
+          - plane-api
+          - plane-postgres
+          - plane-redis
+        environment:
+          APP_PROTOCOL: ${APP_PROTOCOL:-http}
+          WEB_URL: ${WEB_URL:-http://localhost:3000}
+          NEXT_PUBLIC_API_BASE_URL: ${WEB_URL:-http://localhost:3000}/api
+          API_BASE_URL: http://plane-api-1:8000
+        ports:
+          - "3000:3000"
+
+      plane-api:
+        image: makeplane/plane:latest
+        container_name: plane-api
+        restart: unless-stopped
+        command: gunicorn -w 4 -b 0.0.0.0:8000 plane.wsgi
+        depends_on:
+          - plane-postgres
+          - plane-redis
+        environment:
+          DATABASE_URL: postgresql://${POSTGRES_USER:-plane}:${POSTGRES_PASSWORD:-changeme}@plane-postgres-1:5432/${POSTGRES_DB:-plane}
+          REDIS_URL: redis://plane-redis-1:6379
+          SECRET_KEY: ${SECRET_KEY:-change-me-to-a-random-value}
+          DEBUG: "False"
+          ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+        ports:
+          - "8000:8000"
+        volumes:
+          - ${API_DATA_PATH:-./api_data}:/data
+
+      plane-worker:
+        image: makeplane/plane:latest
+        container_name: plane-worker
+        restart: unless-stopped
+        command: celery -A plane worker -l info
+        depends_on:
+          - plane-postgres
+          - plane-redis
+        environment:
+          DATABASE_URL: postgresql://${POSTGRES_USER:-plane}:${POSTGRES_PASSWORD:-changeme}@plane-postgres-1:5432/${POSTGRES_DB:-plane}
+          REDIS_URL: redis://plane-redis-1:6379
+          SECRET_KEY: ${SECRET_KEY:-change-me-to-a-random-value}
+
+      plane-postgres:
+        image: postgres:15-alpine
+        container_name: plane-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${POSTGRES_DB:-plane}
+          POSTGRES_USER: ${POSTGRES_USER:-plane}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./postgres_data}:/var/lib/postgresql/data
+
+      plane-redis:
+        image: redis:7-alpine
+        container_name: plane-redis
+        restart: unless-stopped
+        ports:
+          - "6379:6379"
+        volumes:
+          - ${REDIS_DATA_PATH:-./redis_data}:/data
+
+  required_vars:
+    - name: APP_PROTOCOL
+      description: Protocol for the application (http or https)
+      default: "http"
+    - name: WEB_URL
+      description: Public URL of the web application
+      default: "http://localhost:3000"
+    - name: SECRET_KEY
+      description: Secret key for Django/session encryption (strong random value)
+      default: "change-me-to-a-random-value"
+    - name: POSTGRES_DB
+      description: Postgres database name
+      default: "plane"
+    - name: POSTGRES_USER
+      description: Postgres username
+      default: "plane"
+    - name: POSTGRES_PASSWORD
+      description: Postgres password (strong)
+      default: "changeme"
+    - name: ALLOWED_HOSTS
+      description: Comma-separated list of allowed hosts
+      default: "localhost,127.0.0.1"
+    - name: API_DATA_PATH
+      description: Host path for API working data
+      default: "./api_data"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for Postgres data
+      default: "./postgres_data"
+    - name: REDIS_DATA_PATH
+      description: Host path for Redis data
+      default: "./redis_data"
+
+  known_mounts:
+    - container_path: /data
+      purpose: API application working directory and uploads
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Plane is a multi-service project management platform consisting of: web frontend (Next.js), API backend (Django/Gunicorn), worker service (Celery), Postgres database, and Redis cache.
+
+  Environment variables: APP_PROTOCOL and WEB_URL must be configured to match your deployment. These are critical for API communication and OAuth redirects.
+
+  SECRET_KEY: Generate a strong random value using `openssl rand -hex 32` and set it consistently across all services. Changing it will invalidate existing sessions.
+
+  Database: Migrations run automatically on API startup. Initial startup may take longer as the schema is created.
+
+  Real-time features: Powered by Redis. Cache failures are non-fatal but may delay real-time collaboration updates.
+
+  Common gotchas:
+  - Web cannot reach API: Verify API service is running and networking is correct.
+  - Database errors: Check POSTGRES_* variables match across all services.
+  - Authentication failures: Ensure SECRET_KEY is set and consistent.
+  - Missing projects: Verify Postgres migrations completed successfully.

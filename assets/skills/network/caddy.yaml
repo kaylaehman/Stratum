@@ -1,0 +1,210 @@
+id: caddy
+name: Caddy Reverse Proxy
+version: "1.0"
+container_match:
+  image_patterns:
+    - "caddy"
+  port_hints: [80, 443, 2019]
+category: network
+description: Automatic HTTPS reverse proxy with built-in Let's Encrypt support and dynamic config reloading
+docs_url: https://hub.docker.com/_/caddy
+
+common_issues:
+  - id: caddyfile-syntax-error
+    name: Caddyfile contains invalid syntax
+    symptoms:
+      - "Error parsing Caddyfile"
+      - "Caddy exits on startup"
+      - "Invalid token or directive"
+      - "Malformed address or rule"
+    trigger_conditions:
+      - log_pattern: "error.*parse"
+      - log_pattern: "invalid.*token"
+    steps:
+      - id: step-1
+        description: Check Caddyfile syntax using Caddy validate command
+        type: check
+        command: "docker exec {container_name} caddy validate --config /etc/caddy/Caddyfile"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display Caddyfile validation error
+        type: inform
+        command: ""
+      - id: step-3
+        description: View the Caddyfile content to identify syntax issues
+        type: check
+        command: "docker exec {container_name} cat /etc/caddy/Caddyfile"
+        expected_output: ""
+      - id: step-4
+        description: Review Caddy logs for detailed error message
+        type: check
+        command: "docker logs {container_name} | tail -20"
+      - id: step-5
+        description: Restart Caddy to reload the Caddyfile
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Caddy has started successfully
+        type: check
+        command: "docker logs {container_name} | grep -i 'success\\|ready\\|serving' | tail -3"
+    resolution: |
+      The Caddyfile had a syntax error that prevented Caddy from starting. The error has been identified in the logs above. Common issues include missing colons after domain names, unmatched braces, invalid directive syntax, or incorrect address formats. Edit the Caddyfile to fix the syntax error and ensure each domain block is properly formatted. Caddy has been restarted and should now be serving if the syntax is valid.
+
+  - id: certificate-renewal-failing
+    name: ACME certificate renewal or initial issuance failing
+    symptoms:
+      - "Certificate will expire soon"
+      - "ACME challenge failed"
+      - "TLS handshake error"
+      - "HTTP-01 validation failed"
+      - "Certificate not issued"
+    trigger_conditions:
+      - log_pattern: "certificate.*error"
+      - log_pattern: "acme.*challenge.*failed"
+      - log_pattern: "tls.*error"
+    steps:
+      - id: step-1
+        description: Check Caddy's certificate storage
+        type: check
+        command: "docker exec {container_name} ls -la /data/caddy/certificates/"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Verify /data/caddy volume is mounted and persistent
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 'Mounts'"
+        expected_output: "/data/caddy"
+        on_fail: step-3
+      - id: step-3
+        description: Display volume mount configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check recent ACME errors in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'acme\\|challenge\\|tls' | tail -10"
+      - id: step-5
+        description: Verify port 80 and 443 are exposed and accessible
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 '\\\"80\\|\\\"443'"
+        expected_output: "80\\|443"
+      - id: step-6
+        description: Force certificate renewal by restarting Caddy
+        type: fix
+        command: "docker exec {container_name} rm -f /data/caddy/certificates/*/*_legacy.json 2>/dev/null; docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor certificate issuance in logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'acme\\|certificate\\|tls' | tail -5"
+    resolution: |
+      Certificate renewal was reset and Caddy has been restarted to initiate a fresh ACME cycle. Caddy will automatically attempt to obtain or renew certificates on startup. Ensure ports 80 and 443 are accessible from the public internet for HTTP-01 validation. If renewal continues to fail, verify your domain's DNS is correctly pointed to this server, check firewall rules, and review the email address configured for Let's Encrypt notifications in your Caddyfile.
+
+  - id: backend-unreachable
+    name: Reverse proxy backend is unreachable or returns error
+    symptoms:
+      - "502 Bad Gateway or 503 Service Unavailable"
+      - "Connection refused to backend"
+      - "Backend service not responding"
+      - "Timeout connecting to upstream"
+    trigger_conditions:
+      - log_pattern: "502|503"
+      - log_pattern: "connection.*refused"
+      - log_pattern: "upstream.*error"
+    steps:
+      - id: step-1
+        description: Check Caddyfile reverse proxy rules
+        type: check
+        command: "docker exec {container_name} cat /etc/caddy/Caddyfile | grep -A 3 'reverse_proxy'"
+        expected_output: ""
+      - id: step-2
+        description: Verify backend service is running and reachable from Caddy container
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://{upstream_host}:{upstream_port}/"
+        expected_output: "200|301|302|401|403|500"
+        on_fail: step-3
+      - id: step-3
+        description: Display backend connectivity status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test DNS resolution of backend hostname from Caddy container
+        type: check
+        command: "docker exec {container_name} nslookup {upstream_host}"
+        expected_output: ""
+      - id: step-5
+        description: Reload Caddy configuration
+        type: fix
+        command: "docker exec {container_name} curl -X POST http://localhost:2019/load -H 'Content-Type: application/json' -d @/etc/caddy/Caddyfile"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify proxy is now responding
+        type: check
+        command: "docker logs {container_name} | grep -i 'reload\\|success' | tail -3"
+    resolution: |
+      Caddy's reverse proxy configuration has been reloaded. Verify that your backend service is running and reachable from the Caddy container's perspective. Common causes: backend service is down, IP/hostname is incorrect, port number is wrong, or firewall is blocking container-to-container or container-to-host communication. Check that the `reverse_proxy` directive in your Caddyfile points to the correct backend address and port.
+
+default_config:
+  compose_template: |
+    services:
+      caddy:
+        image: caddy:latest
+        container_name: caddy
+        restart: unless-stopped
+        ports:
+          - "80:80/tcp"
+          - "443:443/tcp"
+          - "2019:2019/tcp"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/etc/caddy
+          - ${DATA_PATH:-./data}:/data
+        environment:
+          ACME_AGREE: "true"
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for Caddyfile and other configuration
+      default: "./config"
+    - name: DATA_PATH
+      description: Host path for certificate storage and persistent data
+      default: "./data"
+  known_mounts:
+    - container_path: /etc/caddy
+      purpose: Caddyfile and static configuration
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /data
+      purpose: Let's Encrypt certificates and ACME state (persistent)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Caddy is a modern HTTP/2 web server and reverse proxy with automatic HTTPS via Let's Encrypt built-in.
+
+  Key concepts:
+  - Caddyfile: Configuration file that defines sites, routes, and upstream services
+  - Automatic HTTPS: Caddy automatically obtains and renews certificates for any domain in the Caddyfile
+  - Admin API: Running on port 2019; allows dynamic config reloading without restart
+  - Auto-renewal: Certificates are renewed automatically 30 days before expiration
+
+  Configuration basics:
+  - Simple reverse proxy: `example.com { reverse_proxy localhost:8080 }`
+  - Multiple backends: use `reverse_proxy localhost:8080 localhost:8081`
+  - Path-based routing: `example.com { route /api* { reverse_proxy localhost:8080 } ... }`
+  - Headers: use `header` directive to add or modify request/response headers
+  - Static files: use `file_server` directive to serve files from a directory
+
+  Certificate storage: Certificates are stored in /data/caddy/certificates/ and must be persistent across container restarts. Back up this directory periodically.
+
+  Admin API: Can be used to reload configuration dynamically without restarting the container using the admin endpoint on port 2019.
+
+  Common gotchas:
+  - Caddyfile syntax error prevents Caddy from starting — always validate with `caddy validate`
+  - Port 80 must be open for HTTP-01 ACME challenge validation
+  - Domain DNS must be properly pointed to the Caddy server for certificate issuance
+  - Reverse proxy backend must be reachable from within the container (use container name if on same network)
+  - /data/caddy volume must be persistent to retain certificates across restarts

@@ -1,0 +1,300 @@
+id: bookstack
+name: BookStack Document Management
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/bookstack"
+    - "ssbbookstack/bookstack"
+  port_hints: [80]
+category: productivity
+description: Self-hosted wiki and documentation management platform with role-based access
+docs_url: https://hub.docker.com/r/linuxserver/bookstack
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to config directory"
+      - "Failed to create required directories"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents BookStack from writing configuration and database files. The fix changed ownership to match the container process. BookStack should now be able to write to /config.
+
+  - id: database-connection-failed
+    name: Database connection failed or not initialized
+    symptoms:
+      - "SQLSTATE[HY000]"
+      - "Connection refused"
+      - "Cannot connect to database"
+      - "Database not initialized"
+      - "Blank page or 500 error on startup"
+    trigger_conditions:
+      - log_pattern: "SQLSTATE"
+      - log_pattern: "Connection refused"
+      - log_pattern: "database.*error"
+    steps:
+      - id: step-1
+        description: Verify MariaDB container is running and healthy
+        type: check
+        command: "docker ps | grep -i mariadb"
+        expected_output: "mariadb"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check MariaDB logs for errors
+        type: check
+        command: "docker logs bookstack-db 2>&1 | tail -20"
+        expected_output: "ready for connections"
+        on_fail: step-4
+      - id: step-4
+        description: Verify database environment variables are correct
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart BookStack to reconnect to database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check if connection was established
+        type: check
+        command: "docker logs {container_name} | grep -i 'database\\|connected' | tail -5"
+    resolution: |
+      BookStack database connection has been re-attempted. Ensure the MariaDB service (defined in the same compose file) is running and healthy. Verify DB_HOST, DB_USER, and DB_PASSWORD environment variables match the MariaDB service configuration. The container may take 30-60 seconds to initialize the database on first run.
+
+  - id: app-url-mismatch
+    name: APP_URL mismatch causing redirect loops or asset loading issues
+    symptoms:
+      - "Redirect loop on login page"
+      - "CSS/JS assets not loading"
+      - "Images broken or not displaying"
+      - "External links redirecting incorrectly"
+      - "Session cookies not being set"
+    trigger_conditions:
+      - log_pattern: "redirect.*loop"
+      - log_pattern: "APP_URL"
+    steps:
+      - id: step-1
+        description: Check the current APP_URL environment variable in container
+        type: check
+        command: "docker exec {container_name} printenv | grep APP_URL"
+        expected_output: "APP_URL="
+        on_fail: step-2
+      - id: step-2
+        description: Display BookStack configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify what URL you are using to access BookStack
+        type: confirm
+        description: "Please confirm: Are you accessing BookStack via http://localhost, an IP address, or a domain name?"
+      - id: step-4
+        description: Update APP_URL environment variable to match access URL
+        type: fix
+        command: "docker exec {container_name} sed -i 's|APP_URL=.*|APP_URL=http://{access_url}|' /config/.env"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart BookStack to apply configuration change
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait for startup and verify assets are loading
+        type: check
+        command: "sleep 10 && curl -s http://localhost:80/ | grep -q '<link' && echo 'Assets loaded'"
+    resolution: |
+      The APP_URL environment variable controls how BookStack generates internal URLs and asset links. If this doesn't match the URL you use to access the application, browsers will reject cookies and fail to load CSS/JS. The configuration has been updated and BookStack restarted. Clear your browser cache and try again.
+
+  - id: app-key-not-set
+    name: APP_KEY not set or invalid (encryption key missing)
+    symptoms:
+      - "Please set APP_KEY in environment"
+      - "Cookies not being created"
+      - "Password reset links not working"
+      - "Unable to log in after restart"
+      - "Application key error on startup"
+    trigger_conditions:
+      - log_pattern: "APP_KEY"
+      - log_pattern: "encryption key"
+    steps:
+      - id: step-1
+        description: Check if APP_KEY is set in environment
+        type: check
+        command: "docker exec {container_name} printenv | grep APP_KEY"
+        expected_output: "APP_KEY=base64:"
+        on_fail: step-2
+      - id: step-2
+        description: Generate a new APP_KEY
+        type: inform
+        command: ""
+      - id: step-3
+        description: Confirm APP_KEY generation is safe (non-destructive for existing data)
+        type: inform
+        command: ""
+      - id: step-4
+        description: Set APP_KEY environment variable with generated key
+        type: fix
+        command: "docker exec {container_name} php artisan key:generate"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart BookStack with new APP_KEY
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify APP_KEY is now set
+        type: check
+        command: "docker exec {container_name} printenv | grep APP_KEY"
+    resolution: |
+      BookStack requires a unique APP_KEY for encryption and session management. A new key has been generated and applied. All users will be logged out and password reset links issued before this change will no longer work. This is a one-time operation.
+
+default_config:
+  compose_template: |
+    services:
+      bookstack:
+        image: linuxserver/bookstack:latest
+        container_name: bookstack
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          APP_URL: ${APP_URL:-http://localhost}
+          APP_KEY: ${APP_KEY:-}
+          DB_HOST: ${DB_HOST:-bookstack-db}
+          DB_PORT: ${DB_PORT:-3306}
+          DB_USER: ${DB_USER:-bookstack}
+          DB_PASSWORD: ${DB_PASSWORD:-bookstack}
+          DB_DATABASE: ${DB_DATABASE:-bookstack}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "80:80/tcp"
+        depends_on:
+          - bookstack-db
+        networks:
+          - bookstack-net
+
+      bookstack-db:
+        image: mariadb:latest
+        container_name: bookstack-db
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpass}
+          MYSQL_DATABASE: ${DB_DATABASE:-bookstack}
+          MYSQL_USER: ${DB_USER:-bookstack}
+          MYSQL_PASSWORD: ${DB_PASSWORD:-bookstack}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+        networks:
+          - bookstack-net
+        healthcheck:
+          test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+
+    networks:
+      bookstack-net:
+        driver: bridge
+  required_vars:
+    - name: PUID
+      description: User ID to run BookStack as
+      default: "1000"
+    - name: PGID
+      description: Group ID for BookStack
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: APP_URL
+      description: Full URL where BookStack is accessible (e.g., http://localhost or https://wiki.example.com)
+      default: "http://localhost"
+    - name: APP_KEY
+      description: Encryption key (generated via key:generate command, leave blank on first run)
+      default: ""
+    - name: DB_HOST
+      description: MariaDB hostname (use service name if in same compose)
+      default: "bookstack-db"
+    - name: DB_USER
+      description: Database user
+      default: "bookstack"
+    - name: DB_PASSWORD
+      description: Database password
+      default: "bookstack"
+    - name: DB_DATABASE
+      description: Database name
+      default: "bookstack"
+    - name: DB_ROOT_PASSWORD
+      description: MariaDB root password
+      default: "rootpass"
+    - name: CONFIG_PATH
+      description: Host path for /config (BookStack files and settings)
+      default: "./config"
+    - name: DB_PATH
+      description: Host path for MariaDB data directory
+      default: "./db"
+  known_mounts:
+    - container_path: /config
+      purpose: BookStack application files, settings, and uploads
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  BookStack is a self-hosted, open-source wiki and documentation platform built on Laravel. The LinuxServer.io image is the most commonly used.
+
+  Database: Requires a MySQL/MariaDB database (included in the compose template). Ensure the database is initialized and healthy before starting BookStack.
+
+  APP_KEY: Must be set for encryption and session management. Generate via `php artisan key:generate` if not set.
+
+  APP_URL: Must match the URL used to access BookStack, or redirects, cookies, and asset loading will fail.
+
+  Uploads: User uploads are stored in the /config mount. Ensure sufficient disk space and proper permissions for media files.
+
+  Initial setup: After first run, navigate to http://<url> and complete the setup wizard. This creates the admin account and initializes the database.
+
+  Common gotchas:
+  - Permission denied on /config: Check PUID/PGID match between host and container.
+  - Database not initializing: Ensure MariaDB service is running and healthy before BookStack.
+  - Redirect loops: APP_URL must match your access URL exactly (including protocol and port).
+  - Assets not loading: Check APP_URL and browser cache.

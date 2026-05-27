@@ -1,0 +1,262 @@
+id: hoarder
+name: Hoarder Bookmark Manager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/hoarder-app/hoarder"
+  port_hints: [3000]
+category: productivity
+description: Self-hosted bookmark and archive manager with AI-powered tagging and full-text search
+docs_url: https://github.com/hoarder-app/hoarder
+
+common_issues:
+  - id: postgres-connection-failed
+    name: Database connection refused
+    symptoms:
+      - "connection refused"
+      - "ECONNREFUSED"
+      - "postgres.*not running"
+      - "Failed to connect to database"
+    trigger_conditions:
+      - log_pattern: "connection refused.*postgres"
+      - log_pattern: "could not connect to database"
+    steps:
+      - id: step-1
+        description: Check if Postgres container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "hoarder.*postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Display running containers in this compose stack
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Postgres logs for errors
+        type: check
+        command: "docker logs hoarder-postgres-1 2>&1 | tail -20"
+        expected_output: ""
+      - id: step-4
+        description: Restart the Postgres container
+        type: fix
+        command: "docker restart hoarder-postgres-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify database is accessible from Hoarder
+        type: check
+        command: "docker exec hoarder-hoarder-1 nc -zv hoarder-postgres-1 5432"
+        expected_output: "succeeded"
+    resolution: |
+      The Postgres database container has been restarted. Hoarder should now establish a connection to the database. If the issue persists, check that DATABASE_URL environment variable is correctly set and that the postgres hostname resolves within the Docker network.
+
+  - id: meilisearch-unavailable
+    name: Full-text search service unavailable
+    symptoms:
+      - "search service failed"
+      - "meilisearch.*connection"
+      - "Failed to index bookmark"
+      - "Search unavailable"
+    trigger_conditions:
+      - log_pattern: "meilisearch.*error"
+      - log_pattern: "search.*failed"
+    steps:
+      - id: step-1
+        description: Verify Meilisearch container is running
+        type: check
+        command: "docker ps | grep meilisearch"
+        expected_output: "hoarder.*meilisearch"
+        on_fail: step-2
+      - id: step-2
+        description: Display all containers in Hoarder stack
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test Meilisearch connectivity from Hoarder
+        type: check
+        command: "docker exec hoarder-hoarder-1 curl -s -o /dev/null -w '%{http_code}' http://hoarder-meilisearch-1:7700/health"
+        expected_output: "200"
+        on_fail: step-4
+      - id: step-4
+        description: Restart Meilisearch search service
+        type: fix
+        command: "docker restart hoarder-meilisearch-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify Meilisearch is responding after restart
+        type: check
+        command: "docker logs hoarder-meilisearch-1 2>&1 | tail -10"
+    resolution: |
+      The Meilisearch search service has been restarted. Full-text search functionality should now be available. Hoarder uses Meilisearch to index bookmark titles, descriptions, and content for instant search. If issues persist, verify that MEILI_MASTER_KEY is correctly set and matches in the Hoarder container environment.
+
+  - id: nextauth-secret-missing
+    name: Missing or invalid NEXTAUTH_SECRET configuration
+    symptoms:
+      - "NEXTAUTH_SECRET not set"
+      - "authentication failed"
+      - "session validation failed"
+      - "Unable to sign in"
+    trigger_conditions:
+      - log_pattern: "NEXTAUTH_SECRET"
+      - log_pattern: "session.*invalid"
+    steps:
+      - id: step-1
+        description: Check if NEXTAUTH_SECRET is defined in environment
+        type: check
+        command: "docker exec hoarder-hoarder-1 env | grep NEXTAUTH_SECRET"
+        expected_output: "NEXTAUTH_SECRET="
+        on_fail: step-2
+      - id: step-2
+        description: Display current environment variables
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a new NEXTAUTH_SECRET
+        type: fix
+        command: "openssl rand -base64 32"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Update environment and restart services
+        type: fix
+        command: "docker-compose -f docker-compose.yml restart hoarder-hoarder-1"
+        requires_approval: true
+    resolution: |
+      A new NEXTAUTH_SECRET has been generated. Add it to your docker-compose.yml or .env file in the NEXTAUTH_SECRET environment variable. This key is used for session authentication and must be kept secure and consistent across restarts. Changing it will invalidate existing sessions.
+
+  - id: bookmark-indexing-slow
+    name: Bookmark indexing or archiving is slow
+    symptoms:
+      - "indexing taking too long"
+      - "archive service timeout"
+      - "Failed to fetch bookmark content"
+      - "High memory usage during indexing"
+    trigger_conditions:
+      - log_pattern: "index.*timeout"
+      - log_pattern: "archive.*slow"
+    steps:
+      - id: step-1
+        description: Check Hoarder logs for indexing errors
+        type: check
+        command: "docker logs hoarder-hoarder-1 2>&1 | grep -i 'index\\|archive' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Display container resource usage
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify Meilisearch is responsive
+        type: check
+        command: "docker exec hoarder-hoarder-1 curl -s http://hoarder-meilisearch-1:7700/stats | head -c 100"
+        expected_output: ""
+      - id: step-4
+        description: Restart Hoarder service to clear indexing backlog
+        type: fix
+        command: "docker restart hoarder-hoarder-1"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Monitor logs for successful indexing recovery
+        type: check
+        command: "docker logs hoarder-hoarder-1 2>&1 | tail -10"
+    resolution: |
+      The Hoarder service has been restarted. Bookmark indexing and archiving should resume. Large library indexing can be CPU and memory intensive; consider increasing container memory limits in docker-compose.yml if performance remains an issue. Meilisearch caching may also benefit from increased memory allocation.
+
+default_config:
+  compose_template: |
+    version: "3.8"
+    services:
+      hoarder:
+        image: ghcr.io/hoarder-app/hoarder:latest
+        container_name: hoarder
+        restart: unless-stopped
+        depends_on:
+          - hoarder-postgres
+          - hoarder-meilisearch
+        environment:
+          NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-to-a-random-value}
+          NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+          DATABASE_URL: postgresql://${POSTGRES_USER:-hoarder}:${POSTGRES_PASSWORD:-changeme}@hoarder-postgres:5432/${POSTGRES_DB:-hoarder}
+          MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-change-me-to-a-random-value}
+          MEILI_URL: http://hoarder-meilisearch:7700
+        ports:
+          - "3000:3000"
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+
+      hoarder-postgres:
+        image: postgres:15-alpine
+        container_name: hoarder-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${POSTGRES_DB:-hoarder}
+          POSTGRES_USER: ${POSTGRES_USER:-hoarder}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./postgres_data}:/var/lib/postgresql/data
+
+      hoarder-meilisearch:
+        image: getmeili/meilisearch:latest
+        container_name: hoarder-meilisearch
+        restart: unless-stopped
+        environment:
+          MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-change-me-to-a-random-value}
+        ports:
+          - "7700:7700"
+        volumes:
+          - ${MEILISEARCH_DATA_PATH:-./meilisearch_data}:/meili_data
+
+  required_vars:
+    - name: NEXTAUTH_SECRET
+      description: NextAuth secret key for session encryption (strong random value)
+      default: "change-me-to-a-random-value"
+    - name: NEXTAUTH_URL
+      description: Public URL of Hoarder (for OAuth redirects)
+      default: "http://localhost:3000"
+    - name: MEILI_MASTER_KEY
+      description: Master key for Meilisearch API authentication (strong random value)
+      default: "change-me-to-a-random-value"
+    - name: POSTGRES_DB
+      description: Postgres database name
+      default: "hoarder"
+    - name: POSTGRES_USER
+      description: Postgres username
+      default: "hoarder"
+    - name: POSTGRES_PASSWORD
+      description: Postgres password (strong)
+      default: "changeme"
+    - name: DATA_PATH
+      description: Host path for /data (application working directory)
+      default: "./data"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for Postgres data
+      default: "./postgres_data"
+    - name: MEILISEARCH_DATA_PATH
+      description: Host path for Meilisearch data
+      default: "./meilisearch_data"
+
+  known_mounts:
+    - container_path: /data
+      purpose: Hoarder application working directory and user data
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+notes: |
+  Hoarder is a self-hosted bookmark and web archive manager with AI-powered tagging and full-text search. It consists of three main services: the Hoarder application (Next.js), Postgres for data persistence, and Meilisearch for full-text search indexing.
+
+  NEXTAUTH_SECRET: Generate a strong random value using `openssl rand -base64 32` and set it consistently across all restarts. Changing it will invalidate existing sessions.
+
+  NEXTAUTH_URL: Must be set to the public URL of Hoarder for OAuth and session redirects to work correctly. In development use http://localhost:3000; in production use https://your-domain.com.
+
+  MEILI_MASTER_KEY: Generate a strong random value using `openssl rand -base64 32`. This key protects the Meilisearch API from unauthorized access.
+
+  Database: Migrations run automatically on first startup.
+
+  Search indexing: Full-text search requires sufficient memory and CPU for Meilisearch indexing. Large bookmark collections may take several minutes to fully index on first startup.
+
+  Common gotchas:
+  - Database connection errors: Verify Postgres is running and DATABASE_URL is correctly configured.
+  - Authentication failures: Ensure NEXTAUTH_SECRET is set and consistent across restarts.
+  - Search unavailable: Verify Meilisearch is running and MEILI_MASTER_KEY matches across containers.
+  - Slow indexing: Increase memory allocation to both Hoarder and Meilisearch containers if performance is poor.

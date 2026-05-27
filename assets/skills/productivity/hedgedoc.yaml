@@ -1,0 +1,279 @@
+id: hedgedoc
+name: HedgeDoc Markdown Collaborative Editor
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/hedgedoc"
+  port_hints: [3000]
+category: productivity
+description: Collaborative markdown editor and note-taking platform
+docs_url: https://hub.docker.com/r/linuxserver/hedgedoc
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to session store"
+      - "Cannot create uploads directory"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current config directory ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Set config directory to PUID:PGID (usually 1000:1000)
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path} && chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership matches container UID/GID
+        type: check
+        command: "stat {config_path} | grep 'Uid.*{puid}'"
+    resolution: |
+      HedgeDoc (running as PUID/PGID, usually 1000:1000) requires write access to /config. The directory was chowned to match the container's user. HedgeDoc should now be able to write session data, uploads, and configuration files.
+
+  - id: database-connection-failed
+    name: PostgreSQL database connection failed
+    symptoms:
+      - "Cannot connect to database"
+      - "DB_HOST or DB_USER is invalid"
+      - "PostgreSQL connection timeout"
+      - "Note history unavailable"
+    trigger_conditions:
+      - log_pattern: "database.*connection"
+      - log_pattern: "ECONNREFUSED.*5432"
+    steps:
+      - id: step-1
+        description: Check database environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i 'db_host\\|db_user\\|db_pass'"
+        expected_output: "DB_HOST"
+        on_fail: step-2
+      - id: step-2
+        description: Display database configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test PostgreSQL connectivity from container
+        type: check
+        command: "docker exec {container_name} pg_isready -h {db_host} -p 5432"
+        expected_output: "accepting"
+        on_fail: step-4
+      - id: step-4
+        description: Check PostgreSQL container logs if applicable
+        type: check
+        command: "docker logs {db_container_name} 2>&1 | tail -10"
+      - id: step-5
+        description: Restart HedgeDoc to retry connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor startup logs for successful DB connection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      HedgeDoc requires a PostgreSQL database for note persistence and history. Verify DB_HOST, DB_USER, DB_PASS, and DB_NAME are correct. The database name must exist and be accessible. After restarting, HedgeDoc should connect and initialize its schema automatically.
+
+  - id: uploads-not-persisting
+    name: File uploads not persisting between restarts
+    symptoms:
+      - "Uploaded images disappear after container restart"
+      - "Upload directory is ephemeral"
+      - "No upload directory in /config/uploads"
+      - "Cannot find previously uploaded images"
+    trigger_conditions:
+      - log_pattern: "upload.*not.*found"
+    steps:
+      - id: step-1
+        description: Verify uploads directory is mounted
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Destination}} {{end}}' | grep uploads"
+        expected_output: "uploads"
+        on_fail: step-2
+      - id: step-2
+        description: Check if uploads are being stored in container-only directory
+        type: check
+        command: "docker exec {container_name} ls -la /config/uploads | head"
+        on_fail: step-3
+      - id: step-3
+        description: Display current mount configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Stop container and verify uploads directory on host
+        type: check
+        command: "ls -la {config_path}/uploads"
+        on_fail: step-5
+      - id: step-5
+        description: Create uploads directory on host with correct permissions
+        type: fix
+        command: "mkdir -p {config_path}/uploads && chown {puid}:{pgid} {config_path}/uploads && chmod 755 {config_path}/uploads"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart HedgeDoc and test upload persistence
+        type: check
+        command: "docker restart {container_name} && sleep 3 && docker logs {container_name} | tail -5"
+    resolution: |
+      HedgeDoc stores uploads in /config/uploads. This directory must be a persistent volume mount to survive container restarts. The uploads directory has been created on the host with correct ownership and permissions.
+
+  - id: session-store-missing
+    name: Session store not persisting or unavailable
+    symptoms:
+      - "Users get logged out after restart"
+      - "Session store error in logs"
+      - "Cannot find .udb/db.sqlite"
+      - "Lost uploaded sessions on restart"
+    trigger_conditions:
+      - log_pattern: "session.*not.*found"
+      - log_pattern: "udb.*sqlite.*error"
+    steps:
+      - id: step-1
+        description: Check if .udb directory exists and is accessible
+        type: check
+        command: "docker exec {container_name} ls -la /config/.udb"
+        expected_output: "db.sqlite"
+        on_fail: step-2
+      - id: step-2
+        description: Display session store directory status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify /config mount is writable
+        type: check
+        command: "docker exec {container_name} touch /config/.write-test && rm /config/.write-test && echo 'writable'"
+        expected_output: "writable"
+        on_fail: step-4
+      - id: step-4
+        description: Fix /config permissions
+        type: fix
+        command: "chmod 755 {config_path} && chown {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart HedgeDoc
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify session store is created
+        type: check
+        command: "sleep 3 && docker exec {container_name} ls -la /config/.udb"
+    resolution: |
+      HedgeDoc stores user sessions in /config/.udb/db.sqlite. The /config directory must be writable and mounted as a persistent volume. Sessions should now persist across restarts.
+
+default_config:
+  compose_template: |
+    services:
+      hedgedoc:
+        image: linuxserver/hedgedoc:latest
+        container_name: hedgedoc
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          DB_HOST: ${DB_HOST:-postgres}
+          DB_USER: ${DB_USER:-hedgedoc}
+          DB_PASS: ${DB_PASS:-hedgedoc}
+          DB_NAME: ${DB_NAME:-hedgedoc}
+          DB_PORT: ${DB_PORT:-5432}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "3000:3000"
+        depends_on:
+          postgres:
+            condition: service_healthy
+
+      postgres:
+        image: postgres:15-alpine
+        container_name: hedgedoc-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: hedgedoc
+          POSTGRES_USER: hedgedoc
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hedgedoc}
+        volumes:
+          - ${POSTGRES_DATA:-./postgres_data}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U hedgedoc"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+  required_vars:
+    - name: PUID
+      description: User ID to run HedgeDoc as (default 1000)
+      default: "1000"
+    - name: PGID
+      description: Group ID for HedgeDoc (default 1000)
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: DB_HOST
+      description: PostgreSQL hostname
+      default: "postgres"
+    - name: DB_USER
+      description: PostgreSQL username
+      default: "hedgedoc"
+    - name: DB_PASS
+      description: PostgreSQL password
+      default: "hedgedoc"
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "hedgedoc"
+    - name: POSTGRES_PASSWORD
+      description: PostgreSQL root password
+      default: "hedgedoc"
+    - name: CONFIG_PATH
+      description: Host path for /config (session store, uploads)
+      default: "./config"
+    - name: POSTGRES_DATA
+      description: Host path for PostgreSQL data
+      default: "./postgres_data"
+
+  known_mounts:
+    - container_path: /config
+      purpose: Session store (.udb), uploads, configuration
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database files
+      recommended_permissions: "700"
+      owner: "70:70"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  HedgeDoc (formerly CodiMD) is a collaborative markdown editor with real-time co-editing. The LinuxServer.io image handles permissions via PUID/PGID, which is the recommended way to run it in a Docker environment.
+
+  Database: PostgreSQL is required for multi-user deployments. HedgeDoc will initialize the schema on first connection.
+
+  Session store: User sessions and temporary data are stored in /config/.udb/db.sqlite. This must be on persistent storage.
+
+  Uploads: Images and file uploads are stored in /config/uploads. Ensure sufficient disk space.
+
+  UID/GID issues: The most common problem is /config ownership mismatch. Use PUID/PGID matching your host user (usually 1000:1000 for a primary non-root user).
+
+  Backups: Backup /config and the PostgreSQL database regularly.

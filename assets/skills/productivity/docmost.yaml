@@ -1,0 +1,210 @@
+id: docmost
+name: Docmost Document Collaboration
+version: "1.0"
+container_match:
+  image_patterns:
+    - "docmost/docmost"
+  port_hints: [3000]
+category: productivity
+description: Self-hosted collaborative document editor and wiki platform
+docs_url: https://hub.docker.com/r/docmost/docmost
+
+common_issues:
+  - id: database-connection-failed
+    name: Database connection failed at startup
+    symptoms:
+      - "Cannot connect to database"
+      - "DATABASE_URL is invalid or unreachable"
+      - "PostgreSQL connection timeout"
+      - "Error: connect ECONNREFUSED"
+    trigger_conditions:
+      - log_pattern: "database.*connection"
+      - log_pattern: "ECONNREFUSED"
+    steps:
+      - id: step-1
+        description: Verify DATABASE_URL environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i database"
+        expected_output: "DATABASE_URL"
+        on_fail: step-2
+      - id: step-2
+        description: Display DATABASE_URL configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test PostgreSQL connectivity from container
+        type: check
+        command: "docker exec {container_name} pg_isready -h {db_host} -p 5432"
+        expected_output: "accepting"
+        on_fail: step-4
+      - id: step-4
+        description: Check PostgreSQL container logs if applicable
+        type: check
+        command: "docker logs {db_container_name} 2>&1 | tail -10"
+        on_fail: step-5
+      - id: step-5
+        description: Restart Docmost to retry database connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor startup logs for successful connection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      Docmost requires a valid PostgreSQL database connection. The DATABASE_URL must point to an accessible PostgreSQL instance with the correct credentials. After restarting, Docmost should initialize its schema and become ready. If issues persist, verify the PostgreSQL server is running, credentials are correct, and the database name exists.
+
+  - id: app-secret-not-configured
+    name: APP_SECRET missing or invalid
+    symptoms:
+      - "Session validation failed"
+      - "Invalid session token"
+      - "Login loop or authentication error"
+      - "Cannot access documents after login"
+    trigger_conditions:
+      - log_pattern: "secret.*invalid"
+      - log_pattern: "session.*failed"
+    steps:
+      - id: step-1
+        description: Check if APP_SECRET is set
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i app_secret"
+        expected_output: "APP_SECRET"
+        on_fail: step-2
+      - id: step-2
+        description: Display APP_SECRET status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a new secure APP_SECRET (64 character random string)
+        type: inform
+        command: ""
+      - id: step-4
+        description: Set APP_SECRET in container environment and restart
+        type: fix
+        command: "docker stop {container_name} && docker update --env-file {env_file} {container_name} && docker start {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify Docmost started with new secret
+        type: check
+        command: "sleep 3 && docker logs {container_name} | grep -i 'ready\\|started'"
+    resolution: |
+      APP_SECRET is used to sign session tokens and must be set to a secure random string. Existing sessions may become invalid after changing the secret. Users will need to log in again. Ensure the secret is at least 32 characters and stored securely.
+
+  - id: app-url-mismatch
+    name: APP_URL does not match access URL
+    symptoms:
+      - "Redirect loops after login"
+      - "Links in emails point to wrong domain"
+      - "CORS or mixed content errors"
+      - "Cannot access from different domain or port"
+    trigger_conditions:
+      - log_pattern: "APP_URL.*mismatch"
+      - log_pattern: "redirect.*loop"
+    steps:
+      - id: step-1
+        description: Check current APP_URL setting
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Config.Env}}' | grep -i app_url"
+        expected_output: "APP_URL"
+        on_fail: step-2
+      - id: step-2
+        description: Display APP_URL configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify the URL matches your actual access domain
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Update APP_URL environment variable
+        type: fix
+        command: "docker update --env APP_URL={new_app_url} {container_name} && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Clear browser cache and test login
+        type: check
+        command: "sleep 3 && docker logs {container_name} | tail -5"
+    resolution: |
+      APP_URL must match the domain and protocol you use to access Docmost in your browser. If you access via https://docs.example.com, then APP_URL should be https://docs.example.com. After updating, existing sessions may be invalidated.
+
+default_config:
+  compose_template: |
+    services:
+      docmost:
+        image: docmost/docmost:latest
+        container_name: docmost
+        restart: unless-stopped
+        environment:
+          DATABASE_URL: ${DATABASE_URL:-postgresql://docmost:docmost@postgres:5432/docmost}
+          APP_SECRET: ${APP_SECRET:-your-secret-key-change-me}
+          APP_URL: ${APP_URL:-http://localhost:3000}
+        volumes:
+          - ${DATA_PATH:-./data}:/app/data
+        ports:
+          - "3000:3000"
+        depends_on:
+          postgres:
+            condition: service_healthy
+
+      postgres:
+        image: postgres:15-alpine
+        container_name: docmost-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: docmost
+          POSTGRES_USER: docmost
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docmost}
+        volumes:
+          - ${POSTGRES_DATA:-./postgres_data}:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U docmost"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+
+  required_vars:
+    - name: DATABASE_URL
+      description: PostgreSQL connection string
+      default: "postgresql://docmost:docmost@postgres:5432/docmost"
+    - name: APP_SECRET
+      description: Secret key for session signing (min 32 chars, random)
+      default: "your-secret-key-change-me-to-random-64-chars"
+    - name: APP_URL
+      description: Public URL where Docmost is accessed
+      default: "http://localhost:3000"
+    - name: POSTGRES_PASSWORD
+      description: PostgreSQL password for docmost user
+      default: "docmost"
+    - name: DATA_PATH
+      description: Host path for persistent data
+      default: "./data"
+    - name: POSTGRES_DATA
+      description: Host path for PostgreSQL data
+      default: "./postgres_data"
+
+  known_mounts:
+    - container_path: /app/data
+      purpose: Docmost application data and uploads
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL database files
+      recommended_permissions: "700"
+      owner: "70:70"
+
+notes: |
+  Docmost is a collaborative document editor with real-time co-editing and a wiki-style knowledge base. It requires a PostgreSQL database.
+
+  APP_SECRET: Must be a secure random string (minimum 32 characters). Generate with: openssl rand -base64 32
+
+  APP_URL: Used for email links and redirects. Must be the exact URL users access Docmost from (including protocol and port if non-standard).
+
+  Database: Docmost automatically initializes the PostgreSQL schema on first run.
+
+  Backups: Regularly backup the /app/data directory and PostgreSQL database.
+
+  Performance: For large document bases, ensure PostgreSQL is on fast storage.

@@ -1,0 +1,139 @@
+id: stirling-pdf
+name: Stirling PDF
+version: "1.0"
+container_match:
+  image_patterns:
+    - "frooodle/s-pdf"
+  port_hints: [8080]
+category: productivity
+description: Web-based PDF manipulation tool suite with OCR, compression, and document utilities
+docs_url: https://hub.docker.com/r/frooodle/s-pdf
+
+common_issues:
+  - id: pdf-processing-fails
+    name: PDF processing or conversion fails
+    symptoms:
+      - "Error processing document"
+      - "Conversion failed"
+      - "File upload fails"
+      - "Processing hangs or times out"
+    trigger_conditions:
+      - log_pattern: "error.*process"
+      - log_pattern: "failed.*convert"
+    steps:
+      - id: step-1
+        description: Check if upload directory exists and is writable
+        type: check
+        command: "ls -la {config_path} | grep -E '^d'"
+        expected_output: "uploads"
+        on_fail: step-2
+      - id: step-2
+        description: Create uploads directory if missing
+        type: fix
+        command: "mkdir -p {config_path}/uploads && chmod 755 {config_path}/uploads"
+        requires_approval: true
+        on_success: step-3
+      - id: step-3
+        description: Check Java heap memory allocation
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i java"
+        expected_output: ""
+      - id: step-4
+        description: Restart container to clear processing queue
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify Stirling is responding
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:8080/health || echo 'Container starting'"
+    resolution: |
+      PDF processing failures can occur due to missing upload directories, insufficient Java memory, or stuck processing jobs. The uploads directory has been created with proper permissions, and the container has been restarted to clear any queued operations. Try uploading a small PDF file to verify functionality is restored.
+
+  - id: missing-libreoffice-support
+    name: Document conversion (Word, Excel, etc.) not working
+    symptoms:
+      - "Document to PDF conversion fails"
+      - "Office format conversion unavailable"
+      - "LibreOffice features missing"
+      - "Only PDF input/output works"
+    trigger_conditions:
+      - log_pattern: "libreoffice.*not found"
+      - log_pattern: "unsupported.*format"
+    steps:
+      - id: step-1
+        description: Display current environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}'"
+        expected_output: ""
+      - id: step-2
+        description: Inform about LibreOffice optional support
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if INSTALL_LIBREOFFICE is enabled
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env (index .Config.Env)}}' 2>/dev/null | grep -i libreoffice"
+        expected_output: "true"
+        on_fail: step-4
+      - id: step-4
+        description: Display note about rebuilding container with LibreOffice
+        type: inform
+        command: ""
+    resolution: |
+      Document conversion requires optional LibreOffice support. The current container does not have LibreOffice installed. To enable document conversion, rebuild the container with the INSTALL_LIBREOFFICE environment variable set to true, or use a pre-built variant that includes it.
+
+default_config:
+  compose_template: |
+    services:
+      stirling-pdf:
+        image: frooodle/s-pdf:latest
+        container_name: stirling-pdf
+        restart: unless-stopped
+        environment:
+          INSTALL_LIBREOFFICE: "true"
+          CUSTOM_FILES: "false"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${CUSTOM_FILES_PATH:-./custom-files}:/custom-files:ro
+        ports:
+          - "8080:8080/tcp"
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for persistent configuration and uploads
+      default: "./config"
+    - name: CUSTOM_FILES_PATH
+      description: Host path for custom fonts, templates, and OCR language files (optional)
+      default: "./custom-files"
+    - name: INSTALL_LIBREOFFICE
+      description: Enable LibreOffice for document conversion (Word, Excel, PowerPoint to PDF)
+      default: "true"
+    - name: CUSTOM_FILES
+      description: Enable custom files mount for extending capabilities
+      default: "false"
+  known_mounts:
+    - container_path: /config
+      purpose: Uploaded PDFs, processing logs, and application configuration
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /custom-files
+      purpose: Custom fonts, language packs for OCR, signature images
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Stirling PDF is a containerized web application for PDF manipulation. It supports multiple operations: compression, splitting, merging, OCR, conversion from images/documents, and more.
+
+  LibreOffice support: By default, INSTALL_LIBREOFFICE=true enables document-to-PDF conversion (Word, Excel, PowerPoint, LibreOffice formats). Set to false to reduce image size if this feature is not needed.
+
+  Custom files: The /custom-files volume allows injection of additional OCR language packs (from Tesseract), custom fonts, and signature images. Only mounted if CUSTOM_FILES=true.
+
+  Storage: The /config directory can grow with uploaded and processed files. Monitor disk usage if uploads are frequent. Consider setting up automatic cleanup for old files.
+
+  Memory: Java-based application; ensure adequate RAM allocation (minimum 512MB, recommended 1GB+ for concurrent operations).
+
+  Port: Default port 8080; change in compose if conflicts exist.

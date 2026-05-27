@@ -1,0 +1,245 @@
+id: grafana
+name: Grafana Visualization Platform
+version: "1.0"
+container_match:
+  image_patterns:
+    - "grafana/grafana"
+  port_hints: [3000]
+category: monitoring
+description: Open-source visualization and alerting platform for time-series metrics and operational dashboards
+docs_url: https://hub.docker.com/r/grafana/grafana
+
+common_issues:
+  - id: admin-password-default
+    name: Default admin password unchanged
+    symptoms:
+      - "Admin credentials not configured"
+      - "Grafana accessible with default admin:admin"
+      - "Security warning about default password"
+      - "First login prompt for default credentials"
+    trigger_conditions:
+      - log_pattern: "default.*password"
+    steps:
+      - id: step-1
+        description: Check if custom admin password is set in environment
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep GF_SECURITY_ADMIN_PASSWORD"
+        expected_output: "GF_SECURITY_ADMIN_PASSWORD"
+        on_fail: step-2
+      - id: step-2
+        description: Inform user that default admin password is active
+        type: inform
+        command: ""
+      - id: step-3
+        description: Update admin password via Grafana API
+        type: fix
+        command: "docker exec {container_name} curl -X POST http://localhost:3000/api/user/password -H 'Content-Type: application/json' -d '{\"oldPassword\": \"admin\", \"newPassword\": \"{new_password}\"}' --user admin:admin"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify password change was successful
+        type: check
+        command: "docker exec {container_name} curl -s -H 'Authorization: Bearer {api_token}' http://localhost:3000/api/user"
+        expected_output: "login"
+    resolution: |
+      The Grafana admin password has been updated from the default credentials. Log in with the new password to continue. For enhanced security, generate and use API tokens for automated integrations instead of basic auth credentials.
+
+  - id: permission-denied-datasource
+    name: Permission denied accessing datasource or plugin directory
+    symptoms:
+      - "Failed to load plugins"
+      - "Datasource mount permission denied"
+      - "Cannot write to /var/lib/grafana"
+      - "EACCES errors in logs"
+    trigger_conditions:
+      - log_pattern: "permission denied.*grafana"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of Grafana data directory on host
+        type: check
+        command: "stat {grafana_path} | grep Uid"
+        expected_output: "Uid: 472"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Fix ownership of Grafana directory to UID 472
+        type: fix
+        command: "chown -R 472:472 {grafana_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Fix directory permissions for Grafana access
+        type: fix
+        command: "chmod -R 755 {grafana_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Grafana to verify permissions are correct
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Grafana started successfully after permission fix
+        type: check
+        command: "docker logs {container_name} | tail -10 | grep -i 'error\\|failed'"
+    resolution: |
+      Grafana data directory ownership has been corrected to UID 472, which is the user Grafana runs as inside the container. This resolves permission conflicts when reading/writing configuration, dashboards, and plugins. Grafana has been restarted and should now have full access to its data directory.
+
+  - id: datasource-connection-failed
+    name: Cannot connect to metrics datasource
+    symptoms:
+      - "Datasource connection test fails"
+      - "Red X on datasource indicator"
+      - "Error connecting to Prometheus/InfluxDB"
+      - "No data in dashboard panels"
+    trigger_conditions:
+      - log_pattern: "datasource.*failed"
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Check if datasource container is running
+        type: check
+        command: "docker ps --filter 'name=prometheus\\|name=influxdb' --format='table {{.Names}}\t{{.Status}}'"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display datasource container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify network connectivity to datasource from Grafana
+        type: check
+        command: "docker exec {container_name} curl -v http://prometheus:9090/api/v1/status/config 2>&1 | head -10"
+        expected_output: "Connected"
+        on_fail: step-4
+      - id: step-4
+        description: Check Grafana datasource configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test datasource via Grafana API
+        type: fix
+        command: "docker exec {container_name} curl -X POST http://localhost:3000/api/datasources/test -H 'Content-Type: application/json' -H 'Authorization: Bearer {api_token}' -d '{\"url\": \"http://prometheus:9090\", \"type\": \"prometheus\"}'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify datasource connectivity after test
+        type: check
+        command: "docker logs {container_name} | tail -5 | grep -i 'datasource.*success'"
+    resolution: |
+      Datasource connectivity has been tested. If the datasource is on a different Docker network or host, verify the connection URL includes the correct hostname/IP and port. Ensure the datasource container is running and accessible from the Grafana container's network. Check firewall rules if the datasource is on a remote host.
+
+  - id: dashboard-not-loading
+    name: Dashboards fail to load or display no data
+    symptoms:
+      - "Dashboard takes too long to load"
+      - "Panels show 'No data'"
+      - "Query errors displayed in panels"
+      - "Loading spinner never completes"
+    trigger_conditions:
+      - log_pattern: "timeout.*query"
+      - log_pattern: "no data"
+    steps:
+      - id: step-1
+        description: Check Grafana container CPU and memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Verify Grafana is responding to API requests
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:3000/api/health | grep -i 'ok\\|status'"
+        expected_output: "ok"
+        on_fail: step-3
+      - id: step-3
+        description: Restart Grafana to clear any stuck connections
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Check Grafana logs for errors after restart
+        type: check
+        command: "docker logs {container_name} | tail -20 | grep -i 'error\\|panic'"
+      - id: step-5
+        description: Increase query timeout if datasource is slow
+        type: inform
+        command: ""
+    resolution: |
+      Grafana has been restarted to clear any stuck queries or connection issues. If dashboards continue to load slowly, check datasource query performance and consider increasing timeouts in datasource settings. Verify that Prometheus or your metrics backend is not overloaded and is responding within expected latency.
+
+known_mounts:
+  - container_path: /var/lib/grafana
+    purpose: Grafana configuration, dashboards, datasources, and plugins
+    recommended_permissions: "755"
+    owner: "472:472"
+  - container_path: /etc/grafana
+    purpose: Grafana configuration files and provisioning
+    recommended_permissions: "755"
+    owner: "472:472"
+  - container_path: /var/log/grafana
+    purpose: Grafana application logs
+    recommended_permissions: "755"
+    owner: "472:472"
+
+default_config:
+  compose_template: |
+    services:
+      grafana:
+        image: grafana/grafana:latest
+        container_name: grafana
+        restart: unless-stopped
+        environment:
+          GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+          GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+          GF_INSTALL_PLUGINS: ${GF_INSTALL_PLUGINS:-}
+          GF_USERS_ALLOW_SIGN_UP: "false"
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${GRAFANA_PATH:-./grafana/lib}:/var/lib/grafana
+          - ${GRAFANA_PROVISIONING:-./grafana/provisioning}:/etc/grafana/provisioning
+          - ${GRAFANA_LOGS:-./grafana/logs}:/var/log/grafana
+        ports:
+          - "3000:3000/tcp"
+        networks:
+          - monitoring
+  required_vars:
+    - name: GF_SECURITY_ADMIN_PASSWORD
+      description: Grafana admin user password (change from default)
+      default: "admin"
+    - name: GF_SECURITY_ADMIN_USER
+      description: Grafana admin username
+      default: "admin"
+    - name: GRAFANA_PATH
+      description: Host path for /var/lib/grafana (data, dashboards, plugins)
+      default: "./grafana/lib"
+    - name: GRAFANA_PROVISIONING
+      description: Host path for /etc/grafana/provisioning (datasources, dashboards config)
+      default: "./grafana/provisioning"
+    - name: GRAFANA_LOGS
+      description: Host path for /var/log/grafana (application logs)
+      default: "./grafana/logs"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Grafana runs as UID 472 inside the container. Host bind mounts must have ownership set to 472:472 to allow Grafana to write configuration and plugin data.
+
+  Default admin password: The default is admin/admin. Change immediately in production environments via GF_SECURITY_ADMIN_PASSWORD environment variable or via Settings > Users > Admin.
+
+  Provisioning: Use the /etc/grafana/provisioning directory to version-control datasources and dashboard definitions. Provision datasources via YAML files in provisioning/datasources/; Grafana auto-discovers them on startup.
+
+  Plugins: Install via GF_INSTALL_PLUGINS environment variable (comma-separated list). Example: grafana-piechart-panel,grafana-worldmap-panel. Plugins are cached in /var/lib/grafana/plugins; mount this volume to persist them across restarts.
+
+  Resource usage: Grafana is lightweight but scales with number of dashboards and query frequency. Monitor CPU and memory if serving many dashboards or high-frequency queries. Consider caching query results via recording rules in Prometheus.
+
+  Datasources: Define in provisioning/datasources/prometheus.yml to auto-load on startup. Include auth credentials securely (use Grafana secrets or .env substitution).

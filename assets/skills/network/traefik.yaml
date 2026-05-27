@@ -1,0 +1,272 @@
+id: traefik
+name: Traefik Reverse Proxy
+version: "1.0"
+container_match:
+  image_patterns:
+    - "traefik"
+  port_hints: [80, 443, 8080]
+category: network
+description: Modern reverse proxy and load balancer with automatic Let's Encrypt SSL, Docker integration, and dashboard
+docs_url: https://hub.docker.com/_/traefik
+
+common_issues:
+  - id: no-docker-socket-access
+    name: Cannot access Docker socket
+    symptoms:
+      - "permission denied while trying to connect to the Docker daemon"
+      - "dial unix /var/run/docker.sock: permission denied"
+      - "No providers found"
+      - "Traefik not discovering containers"
+    trigger_conditions:
+      - log_pattern: "permission denied.*docker.sock"
+      - log_pattern: "dial unix.*docker.sock"
+    steps:
+      - id: step-1
+        description: Check Docker socket permissions on host
+        type: check
+        command: "ls -la /var/run/docker.sock"
+        expected_output: "docker"
+        on_fail: step-2
+      - id: step-2
+        description: Verify docker socket is mounted in container
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 'Mounts' | grep docker.sock"
+        expected_output: "/var/run/docker.sock"
+        on_fail: step-3
+      - id: step-3
+        description: Display socket mount status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Traefik to reinitialize Docker connection
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify Docker provider is now connected
+        type: check
+        command: "docker logs {container_name} | grep -i 'docker provider' | tail -3"
+    resolution: |
+      Traefik requires access to the Docker socket (/var/run/docker.sock) to discover and monitor containers. The socket must be mounted into the container with proper permissions. Traefik has been restarted to establish the connection. If the issue persists, verify the socket path on your host and ensure it's mounted correctly in the docker-compose configuration.
+
+  - id: acme-certificate-renewal-failure
+    name: ACME certificate renewal failing
+    symptoms:
+      - "certificate will expire"
+      - "ACME renewal error"
+      - "Let's Encrypt challenge failed"
+      - "DNS validation timed out"
+    trigger_conditions:
+      - log_pattern: "ACME.*error"
+      - log_pattern: "renewal.*failed"
+      - log_pattern: "challenge.*failed"
+    steps:
+      - id: step-1
+        description: Check Traefik's certificate storage location
+        type: check
+        command: "docker exec {container_name} ls -la /letsencrypt/"
+        expected_output: ".json"
+        on_fail: step-2
+      - id: step-2
+        description: Verify /letsencrypt directory is mounted and persistent
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check recent ACME errors in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'acme' | tail -10"
+      - id: step-4
+        description: Verify DNS challenge details if using DNS provider
+        type: inform
+        command: ""
+      - id: step-5
+        description: Force certificate renewal by restarting Traefik
+        type: fix
+        command: "docker exec {container_name} rm -f /letsencrypt/acme.json.backup && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor renewal progress in logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'acme\\|certificate' | tail -5"
+    resolution: |
+      ACME certificate renewal was reset and Traefik has been restarted to initiate a fresh renewal cycle. Certificate renewal typically takes a few minutes. Check logs for confirmation of successful certificate issuance. If renewal continues to fail, verify your DNS provider credentials (if using DNS challenge), firewall port 80/443 accessibility, or email address configured for Let's Encrypt.
+
+  - id: dashboard-unreachable
+    name: Traefik dashboard not accessible
+    symptoms:
+      - "Cannot reach dashboard at configured URL"
+      - "Dashboard returns 404 or 403"
+      - "Dashboard authentication fails"
+      - "Port 8080 not responding"
+    trigger_conditions:
+      - log_pattern: "dashboard.*unauthorized"
+      - log_pattern: "authentication.*failed"
+    steps:
+      - id: step-1
+        description: Verify dashboard port is exposed in container
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '8080'"
+        expected_output: "8080"
+        on_fail: step-2
+      - id: step-2
+        description: Check if dashboard service is enabled in Traefik config
+        type: check
+        command: "docker exec {container_name} cat /traefik/traefik.yml | grep -A 3 'dashboard'"
+        expected_output: ""
+      - id: step-3
+        description: Display dashboard configuration and access URL
+        type: inform
+        command: ""
+      - id: step-4
+        description: Verify basic connectivity to dashboard port
+        type: check
+        command: "docker exec {container_name} curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/"
+        expected_output: "200|302|401"
+      - id: step-5
+        description: Restart Traefik dashboard service
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify dashboard is now accessible
+        type: check
+        command: "docker logs {container_name} | grep 'dashboard' | tail -3"
+    resolution: |
+      The Traefik dashboard has been restarted. It should now be accessible at the configured URL (typically http://localhost:8080 or through a reverse proxy). If basic auth is enabled, verify your credentials. Dashboard access requires the service to be enabled in Traefik's configuration and port 8080 to be available.
+
+  - id: routes-not-working
+    name: Container routes not showing or requests failing
+    symptoms:
+      - "Containers not showing in Traefik routes"
+      - "404 Bad Gateway when accessing service"
+      - "Requests timeout"
+      - "Services not detected by Traefik"
+    trigger_conditions:
+      - log_pattern: "no route.*found"
+      - log_pattern: "404"
+      - log_pattern: "backend.*unhealthy"
+    steps:
+      - id: step-1
+        description: Check if target container has required Traefik labels
+        type: check
+        command: "docker inspect {service_container} | grep -i 'traefik'"
+        expected_output: "traefik"
+        on_fail: step-2
+      - id: step-2
+        description: Display current Traefik routing configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify target container is running and connected to correct network
+        type: check
+        command: "docker inspect {service_container} | grep -A 5 'Networks' | head -10"
+        expected_output: ""
+      - id: step-4
+        description: Check if Traefik and service container share a network
+        type: check
+        command: "docker network inspect {network_name} | grep -E 'traefik|{service_container}'"
+        expected_output: ""
+      - id: step-5
+        description: Review recent routing changes in Traefik logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'entrypoint\\|route\\|rule' | tail -10"
+      - id: step-6
+        description: Reload Traefik configuration
+        type: fix
+        command: "docker exec {container_name} kill -HUP 1"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify routes are now active
+        type: check
+        command: "docker logs {container_name} | grep -i 'route.*created\\|entrypoint' | tail -5"
+    resolution: |
+      Traefik configuration has been reloaded. Routes should now be active. Verify that your target containers have proper Traefik labels (traefik.enable=true, traefik.http.routers, traefik.http.services), are connected to the same Docker network as Traefik, and are in a running state. Check the dashboard to see if routes now appear with status "up".
+
+default_config:
+  compose_template: |
+    services:
+      traefik:
+        image: traefik:latest
+        container_name: traefik
+        restart: unless-stopped
+        security_opt:
+          - no-new-privileges:true
+        environment:
+          CF_API_EMAIL: ${CF_API_EMAIL:-}
+          CF_API_KEY: ${CF_API_KEY:-}
+        ports:
+          - "80:80/tcp"
+          - "443:443/tcp"
+          - "8080:8080/tcp"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - ${CONFIG_PATH:-./config}:/traefik
+          - ${LETSENCRYPT_PATH:-./letsencrypt}:/letsencrypt
+        command:
+          - --api.insecure=false
+          - --api.dashboard=true
+          - --providers.docker=true
+          - --providers.docker.exposedbydefault=false
+          - --entrypoints.web.address=:80
+          - --entrypoints.websecure.address=:443
+          - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}
+          - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+          - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+          - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare
+  required_vars:
+    - name: CF_API_EMAIL
+      description: Cloudflare API email (if using DNS challenge)
+      default: ""
+    - name: CF_API_KEY
+      description: Cloudflare API key (if using DNS challenge)
+      default: ""
+    - name: ACME_EMAIL
+      description: Email for Let's Encrypt certificate notifications
+      default: "admin@example.com"
+    - name: CONFIG_PATH
+      description: Host path for Traefik configuration files
+      default: "./config"
+    - name: LETSENCRYPT_PATH
+      description: Host path for Let's Encrypt certificates
+      default: "./letsencrypt"
+  known_mounts:
+    - container_path: /var/run/docker.sock
+      purpose: Docker daemon socket for service discovery
+      recommended_permissions: "660"
+      owner: "root:docker"
+    - container_path: /traefik
+      purpose: Traefik configuration and dynamic provider files
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /letsencrypt
+      purpose: Let's Encrypt certificate storage (persistent)
+      recommended_permissions: "700"
+      owner: "root:root"
+
+notes: |
+  Traefik is a modern reverse proxy and load balancer that automatically detects and configures services via Docker labels. It includes built-in ACME support for Let's Encrypt with multiple challenge types (HTTP-01, DNS-01).
+
+  Key concepts:
+  - Entrypoints: listening ports (typically 80 for HTTP, 443 for HTTPS)
+  - Routers: rules that match incoming requests (e.g., Host(`example.com`))
+  - Services: backend containers to route traffic to
+  - Middleware: request/response modification (auth, rate limiting, etc.)
+  - Certificate resolvers: ACME providers (Let's Encrypt, self-signed, etc.)
+
+  Docker integration: Services are discovered via Docker labels. A container must have traefik.enable=true to be exposed. Routes are defined via traefik.http.routers.* labels.
+
+  DNS challenge: For DNS-01 challenge (wildcard certificates), configure the provider credentials (Cloudflare, Route53, etc.) via environment variables.
+
+  Dashboard: Available at port 8080. Use traefik.api.dashboard=true in config. Optionally protect with middleware (basic auth, OAuth).
+
+  Certificate storage: ACME certificates are stored in /letsencrypt/acme.json (must be persistent). Backup this file before major updates.
+
+  Common gotchas:
+  - Containers not discovered: Verify traefik.enable=true label and shared Docker network.
+  - 404 errors: Check router rules match the incoming request (Host, Path, etc.).
+  - Certificate renewal fails: Verify DNS provider credentials, firewall port access, email validity.
+  - Dashboard inaccessible: Ensure port 8080 is exposed and api.dashboard=true is set.

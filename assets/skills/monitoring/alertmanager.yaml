@@ -1,0 +1,269 @@
+id: alertmanager
+name: Prometheus AlertManager
+version: "1.0"
+container_match:
+  image_patterns:
+    - "prom/alertmanager"
+  port_hints: [9093]
+category: monitoring
+description: Alert management and routing system that receives alerts from Prometheus and sends notifications to configured receivers
+docs_url: https://hub.docker.com/r/prom/alertmanager
+
+common_issues:
+  - id: config-validation-failed
+    name: Configuration file syntax or validation errors
+    symptoms:
+      - "AlertManager fails to start"
+      - "Configuration not loaded on startup"
+      - "Invalid YAML in alertmanager.yml"
+      - "Receiver or route configuration error"
+    trigger_conditions:
+      - log_pattern: "parse error"
+      - log_pattern: "invalid.*config"
+    steps:
+      - id: step-1
+        description: Validate AlertManager configuration file syntax
+        type: check
+        command: "docker exec {container_name} amtool config routes"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display configuration validation error details
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check AlertManager logs for parse errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|invalid' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Display alertmanager.yml content for review
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart AlertManager after config fix
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify AlertManager started successfully
+        type: check
+        command: "docker logs {container_name} | tail -5 | grep -i 'listening\\|started'"
+    resolution: |
+      AlertManager configuration has been validated and restarted. Ensure your alertmanager.yml follows correct YAML syntax and that all receivers, routes, and inhibition rules reference defined receivers. Check the official AlertManager documentation for configuration examples if errors persist.
+
+  - id: webhook-delivery-failed
+    name: Webhook notifications not being delivered
+    symptoms:
+      - "Alerts not reaching Slack/Discord/custom webhook"
+      - "No notification received when alert fires"
+      - "Webhook timeout or connection refused"
+      - "webhook_configs error in logs"
+    trigger_conditions:
+      - log_pattern: "webhook.*failed"
+      - log_pattern: "connection refused.*webhook"
+    steps:
+      - id: step-1
+        description: Check AlertManager webhook configuration in alertmanager.yml
+        type: check
+        command: "docker exec {container_name} cat /etc/alertmanager/alertmanager.yml | grep -A 10 'webhook_configs'"
+        expected_output: "url:"
+        on_fail: step-2
+      - id: step-2
+        description: Display webhook configuration section
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test webhook connectivity from AlertManager
+        type: check
+        command: "docker exec {container_name} curl -v {webhook_url} 2>&1 | head -15"
+        expected_output: "Connected\\|HTTP"
+        on_fail: step-4
+      - id: step-4
+        description: Check AlertManager logs for webhook errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'webhook\\|notify' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Verify webhook URL is reachable from AlertManager container network
+        type: check
+        command: "docker exec {container_name} ping -c 1 {webhook_host}"
+        expected_output: "bytes from"
+        on_fail: step-6
+      - id: step-6
+        description: Check for firewall or network policy blocking webhook requests
+        type: inform
+        command: ""
+    resolution: |
+      Webhook delivery has been tested. Ensure the webhook URL is reachable from the AlertManager container's network, includes any required authentication headers in the AlertManager config, and that the receiving webhook endpoint is running and responding. Verify Prometheus is properly configured to send alerts to AlertManager on port 9093.
+
+  - id: alerts-not-firing
+    name: Alerts defined in Prometheus not triggering in AlertManager
+    symptoms:
+      - "Alerts visible in Prometheus but not in AlertManager"
+      - "AlertManager shows no active alerts"
+      - "Prometheus target shows alert rules loaded but alerts do not fire"
+      - "Alert evaluation shows no results"
+    trigger_conditions:
+      - log_pattern: "alert.*not.*firing"
+    steps:
+      - id: step-1
+        description: Verify Prometheus is configured to send alerts to AlertManager
+        type: check
+        command: "docker exec prometheus curl -s http://localhost:9090/api/v1/status/config | grep -i alertmanager"
+        expected_output: "alertmanager"
+        on_fail: step-2
+      - id: step-2
+        description: Display Prometheus alertmanager configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Prometheus alertmanager targets status
+        type: check
+        command: "docker exec prometheus curl -s 'http://localhost:9090/api/v1/alertmanagers' | grep -i 'activeAlertmanagers\\|url'"
+        expected_output: "activeAlertmanagers"
+      - id: step-4
+        description: Verify AlertManager is listening on port 9093
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 9093"
+        expected_output: "LISTEN.*9093"
+        on_fail: step-5
+      - id: step-5
+        description: Check AlertManager logs for connection from Prometheus
+        type: check
+        command: "docker logs {container_name} | tail -20 | grep -i 'prometheus\\|connection'"
+        expected_output: ""
+      - id: step-6
+        description: Verify alert rule evaluation is enabled in Prometheus
+        type: check
+        command: "docker exec prometheus curl -s 'http://localhost:9090/api/v1/rules' | grep -i 'state.*firing\\|evaluation'"
+    resolution: |
+      Alert firing has been verified. Ensure Prometheus is configured with the correct AlertManager URL and port in prometheus.yml under `alerting.alertmanagers`. Verify alert rules have matching for conditions and that the evaluation interval in Prometheus is short enough to catch temporary spikes. Check that AlertManager can reach Prometheus on port 9090 for querying alert context.
+
+  - id: deduplication-or-grouping-issues
+    name: Alerts are duplicated, not grouped, or arriving too frequently
+    symptoms:
+      - "Same alert received multiple times in quick succession"
+      - "Related alerts not grouped by label"
+      - "Notification spam from AlertManager"
+      - "Inhibition rules not working"
+    trigger_conditions:
+      - log_pattern: "duplicate.*alert"
+    steps:
+      - id: step-1
+        description: Check AlertManager grouping configuration in alertmanager.yml
+        type: check
+        command: "docker exec {container_name} cat /etc/alertmanager/alertmanager.yml | grep -A 5 'group_by\\|group_interval\\|group_wait'"
+        expected_output: "group_by\\|group_interval\\|group_wait"
+        on_fail: step-2
+      - id: step-2
+        description: Display grouping and deduplication settings
+        type: inform
+        command: ""
+      - id: step-3
+        description: View currently grouped alerts in AlertManager API
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:9093/api/v1/alerts | grep -o '\"groupLabels\":{[^}]*}' | head -5"
+        expected_output: ""
+      - id: step-4
+        description: Check if inhibition rules are configured in alertmanager.yml
+        type: check
+        command: "docker exec {container_name} cat /etc/alertmanager/alertmanager.yml | grep -A 10 'inhibit_rules'"
+        expected_output: "inhibit_rules"
+        on_fail: step-5
+      - id: step-5
+        description: Inform user about default grouping behavior if not configured
+        type: inform
+        command: ""
+      - id: step-6
+        description: Adjust group_wait and group_interval if deduplication is insufficient
+        type: fix
+        command: "echo 'Adjust group_wait (default 10s) and group_interval (default 5m) in alertmanager.yml to balance responsiveness vs. grouping'"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart AlertManager after grouping configuration change
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify alerts are now properly grouped
+        type: check
+        command: "docker logs {container_name} | tail -5 | grep -i 'group\\|notification'"
+    resolution: |
+      AlertManager grouping and deduplication have been configured. Alerts should now be grouped by the configured labels and sent in batches according to group_wait and group_interval settings. Inhibition rules, if configured, will suppress certain alerts based on the presence of other alerts. Test by triggering multiple related alerts and verifying they arrive in a single grouped notification.
+
+default_config:
+  compose_template: |
+    services:
+      alertmanager:
+        image: prom/alertmanager:latest
+        container_name: alertmanager
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${ALERTMANAGER_CONFIG:-./alertmanager.yml}:/etc/alertmanager/alertmanager.yml:ro
+          - ${ALERTMANAGER_DATA:-./alertmanager_data}:/alertmanager
+        ports:
+          - "9093:9093/tcp"
+        command:
+          - "--config.file=/etc/alertmanager/alertmanager.yml"
+          - "--storage.path=/alertmanager"
+          - "--web.external-url=http://${ALERTMANAGER_EXTERNAL_URL:-localhost:9093}/"
+        networks:
+          - monitoring
+  required_vars:
+    - name: ALERTMANAGER_CONFIG
+      description: Host path to alertmanager.yml configuration file
+      default: "./alertmanager.yml"
+    - name: ALERTMANAGER_DATA
+      description: Host path for AlertManager data storage and templates
+      default: "./alertmanager_data"
+    - name: ALERTMANAGER_EXTERNAL_URL
+      description: External URL for AlertManager web UI (used in alert notifications)
+      default: "localhost:9093"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+
+known_mounts:
+  - container_path: /etc/alertmanager/alertmanager.yml
+    purpose: AlertManager configuration (receivers, routes, inhibition rules, grouping)
+    recommended_permissions: "644"
+    owner: "root:root"
+  - container_path: /alertmanager
+    purpose: AlertManager data storage (notification history, template cache)
+    recommended_permissions: "755"
+    owner: "nobody:nogroup"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  AlertManager is the notification component of the Prometheus monitoring stack. It receives alerts from Prometheus (via the --alertmanager.url flag in prometheus.yml) and routes them to configured receivers (Slack, Discord, PagerDuty, email, webhooks, etc.).
+
+  Configuration: alertmanager.yml defines routes (alert routing rules), receivers (notification destinations), inhibition rules (suppress alerts under certain conditions), and notification templates. The configuration is read-only from host.
+
+  Key concepts:
+  - Receiver: notification destination (webhook, email, Slack, Discord, PagerDuty, etc.)
+  - Route: tree of routing rules that determine which receiver handles each alert based on label matching
+  - Inhibition rule: suppress certain alerts when other alerts are firing (e.g., suppress "instance down" when "cluster critical" is active)
+  - Grouping: group related alerts by label and send in batches (group_wait, group_interval)
+  - Silencing: mute alerts temporarily via API or UI
+
+  Prometheus integration: Add this to prometheus.yml to send alerts to AlertManager:
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['alertmanager:9093']
+
+  Web UI: Access at http://localhost:9093 to view active/silenced/inhibited alerts, manage silences, and view notification history.
+
+  Webhook format: When using generic webhook receivers, AlertManager sends POST requests with JSON body containing the alert group. Ensure your webhook endpoint can accept this format.
+
+  Alert deduplication: AlertManager automatically deduplicates identical alerts from multiple Prometheus instances or evaluation cycles using fingerprinting. The group_wait setting delays initial notification to allow related alerts to arrive together.
+
+  Template functions: Custom notification templates can use Prometheus alert labels and annotations via Go template syntax in the template files.

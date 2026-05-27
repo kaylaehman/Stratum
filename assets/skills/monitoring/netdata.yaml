@@ -1,0 +1,420 @@
+id: netdata
+name: Netdata Real-Time Monitoring
+version: "1.0"
+container_match:
+  image_patterns:
+    - "netdata/netdata"
+  port_hints: [19999]
+category: monitoring
+description: Real-time performance monitoring with system observability for containers and hosts
+docs_url: https://hub.docker.com/r/netdata/netdata
+
+common_issues:
+  - id: permission-denied-proc-sys
+    name: Permission denied accessing /proc, /sys, or /etc/passwd
+    symptoms:
+      - "Permission denied"
+      - "Cannot open /proc"
+      - "Cannot stat /sys"
+      - "Netdata unable to collect metrics"
+      - "Dashboard shows incomplete or missing data"
+    trigger_conditions:
+      - log_pattern: "permission denied.*proc"
+      - log_pattern: "permission denied.*sys"
+      - log_pattern: "cannot.*open.*etc"
+    steps:
+      - id: step-1
+        description: Inform about required capabilities and mounts
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if /proc is mounted in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep -o '/proc:[^ ]*'"
+        expected_output: "/proc"
+        on_fail: step-3
+      - id: step-3
+        description: Verify SYS_PTRACE capability is enabled
+        type: check
+        command: "docker inspect {container_name} --format='{{json .HostConfig.CapAdd}}' | grep -i sys_ptrace"
+        expected_output: "SYS_PTRACE"
+        on_fail: step-4
+      - id: step-4
+        description: Display capability and mount configuration required
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart container with required capabilities
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify metrics collection is working
+        type: check
+        command: "docker logs {container_name} | grep -i 'collector\\|started' | tail -5"
+    resolution: |
+      Netdata requires access to /proc, /sys, and /etc/passwd (or /etc/group) to collect system metrics. The container has been restarted. Ensure your compose file includes: volumes with /proc, /sys, /etc/passwd, /etc/group bind mounts; and capabilities SYS_PTRACE and SYS_ADMIN. These are required for accurate host observability and container metric collection.
+
+  - id: cgroup-mounts-missing
+    name: Container memory and CPU metrics not showing
+    symptoms:
+      - "Memory usage showing 0% or unavailable"
+      - "CPU metrics missing"
+      - "Cgroup metrics incomplete"
+      - "Container stats blank in dashboard"
+    trigger_conditions:
+      - log_pattern: "cgroup.*not found"
+      - log_pattern: "memory.*unavailable"
+      - log_pattern: "cpu.*not.*available"
+    steps:
+      - id: step-1
+        description: Inform about cgroup mount requirements
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if cgroup mounts are present
+        type: check
+        command: "docker exec {container_name} ls -la /sys/fs/cgroup/ | head -10"
+        expected_output: "memory"
+        on_fail: step-3
+      - id: step-3
+        description: Display cgroup mount status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart container to apply cgroup mount fixes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify cgroup metrics are now available
+        type: check
+        command: "docker exec {container_name} ls -la /sys/fs/cgroup/memory 2>/dev/null | wc -l"
+        expected_output: ""
+    resolution: |
+      Netdata uses cgroup mounts to collect memory and CPU metrics from containers on this host. Ensure your compose file mounts /sys/fs/cgroup to the container. The container has been restarted; cgroup metrics should now be available in the dashboard.
+
+  - id: high-memory-usage
+    name: Netdata container consuming high memory
+    symptoms:
+      - "Netdata container using >500MB RAM"
+      - "Memory usage continuously growing"
+      - "OOMKilled or memory pressure alerts"
+    trigger_conditions:
+      - log_pattern: "OOMKilled"
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage of Netdata
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Check database file size in /var/lib/netdata
+        type: check
+        command: "docker exec {container_name} du -sh /var/lib/netdata/ 2>/dev/null || echo 'Not accessible'"
+        expected_output: ""
+      - id: step-3
+        description: Display memory usage and retention policy
+        type: inform
+        command: ""
+      - id: step-4
+        description: Reduce Netdata history retention to lower memory
+        type: fix
+        command: "docker exec {container_name} sed -i 's/^\thistory = .*/\thistory = 60/' /etc/netdata/netdata.conf && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify memory usage decreased after restart
+        type: check
+        command: "sleep 30 && docker stats {container_name} --no-stream"
+    resolution: |
+      Netdata memory usage was reduced by decreasing the history retention window from default (3600s) to 60 seconds. This reduces the in-memory database size. If you need longer history, increase retention in /etc/netdata/netdata.conf, or ensure the host has sufficient memory (minimum 512MB recommended).
+
+  - id: dashboard-unreachable
+    name: Netdata dashboard inaccessible on port 19999
+    symptoms:
+      - "Cannot access http://host:19999"
+      - "Connection refused"
+      - "Timeout accessing dashboard"
+      - "Service unavailable"
+    trigger_conditions:
+      - log_pattern: "listen.*failed"
+      - log_pattern: "bind.*refused"
+    steps:
+      - id: step-1
+        description: Verify Netdata is listening on port 19999
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 19999"
+        expected_output: "LISTEN.*19999"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 19999 is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '19999'"
+        expected_output: "19999"
+        on_fail: step-3
+      - id: step-3
+        description: Display port configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Netdata to reinitialize dashboard
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify dashboard is accessible
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'listening\\|started' | tail -3"
+    resolution: |
+      Netdata has been restarted and should now be accessible on port 19999. Verify your compose file exposes port 19999 (e.g., ports: - "19999:19999"). If the issue persists, check firewall rules or reverse proxy configuration if using one.
+
+common_issues:
+  - id: permission-denied-proc-sys
+    name: Permission denied accessing /proc, /sys, or /etc/passwd
+    symptoms:
+      - "Permission denied"
+      - "Cannot open /proc"
+      - "Cannot stat /sys"
+      - "Netdata unable to collect metrics"
+      - "Dashboard shows incomplete or missing data"
+    trigger_conditions:
+      - log_pattern: "permission denied.*proc"
+      - log_pattern: "permission denied.*sys"
+      - log_pattern: "cannot.*open.*etc"
+    steps:
+      - id: step-1
+        description: Inform about required capabilities and mounts
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if /proc is mounted in container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep -o '/proc:[^ ]*'"
+        expected_output: "/proc"
+        on_fail: step-3
+      - id: step-3
+        description: Verify SYS_PTRACE capability is enabled
+        type: check
+        command: "docker inspect {container_name} --format='{{json .HostConfig.CapAdd}}' | grep -i sys_ptrace"
+        expected_output: "SYS_PTRACE"
+        on_fail: step-4
+      - id: step-4
+        description: Display capability and mount configuration required
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart container with required capabilities
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify metrics collection is working
+        type: check
+        command: "docker logs {container_name} | grep -i 'collector\\|started' | tail -5"
+    resolution: |
+      Netdata requires access to /proc, /sys, and /etc/passwd (or /etc/group) to collect system metrics. The container has been restarted. Ensure your compose file includes: volumes with /proc, /sys, /etc/passwd, /etc/group bind mounts; and capabilities SYS_PTRACE and SYS_ADMIN. These are required for accurate host observability and container metric collection.
+
+  - id: cgroup-mounts-missing
+    name: Container memory and CPU metrics not showing
+    symptoms:
+      - "Memory usage showing 0% or unavailable"
+      - "CPU metrics missing"
+      - "Cgroup metrics incomplete"
+      - "Container stats blank in dashboard"
+    trigger_conditions:
+      - log_pattern: "cgroup.*not found"
+      - log_pattern: "memory.*unavailable"
+      - log_pattern: "cpu.*not.*available"
+    steps:
+      - id: step-1
+        description: Inform about cgroup mount requirements
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if cgroup mounts are present
+        type: check
+        command: "docker exec {container_name} ls -la /sys/fs/cgroup/ | head -10"
+        expected_output: "memory"
+        on_fail: step-3
+      - id: step-3
+        description: Display cgroup mount status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart container to apply cgroup mount fixes
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify cgroup metrics are now available
+        type: check
+        command: "docker exec {container_name} ls -la /sys/fs/cgroup/memory 2>/dev/null | wc -l"
+        expected_output: ""
+    resolution: |
+      Netdata uses cgroup mounts to collect memory and CPU metrics from containers on this host. Ensure your compose file mounts /sys/fs/cgroup to the container. The container has been restarted; cgroup metrics should now be available in the dashboard.
+
+  - id: high-memory-usage
+    name: Netdata container consuming high memory
+    symptoms:
+      - "Netdata container using >500MB RAM"
+      - "Memory usage continuously growing"
+      - "OOMKilled or memory pressure alerts"
+    trigger_conditions:
+      - log_pattern: "OOMKilled"
+      - log_pattern: "out of memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage of Netdata
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Check database file size in /var/lib/netdata
+        type: check
+        command: "docker exec {container_name} du -sh /var/lib/netdata/ 2>/dev/null || echo 'Not accessible'"
+        expected_output: ""
+      - id: step-3
+        description: Display memory usage and retention policy
+        type: inform
+        command: ""
+      - id: step-4
+        description: Reduce Netdata history retention to lower memory
+        type: fix
+        command: "docker exec {container_name} sed -i 's/^\thistory = .*/\thistory = 60/' /etc/netdata/netdata.conf && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify memory usage decreased after restart
+        type: check
+        command: "sleep 30 && docker stats {container_name} --no-stream"
+    resolution: |
+      Netdata memory usage was reduced by decreasing the history retention window from default (3600s) to 60 seconds. This reduces the in-memory database size. If you need longer history, increase retention in /etc/netdata/netdata.conf, or ensure the host has sufficient memory (minimum 512MB recommended).
+
+  - id: dashboard-unreachable
+    name: Netdata dashboard inaccessible on port 19999
+    symptoms:
+      - "Cannot access http://host:19999"
+      - "Connection refused"
+      - "Timeout accessing dashboard"
+      - "Service unavailable"
+    trigger_conditions:
+      - log_pattern: "listen.*failed"
+      - log_pattern: "bind.*refused"
+    steps:
+      - id: step-1
+        description: Verify Netdata is listening on port 19999
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 19999"
+        expected_output: "LISTEN.*19999"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 19999 is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '19999'"
+        expected_output: "19999"
+        on_fail: step-3
+      - id: step-3
+        description: Display port configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Netdata to reinitialize dashboard
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify dashboard is accessible
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'listening\\|started' | tail -3"
+    resolution: |
+      Netdata has been restarted and should now be accessible on port 19999. Verify your compose file exposes port 19999 (e.g., ports: - "19999:19999"). If the issue persists, check firewall rules or reverse proxy configuration if using one.
+
+default_config:
+  compose_template: |
+    services:
+      netdata:
+        image: netdata/netdata:latest
+        container_name: netdata
+        restart: unless-stopped
+        hostname: {hostname}
+        cap_add:
+          - SYS_ADMIN
+          - SYS_PTRACE
+        security_opt:
+          - apparmor=unconfined
+        volumes:
+          - netdata_config:/etc/netdata
+          - netdata_lib:/var/lib/netdata
+          - /etc/passwd:/host/etc/passwd:ro
+          - /etc/group:/host/etc/group:ro
+          - /proc:/host/proc:ro
+          - /sys:/host/sys:ro
+          - /etc/os-release:/host/etc/os-release:ro
+          - /etc/localtime:/etc/localtime:ro
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+        environment:
+          NETDATA_CLAIM_TOKEN: ${NETDATA_CLAIM_TOKEN}
+          NETDATA_CLAIM_URL: ${NETDATA_CLAIM_URL}
+          NETDATA_CLAIM_ROOMS: ${NETDATA_CLAIM_ROOMS}
+        ports:
+          - "19999:19999/tcp"
+
+    volumes:
+      netdata_config:
+      netdata_lib:
+  required_vars:
+    - name: NETDATA_CLAIM_TOKEN
+      description: Optional token for Netdata Cloud integration
+      default: ""
+    - name: NETDATA_CLAIM_URL
+      description: Optional Netdata Cloud URL
+      default: ""
+    - name: NETDATA_CLAIM_ROOMS
+      description: Optional Netdata Cloud room IDs
+      default: ""
+  known_mounts:
+    - container_path: /etc/netdata
+      purpose: Configuration and alert rules
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/netdata
+      purpose: Metrics database and cache
+      recommended_permissions: "755"
+      owner: "netdata:netdata"
+    - container_path: /proc
+      purpose: Host process information for system metrics
+      recommended_permissions: "ro"
+      owner: "root:root"
+    - container_path: /sys
+      purpose: Host sysfs for advanced metrics
+      recommended_permissions: "ro"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Netdata is a real-time performance monitoring agent. It requires elevated privileges (SYS_ADMIN, SYS_PTRACE) and access to /proc and /sys to collect comprehensive system metrics.
+
+  Mount requirements:
+  - /proc and /sys: Read-only access for process and system metrics
+  - /etc/passwd and /etc/group: To resolve UIDs/GIDs to usernames in process metrics
+  - /var/run/docker.sock: To monitor other containers on this host
+  - /etc/os-release: For system identification
+
+  Netdata Cloud integration is optional. Leave NETDATA_CLAIM_* variables empty to run in standalone mode.
+
+  Database location: /var/lib/netdata stores time-series data in-memory. Large retention windows (default 3600s) increase memory usage. Adjust the history parameter in netdata.conf to balance memory vs retention.
+
+  Common gotchas:
+  - Metrics incomplete: Missing required mount points or capabilities
+  - High memory: Reduce history retention in config
+  - Dashboard unreachable: Port not exposed or firewall blocking

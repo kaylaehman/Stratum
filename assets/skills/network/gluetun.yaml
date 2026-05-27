@@ -1,0 +1,353 @@
+id: gluetun
+name: Gluetun VPN Client
+version: "1.0"
+container_match:
+  image_patterns:
+    - "qmcgaw/gluetun"
+  port_hints: [8888]
+category: network
+description: Lightweight VPN client container for routing traffic through OpenVPN or WireGuard
+docs_url: https://hub.docker.com/r/qmcgaw/gluetun
+
+common_issues:
+  - id: vpn-provider-connection-failed
+    name: VPN provider connection failed or authentication error
+    symptoms:
+      - "connection failed"
+      - "authentication failed"
+      - "remote host unreachable"
+      - "VPN_SERVICE_PROVIDER error"
+      - "exited with code 1"
+      - "OpenVPN: auth failed"
+    trigger_conditions:
+      - log_pattern: "failed.*connect|authentication|auth failed"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if VPN_SERVICE_PROVIDER is correctly set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"VPN_SERVICE_PROVIDER\"}}{{.}}{{end}}{{end}}'"
+        expected_output: "VPN_SERVICE_PROVIDER"
+        on_fail: step-2
+      - id: step-2
+        description: Display VPN_SERVICE_PROVIDER setting
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify OpenVPN credentials (OPENVPN_USER and OPENVPN_PASSWORD) are set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"OPENVPN_\"}}{{.}}{{end}}{{end}}' | head -2"
+        expected_output: "OPENVPN_USER"
+        on_fail: step-4
+      - id: step-4
+        description: Display OpenVPN credential status
+        type: inform
+        command: ""
+      - id: step-5
+        description: If using WireGuard, verify WIREGUARD_PRIVATE_KEY is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"WIREGUARD_PRIVATE_KEY\"}}key-is-set{{end}}{{end}}'"
+        expected_output: ""
+      - id: step-6
+        description: Review gluetun logs for connection details
+        type: check
+        command: "docker logs {container_name} | grep -i 'provider\\|vpn\\|connected\\|error' | tail -10"
+        expected_output: ""
+      - id: step-7
+        description: Display connection attempt log
+        type: inform
+        command: ""
+      - id: step-8
+        description: If provider credentials are incorrect, update environment variables
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Monitor connection status after restart
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'vpn.*up\\|connected' | tail -3"
+    resolution: |
+      Gluetun requires valid credentials for your VPN provider. For OpenVPN, set OPENVPN_USER and OPENVPN_PASSWORD. For WireGuard, set WIREGUARD_PRIVATE_KEY. Ensure VPN_SERVICE_PROVIDER matches a supported provider (e.g., nordvpn, surfshark, expressvpn, custom). Provider credentials are obtained from your VPN account. If credentials are incorrect or expired, the VPN connection will fail. Update the credentials in the container environment and restart.
+
+  - id: dns-leak-detected
+    name: DNS leak — traffic leaking outside VPN
+    symptoms:
+      - "DNS leaking outside tunnel"
+      - "DNS requests visible in plain text"
+      - "split DNS not working"
+      - "queries resolving from ISP DNS"
+      - "failed to apply DNS rules"
+    trigger_conditions:
+      - log_pattern: "dns.*leak|DNS.*issue|split.*dns"
+    steps:
+      - id: step-1
+        description: Check if gluetun is running and VPN is connected
+        type: check
+        command: "docker logs {container_name} | grep -i 'vpn.*up\\|connected' | tail -1"
+        expected_output: "connected"
+        on_fail: step-2
+      - id: step-2
+        description: Display VPN connection status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify DNS configuration (default is 1.1.1.3 and 1.0.0.3 for Cloudflare)
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"DNS\"}}{{.}}{{end}}{{end}}'"
+        expected_output: ""
+      - id: step-4
+        description: Display configured DNS servers
+        type: inform
+        command: ""
+      - id: step-5
+        description: Test DNS leak from a client container using gluetun network
+        type: check
+        command: "docker run --rm --network='container:{container_name}' alpine nslookup google.com 8.8.8.8 2>&1 || echo 'DNS test failed'"
+        expected_output: ""
+      - id: step-6
+        description: Display DNS resolution test result
+        type: inform
+        command: ""
+      - id: step-7
+        description: Set secure DNS_PLAINTEXT_ADDRESS to block plaintext DNS
+        type: fix
+        command: "docker exec {container_name} env | grep -i dns || echo 'DNS env vars not set'"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Restart gluetun to apply DNS protections
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify DNS is routed through VPN tunnel
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'dns' | tail -5"
+    resolution: |
+      DNS leaks occur when DNS queries bypass the VPN tunnel and are sent directly to your ISP's nameservers. Gluetun can prevent this by routing all DNS through the VPN. Ensure DNS servers are configured correctly (default: Cloudflare 1.1.1.3 + 1.0.0.3). Disable split DNS unless specifically needed. Verify all containers routing through gluetun use gluetun's DNS (127.0.0.1:53). If leaks persist, enable DNS_PLAINTEXT_ADDRESS block to prevent plaintext queries.
+
+  - id: container-not-routing-through-vpn
+    name: Container unable to route through VPN tunnel
+    symptoms:
+      - "container cannot reach external IP"
+      - "traffic not going through VPN"
+      - "network: container not found"
+      - "no route to host"
+      - "containers can't connect outside"
+      - "public IP shows host IP, not VPN IP"
+    trigger_conditions:
+      - log_pattern: "no.*route|container.*not.*found"
+    steps:
+      - id: step-1
+        description: Verify gluetun container is running
+        type: check
+        command: "docker ps --filter 'name={container_name}' --format '{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Display gluetun container status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if VPN is connected inside gluetun
+        type: check
+        command: "docker logs {container_name} | grep -i 'vpn.*up\\|connected' | tail -1"
+        expected_output: "connected"
+        on_fail: step-4
+      - id: step-4
+        description: Display VPN connection status in gluetun
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify routed container is using network_mode pointing to gluetun
+        type: check
+        command: "docker inspect {routed_container_name} --format='{{.HostConfig.NetworkMode}}' 2>/dev/null || echo 'container not found'"
+        expected_output: "service:"
+        on_fail: step-6
+      - id: step-6
+        description: Display network mode of client container
+        type: inform
+        command: ""
+      - id: step-7
+        description: Verify gluetun has correct capabilities (NET_ADMIN, SYS_MODULE) set
+        type: check
+        command: "docker inspect {container_name} --format='{{.HostConfig.CapAdd}}' | grep -E 'NET_ADMIN|SYS_MODULE' || echo 'missing capabilities'"
+        expected_output: "NET_ADMIN"
+        on_fail: step-8
+      - id: step-8
+        description: Display required capabilities status
+        type: inform
+        command: ""
+      - id: step-9
+        description: Ensure /dev/net/tun is accessible to gluetun container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if contains .Source \"tun\"}}{{.Destination}}{{end}}{{end}}'"
+        expected_output: "/dev/net/tun"
+        on_fail: step-10
+      - id: step-10
+        description: Display /dev/net/tun mount status
+        type: inform
+        command: ""
+      - id: step-11
+        description: Restart gluetun and routed container in correct order
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-12
+      - id: step-12
+        description: Verify routing is now operational
+        type: check
+        command: "docker logs {container_name} | grep -i 'vpn' | tail -5"
+    resolution: |
+      Containers route through gluetun by setting network_mode: "service:gluetun" in their compose definition. The routed container then shares gluetun's network stack and tunneled connection. Ensure: (1) gluetun is running and VPN is connected, (2) NET_ADMIN and SYS_MODULE capabilities are granted to gluetun, (3) /dev/net/tun device is mounted, (4) routed container uses correct network_mode syntax. Restart both gluetun and routed containers together to re-establish the routing.
+
+  - id: wireguard-key-invalid
+    name: WireGuard private key invalid or not set
+    symptoms:
+      - "WireGuard key error"
+      - "invalid private key format"
+      - "key generation failed"
+      - "unable to start WireGuard interface"
+      - "wg-quick error"
+    trigger_conditions:
+      - log_pattern: "wireguard.*error|key.*invalid|wg-quick"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Verify WIREGUARD_PRIVATE_KEY environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"WIREGUARD_PRIVATE_KEY\"}}key-configured{{end}}{{end}}'"
+        expected_output: "key-configured"
+        on_fail: step-2
+      - id: step-2
+        description: Display WireGuard key configuration status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify the WireGuard private key format (should be 44 characters, base64)
+        type: check
+        command: "echo 'WireGuard private keys must be 44-character base64 strings' && echo 'Generate new key from your WireGuard provider dashboard'"
+        expected_output: ""
+      - id: step-4
+        description: Check gluetun logs for WireGuard initialization errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'wireguard\\|wg-quick\\|key' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Display WireGuard initialization logs
+        type: inform
+        command: ""
+      - id: step-6
+        description: If using WireGuard, ensure correct VPN_SERVICE_PROVIDER setting
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{if contains . \"VPN_SERVICE_PROVIDER\"}}{{.}}{{end}}{{end}}'"
+        expected_output: "VPN_SERVICE_PROVIDER"
+      - id: step-7
+        description: Update WIREGUARD_PRIVATE_KEY with valid key from provider
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify WireGuard connection after key update
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'wireguard.*up\\|connected' | tail -1"
+    resolution: |
+      WireGuard keys must be in the correct format: 44-character base64 strings generated by the VPN provider. Invalid keys cause WireGuard initialization to fail. Obtain a new private key from your WireGuard VPN provider dashboard, ensure it is properly formatted, and set WIREGUARD_PRIVATE_KEY. Also verify WIREGUARD_PUBLIC_KEY and WIREGUARD_PRESHARED_KEY if used by your provider. Restart the container with the correct key.
+
+default_config:
+  compose_template: |
+    services:
+      gluetun:
+        image: qmcgaw/gluetun:latest
+        container_name: gluetun
+        restart: unless-stopped
+        cap_add:
+          - NET_ADMIN
+          - SYS_MODULE
+        environment:
+          VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER}
+          OPENVPN_USER: ${OPENVPN_USER:-}
+          OPENVPN_PASSWORD: ${OPENVPN_PASSWORD:-}
+          WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:-}
+          DNS_ADDRESS: 1.1.1.3
+        volumes:
+          - /dev/net/tun:/dev/net/tun
+        ports:
+          - "8888:8888/tcp"
+          - "8388:8388/udp"
+        networks:
+          - default
+
+    # Example routed container using gluetun
+    qbittorrent:
+      image: linuxserver/qbittorrent:latest
+      container_name: qbittorrent
+      restart: unless-stopped
+      network_mode: "service:gluetun"
+      environment:
+        PUID: ${PUID:-1000}
+        PGID: ${PGID:-1000}
+      volumes:
+        - ${QBIT_CONFIG}:/config
+        - ${QBIT_DOWNLOADS}:/downloads
+      depends_on:
+        - gluetun
+
+  required_vars:
+    - name: VPN_SERVICE_PROVIDER
+      description: "VPN provider name (nordvpn, surfshark, expressvpn, custom, etc.)"
+      default: "nordvpn"
+    - name: OPENVPN_USER
+      description: "OpenVPN username (if using OpenVPN provider)"
+      default: ""
+    - name: OPENVPN_PASSWORD
+      description: "OpenVPN password (if using OpenVPN provider)"
+      default: ""
+    - name: WIREGUARD_PRIVATE_KEY
+      description: "WireGuard private key (if using WireGuard provider)"
+      default: ""
+    - name: PUID
+      description: "User ID for routed containers"
+      default: "1000"
+    - name: PGID
+      description: "Group ID for routed containers"
+      default: "1000"
+  known_mounts:
+    - container_path: /dev/net/tun
+      purpose: TUN device for VPN tunnel
+      recommended_permissions: "rw"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Gluetun is a lightweight VPN client that routes container traffic through OpenVPN or WireGuard tunnels. It acts as a network gateway for other containers.
+
+  **Supported VPN providers:** nordvpn, surfshark, expressvpn, protonvpn, custom, and many others.
+
+  **Two VPN protocols:**
+  - OpenVPN: Set VPN_SERVICE_PROVIDER, OPENVPN_USER, OPENVPN_PASSWORD
+  - WireGuard: Set VPN_SERVICE_PROVIDER, WIREGUARD_PRIVATE_KEY, optionally WIREGUARD_PRESHARED_KEY
+
+  **Routing containers through gluetun:** Use `network_mode: "service:gluetun"` in the client container's compose definition. The client shares gluetun's network stack and all traffic is tunneled.
+
+  **Required Linux kernel features:**
+  - NET_ADMIN capability: Allow container to manage network interfaces
+  - SYS_MODULE capability: Allow kernel module loading (for tun/tap)
+  - /dev/net/tun device: Virtual tunnel device for VPN
+
+  **Security considerations:**
+  - Credentials: Store OPENVPN_USER, OPENVPN_PASSWORD, and WIREGUARD_PRIVATE_KEY in a secrets manager, not hardcoded
+  - DNS: Gluetun forces all DNS queries through the VPN. Ensure DNS_ADDRESS is set to a trusted resolver (default: Cloudflare)
+  - Kill switch: Enable VPN_IS_REQUIRED to disable routed containers if tunnel goes down
+  - IP leak: Monitor external IP of routed containers to confirm traffic exits from VPN IP, not host IP
+
+  **Common issues:**
+  - Provider credentials incorrect: Update OPENVPN_USER/PASSWORD or WIREGUARD_PRIVATE_KEY
+  - DNS leak: Verify DNS is configured and routed containers inherit gluetun's DNS (127.0.0.1:53)
+  - Container not routing: Ensure network_mode: "service:gluetun" is set on routed container; verify gluetun is running and VPN connected
+  - WireGuard key invalid: Obtain new key from provider; ensure it is 44-character base64 string

@@ -1,0 +1,185 @@
+id: memos
+name: Memos Note Taking Platform
+version: "1.0"
+container_match:
+  image_patterns:
+    - "neosmemo/memos"
+  port_hints: [5230]
+category: productivity
+description: Lightweight, fast note-taking and micro-blogging platform
+docs_url: https://hub.docker.com/r/neosmemo/memos
+
+common_issues:
+  - id: database-initialization-failed
+    name: Database initialization or connection failed
+    symptoms:
+      - "Application crashes at startup"
+      - "Cannot initialize SQLite database"
+      - "Database is locked"
+      - "Cannot create /var/opt/memos/memos_prod.db"
+    trigger_conditions:
+      - log_pattern: "database.*error"
+      - log_pattern: "sqlite.*locked"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Verify /var/opt/memos directory exists and is writable
+        type: check
+        command: "docker exec {container_name} ls -la /var/opt/memos"
+        expected_output: "memos_prod.db"
+        on_fail: step-2
+      - id: step-2
+        description: Check mount status and permissions
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if eq .Destination \"/var/opt/memos\"}}{{.Source}}: mounted{{end}}{{end}}'"
+        on_fail: step-3
+      - id: step-3
+        description: Display mount and permission details
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check if volume is locked or corrupted
+        type: check
+        command: "docker exec {container_name} file /var/opt/memos/memos_prod.db"
+        on_fail: step-5
+      - id: step-5
+        description: Remove corrupted database to force re-initialization
+        type: fix
+        command: "docker exec {container_name} rm -f /var/opt/memos/memos_prod.db && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor initialization of fresh database
+        type: check
+        command: "sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      Memos stores data in a SQLite database at /var/opt/memos/memos_prod.db. If the database was corrupted or locked, it has been removed and Memos will create a fresh one. Existing notes will be lost if the database was corrupted. For future protection, ensure /var/opt/memos is on reliable storage and regularly backed up.
+
+  - id: port-already-in-use
+    name: Port 5230 already in use
+    symptoms:
+      - "Address already in use"
+      - "EADDRINUSE"
+      - "Cannot bind to port 5230"
+      - "Application exits immediately"
+    trigger_conditions:
+      - log_pattern: "EADDRINUSE"
+      - log_pattern: "Address already in use"
+    steps:
+      - id: step-1
+        description: Check if another service is using port 5230
+        type: check
+        command: "docker ps | grep ':5230'"
+        on_fail: step-2
+      - id: step-2
+        description: Check host port usage
+        type: check
+        command: "ss -tlnp | grep 5230"
+        on_fail: step-3
+      - id: step-3
+        description: Display current running containers and port bindings
+        type: inform
+        command: ""
+      - id: step-4
+        description: Stop conflicting container if identified
+        type: confirm
+        command: ""
+      - id: step-5
+        description: Change published port in docker-compose to a free port
+        type: fix
+        command: "docker update -p {new_port}:5230 {container_name} && docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify Memos is listening on new port
+        type: check
+        command: "sleep 3 && docker logs {container_name} | grep -i 'listen\\|ready'"
+    resolution: |
+      Port 5230 is now published to {new_port} on the host. Update any bookmarks or reverse proxy configurations to use the new port. Memos should be accessible on http://localhost:{new_port}.
+
+  - id: data-loss-on-restart
+    name: Notes disappear or are lost after restart
+    symptoms:
+      - "Previously created notes are gone"
+      - "/var/opt/memos is not mounted to host"
+      - "Database reset on each restart"
+      - "No persistent data directory"
+    trigger_conditions:
+      - log_pattern: "no.*notes.*found"
+    steps:
+      - id: step-1
+        description: Check if /var/opt/memos is mounted to a persistent volume
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if eq .Destination \"/var/opt/memos\"}}{{.Source}}{{end}}{{end}}'"
+        expected_output: "/"
+        on_fail: step-2
+      - id: step-2
+        description: Display current mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify the host path exists and is accessible
+        type: check
+        command: "ls -la {memos_data_path}"
+        on_fail: step-4
+      - id: step-4
+        description: Create persistent data directory on host
+        type: fix
+        command: "mkdir -p {memos_data_path} && chmod 755 {memos_data_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Stop Memos and update docker-compose with volume mount
+        type: fix
+        command: "docker stop {container_name} && docker run --rm -v {memos_data_path}:/var/opt/memos neosmemo/memos:latest"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Memos with persistent mount
+        type: check
+        command: "docker restart {container_name} && sleep 3 && docker logs {container_name} | tail -5"
+    resolution: |
+      Memos data is now persisted to {memos_data_path} on the host. The SQLite database and all notes will survive container restarts. Ensure regular backups of this directory.
+
+default_config:
+  compose_template: |
+    services:
+      memos:
+        image: neosmemo/memos:latest
+        container_name: memos
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${MEMOS_DATA:-./memos_data}:/var/opt/memos
+        ports:
+          - "5230:5230"
+
+  required_vars:
+    - name: MEMOS_DATA
+      description: Host path for persistent memo database and files
+      default: "./memos_data"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+
+  known_mounts:
+    - container_path: /var/opt/memos
+      purpose: SQLite database, configuration, and user data
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  Memos is a lightweight note-taking and micro-blogging platform with a clean, minimal interface. It uses SQLite for storage, making it easy to deploy and back up.
+
+  Database: Memos automatically creates memos_prod.db on first run in /var/opt/memos. This directory must be mounted to persistent storage.
+
+  Data portability: The entire Memos database is a single SQLite file, making it easy to migrate between hosts or back up.
+
+  Performance: SQLite is suitable for personal and small-team use. For large deployments, consider external database support if implemented in future versions.
+
+  Backups: Regularly back up the /var/opt/memos directory. Copy the entire directory to cold storage for disaster recovery.
+
+  Zero-configuration: Memos requires no environment variables beyond the timezone. Access via web browser on port 5230.
+
+  First login: Memos creates an admin user on first access. Keep the initial setup URL/password secure.
