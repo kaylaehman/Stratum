@@ -50,7 +50,7 @@ func Fixes(in Inputs) []SuggestedFix {
 	// chown (most invasive, last).
 	var fixes []SuggestedFix
 	switch in.Effective.Category {
-	case "group", "group-acl":
+	case "group": // Reconcile emits Category "group" for owning- and named-group ACL matches
 		fixes = append(fixes,
 			SuggestedFix{
 				Command:   fmt.Sprintf("setfacl -m g:%d:r %s", in.RunGID, q),
