@@ -8,7 +8,7 @@ import (
 
 func TestBroadcastDeliversToSubscribers(t *testing.T) {
 	h := New()
-	id, ch := h.Register()
+	id, ch := h.Register("")
 	h.Subscribe(id, "topic-a")
 
 	h.Broadcast("topic-a", []byte("hello"))
@@ -25,7 +25,7 @@ func TestBroadcastDeliversToSubscribers(t *testing.T) {
 
 func TestBroadcastSkipsNonSubscribers(t *testing.T) {
 	h := New()
-	id, ch := h.Register()
+	id, ch := h.Register("")
 	h.Subscribe(id, "topic-a")
 
 	h.Broadcast("topic-b", []byte("nope"))
@@ -40,7 +40,7 @@ func TestBroadcastSkipsNonSubscribers(t *testing.T) {
 
 func TestUnsubscribeRemovesAndCloses(t *testing.T) {
 	h := New()
-	id, ch := h.Register()
+	id, ch := h.Register("")
 	h.Subscribe(id, "t")
 	h.Unsubscribe(id)
 
@@ -56,7 +56,7 @@ func TestUnsubscribeRemovesAndCloses(t *testing.T) {
 
 func TestSlowClientDropsInsteadOfBlocking(t *testing.T) {
 	h := New()
-	id, _ := h.Register() // never drain the channel
+	id, _ := h.Register("") // never drain the channel
 	h.Subscribe(id, "flood")
 
 	// Publish more than the buffer; must not block.
@@ -84,7 +84,7 @@ func TestConcurrentRegisterBroadcastUnsubscribe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			id, ch := h.Register()
+			id, ch := h.Register("")
 			go func() {
 				for range ch {
 				}

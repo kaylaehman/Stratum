@@ -2,12 +2,27 @@ package docker
 
 import (
 	"context"
+	"io"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 )
+
+// ContainerLogs returns a streaming reader of a container's logs. With
+// follow=true it tails live; tail is the backlog count ("100", "all").
+// Timestamps are included (RFC3339Nano prefix per line). The stream is
+// stdcopy-multiplexed unless the container has a TTY (check Inspect().Tty).
+func (c *Client) ContainerLogs(ctx context.Context, id, tail string, follow bool) (io.ReadCloser, error) {
+	return c.cli.ContainerLogs(ctx, id, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     follow,
+		Timestamps: true,
+		Tail:       tail,
+	})
+}
 
 // ContainerInfo is one container from ContainerList.
 type ContainerInfo struct {

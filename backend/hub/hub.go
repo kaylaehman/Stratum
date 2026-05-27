@@ -11,14 +11,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// defaultBuffer is the per-client send-channel capacity.
-const defaultBuffer = 64
+// defaultBuffer is the per-client send-channel capacity. Sized for log
+// firehoses; slow clients drop (counted) rather than blocking publishers.
+const defaultBuffer = 256
 
 // ClientID identifies a registered connection.
 type ClientID string
 
 type client struct {
 	id     ClientID
+	userID string
 	send   chan []byte
 	topics map[string]struct{}
 }
@@ -43,19 +45,33 @@ func New() *Hub {
 	}
 }
 
-// Register adds a new client and returns its id plus the channel the caller's
-// writer goroutine should pump to the underlying connection. The channel is
+// Register adds a new client (owned by userID) and returns its id plus the
+// channel the caller's writer goroutine pumps to the connection. The channel is
 // closed when the client is unsubscribed.
-func (h *Hub) Register() (ClientID, <-chan []byte) {
+func (h *Hub) Register(userID string) (ClientID, <-chan []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	c := &client{
 		id:     ClientID(uuid.NewString()),
+		userID: userID,
 		send:   make(chan []byte, h.bufSize),
 		topics: make(map[string]struct{}),
 	}
 	h.clients[c.id] = c
 	return c.id, c.send
+}
+
+// ClientUser returns the userID that owns a client, so an HTTP endpoint can
+// verify a caller may grant that connection a (sensitive) topic before calling
+// Subscribe server-side.
+func (h *Hub) ClientUser(id ClientID) (string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c, ok := h.clients[id]
+	if !ok {
+		return "", false
+	}
+	return c.userID, true
 }
 
 // Subscribe joins a client to a topic. Unknown client ids are ignored.

@@ -36,6 +36,7 @@ type InspectInfo struct {
 	ImageID     string   `json:"image_id"`     // .Image (the sha256 image id)
 	State       string   `json:"state"`        // .State.Status (running|exited|...)
 	ConfigUser  string   `json:"config_user"`  // .Config.User (reflects runtime --user merged over image USER)
+	Tty         bool     `json:"tty"`          // .Config.Tty (drives log-stream demux)
 	Mounts      []Mount  `json:"mounts"`
 	Privileged  bool     `json:"privileged"`   // .HostConfig.Privileged
 	CapAdd      []string `json:"cap_add"`      // .HostConfig.CapAdd
@@ -69,6 +70,7 @@ func mapInspect(r container.InspectResponse) InspectInfo {
 		state       string
 		configUser  string
 		configImage string
+		tty         bool
 		capAdd      []string
 		capDrop     []string
 		pidMode     string
@@ -82,6 +84,7 @@ func mapInspect(r container.InspectResponse) InspectInfo {
 	if r.Config != nil {
 		configUser = r.Config.User
 		configImage = r.Config.Image
+		tty = r.Config.Tty
 	}
 	if r.HostConfig != nil {
 		privileged = r.HostConfig.Privileged
@@ -104,6 +107,7 @@ func mapInspect(r container.InspectResponse) InspectInfo {
 		ImageID:     r.Image,
 		State:       state,
 		ConfigUser:  configUser,
+		Tty:         tty,
 		Mounts:      mapMounts(r.Mounts),
 		Privileged:  privileged,
 		CapAdd:      capAdd,

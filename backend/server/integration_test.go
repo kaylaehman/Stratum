@@ -122,6 +122,10 @@ func TestFoundationE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
 	}
+	// The server sends a {client_id:...} hello first; consume it.
+	if _, hello, err := c.Read(ctx); err != nil || !strings.Contains(string(hello), "client_id") {
+		t.Fatalf("ws hello = %q, %v; want client_id", hello, err)
+	}
 	if err := c.Write(ctx, websocket.MessageText, []byte("ping")); err != nil {
 		t.Fatalf("ws write: %v", err)
 	}
