@@ -25,6 +25,8 @@ const (
 
 	ActionSecurityAcknowledge = "security.acknowledge"
 	ActionSecurityAckRevoke   = "security.revoke_acknowledge"
+
+	ActionVolumeRemove = "volume.remove"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -35,6 +37,7 @@ const (
 	TargetSecret          = "secret"
 	TargetAcknowledgement = "acknowledgement"
 	TargetUser            = "user"
+	TargetVolume          = "volume"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -66,6 +69,8 @@ var actionCatalog = []ActionInfo{
 
 	{ActionSecurityAcknowledge, "Security flag acknowledged", "security", TargetContainer},
 	{ActionSecurityAckRevoke, "Security acknowledgement revoked", "security", TargetAcknowledgement},
+
+	{ActionVolumeRemove, "Volume removed", "volume", TargetVolume},
 }
 
 var actionByName = func() map[string]ActionInfo {

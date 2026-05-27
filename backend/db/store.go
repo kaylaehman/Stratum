@@ -178,6 +178,16 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
+// VolumeSample is one daily size/refcount reading for a volume (Feature 7).
+type VolumeSample struct {
+	ID         string
+	NodeID     string
+	VolumeName string
+	SizeBytes  int64
+	RefCount   int64
+	SampledAt  time.Time
+}
+
 // SecurityAck suppresses a specific flag's badge/alert.
 type SecurityAck struct {
 	ID             string
@@ -243,6 +253,10 @@ type Store interface {
 	InsertAck(ctx context.Context, a SecurityAck) error
 	DeleteAck(ctx context.Context, id string) error
 	ListAcks(ctx context.Context) ([]SecurityAck, error)
+
+	// Volume health (Feature 7) — size-trend samples
+	InsertVolumeSample(ctx context.Context, s VolumeSample) error
+	ListVolumeSamplesByNode(ctx context.Context, nodeID string) ([]VolumeSample, error)
 
 	Close() error
 }

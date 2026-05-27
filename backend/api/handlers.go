@@ -18,6 +18,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/security"
+	"github.com/kaylaehman/stratum/backend/volumes"
 )
 
 // Handlers carries the dependencies shared by all HTTP handlers.
@@ -34,6 +35,7 @@ type Handlers struct {
 	Logs           *logtail.Manager
 	Mounts         *mountindex.Index
 	Security       *security.Scanner
+	Volumes        *volumes.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

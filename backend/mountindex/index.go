@@ -86,6 +86,13 @@ func (ix *Index) ensureFresh(ctx context.Context, nodeID string) error {
 	return err
 }
 
+// EnsureFresh re-seeds a node's mount rows if stale (exported so other features
+// — e.g. volume health — can rely on the persisted mount index being current
+// before reading it directly via the store).
+func (ix *Index) EnsureFresh(ctx context.Context, nodeID string) error {
+	return ix.ensureFresh(ctx, nodeID)
+}
+
 // Invalidate forces the next query for a node to re-seed.
 func (ix *Index) Invalidate(nodeID string) {
 	ix.mu.Lock()

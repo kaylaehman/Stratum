@@ -1,0 +1,67 @@
+package api
+
+import (
+	"errors"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/kaylaehman/stratum/backend/capabilities"
+	"github.com/kaylaehman/stratum/backend/volumes"
+)
+
+// ListVolumes lists volumes across all docker-capable nodes with health status.
+// Read-only; available to any authenticated user.
+func (h *Handlers) ListVolumes(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	nodes, err := h.Store.ListNodes(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	out := []volumes.VolumeView{}
+	for _, n := range nodes {
+		caps, _ := capabilities.Parse([]byte(n.CapabilitiesJSON))
+		if !caps.Docker {
+			continue
+		}
+		vols, err := h.Volumes.ListForNode(ctx, n.ID)
+		if err != nil {
+			continue // a single unreachable node must not fail the whole list
+		}
+		out = append(out, vols...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"volumes": out})
+}
+
+// RemoveVolume deletes an unused volume on a node. Admin-gated + audited.
+func (h *Handlers) RemoveVolume(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	nodeID := chi.URLParam(r, "id")
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "volume_name_required")
+		return
+	}
+
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = activity.ActionVolumeRemove
+		e.TargetType = ptr(activity.TargetVolume)
+		e.TargetID = &name
+		e.Detail = map[string]string{"node_id": nodeID, "volume": name}
+	}
+
+	err := h.Volumes.Remove(r.Context(), nodeID, name)
+	switch {
+	case errors.Is(err, volumes.ErrVolumeInUse):
+		writeError(w, http.StatusConflict, "volume_in_use")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "remove_failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

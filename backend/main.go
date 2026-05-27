@@ -35,6 +35,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
+	"github.com/kaylaehman/stratum/backend/volumes"
 )
 
 // accessTokenTTL is the lifetime of issued access tokens.
@@ -102,6 +103,7 @@ func run(logger *slog.Logger) error {
 	logsMgr := logtail.NewManager(dockerForNode, h, func(context.Context, string, string) (bool, error) { return true, nil })
 	mountIdx := mountindex.New(store, dockerForNode, 30*time.Second)
 	securityScanner := security.NewScanner(store, security.ClientProvider(dockerForNode), containerUsers, 30*time.Second)
+	volumeSvc := volumes.New(store, volumes.ClientProvider(dockerForNode), mountIdx, volumeAlertBytes())
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -116,6 +118,7 @@ func run(logger *slog.Logger) error {
 		Logs:           logsMgr,
 		Mounts:         mountIdx,
 		Security:       securityScanner,
+		Volumes:        volumeSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -128,9 +131,20 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go poller.Run(ctx) // inventory poller; stops on shutdown
+	go poller.Run(ctx)                              // inventory poller; stops on shutdown
+	go volumeSvc.RunDailySampler(ctx, 24*time.Hour) // volume size-trend sampler
 
 	return srv.Run(ctx)
+}
+
+// volumeAlertBytes reads STRATUM_VOLUME_ALERT_BYTES (0/unset disables the flag).
+func volumeAlertBytes() int64 {
+	if v := os.Getenv("STRATUM_VOLUME_ALERT_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // uploadMaxBytes reads STRATUM_UPLOAD_MAX_BYTES (default fs.DefaultUploadMax).

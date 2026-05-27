@@ -28,6 +28,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
+	"github.com/kaylaehman/stratum/backend/volumes"
 
 	"context"
 	"errors"
@@ -61,6 +62,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 	noDocker := func(context.Context, string) (*docker.Client, error) { return nil, errNoDockerInTest }
 	logsMgr := logtail.NewManager(noDocker, hb, func(context.Context, string, string) (bool, error) { return true, nil })
 	ctrUsers := permissions.NewContainerCache(func(context.Context, string, string, string) ([]byte, error) { return nil, nil }, time.Minute)
+	mountIdx := mountindex.New(store, noDocker, time.Minute)
 
 	h := &api.Handlers{
 		Store:          store,
@@ -72,8 +74,9 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Conn:           nodeconn.NewManager(store, cipher),
 		ContainerUsers: ctrUsers,
 		Logs:           logsMgr,
-		Mounts:         mountindex.New(store, noDocker, time.Minute),
+		Mounts:         mountIdx,
 		Security:       security.NewScanner(store, security.ClientProvider(noDocker), ctrUsers, time.Minute),
+		Volumes:        volumes.New(store, volumes.ClientProvider(noDocker), mountIdx, 0),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

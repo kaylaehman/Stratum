@@ -82,6 +82,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/containers/security-badges", d.Handlers.SecurityBadges)
 			r.Get("/containers/{id}/security", d.Handlers.ContainerSecurity)
 
+			// Volume health (read-only; cross-node).
+			r.Get("/volumes", d.Handlers.ListVolumes)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
@@ -103,6 +106,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/security/acknowledge", d.Handlers.AcknowledgeFlag)
 			audited.Delete("/security/acknowledge/{id}", d.Handlers.RevokeAcknowledgement)
 			audited.Post("/security/rescan", d.Handlers.Rescan)
+			audited.Delete("/nodes/{id}/volumes/{name}", d.Handlers.RemoveVolume)
 		})
 	})
 
