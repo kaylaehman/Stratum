@@ -44,6 +44,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/cve"
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/features"
+	"github.com/kaylaehman/stratum/backend/filewatch"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
@@ -147,6 +148,10 @@ func run(logger *slog.Logger) error {
 	certSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
 	})
+	fileWatchSvc := filewatch.New(store, filesSvc.Exec)
+	fileWatchSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
+		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+	})
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -178,6 +183,7 @@ func run(logger *slog.Logger) error {
 		DNS:            dnsSvc,
 		Features:       featureSvc,
 		Chat:           chatSvc,
+		FileWatch:      fileWatchSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

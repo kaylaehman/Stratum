@@ -290,6 +290,25 @@ type Runbook struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+// FileWatch is a configured path to monitor for changes (Feature 22).
+type FileWatch struct {
+	ID        string    `json:"id"`
+	NodeID    string    `json:"node_id"`
+	Path      string    `json:"path"`
+	Recursive bool      `json:"recursive"`
+	CreatedBy string    `json:"created_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// FileEvent is a detected change under a watched path (Feature 22).
+type FileEvent struct {
+	ID         string    `json:"id"`
+	NodeID     string    `json:"node_id"`
+	Path       string    `json:"path"`
+	EventType  string    `json:"event_type"`
+	DetectedAt time.Time `json:"detected_at"`
+}
+
 // AgentMemory is a persistent per-scope note the AI assistant uses (Feature F9).
 // Scope is "global" | "node" | "container"; ScopeID is "" for global. Source is
 // "user" | "ai" | "observed"; AI-proposed memories stay Confirmed=false until a
@@ -583,6 +602,13 @@ type Store interface {
 	// Chat bot config (Feature F8) — single row
 	GetChatConfig(ctx context.Context) (ChatConfig, error)
 	UpsertChatConfig(ctx context.Context, c ChatConfig) error
+
+	// File change detection (Feature 22)
+	CreateFileWatch(ctx context.Context, w FileWatch) error
+	ListFileWatchesByNode(ctx context.Context, nodeID string) ([]FileWatch, error)
+	DeleteFileWatch(ctx context.Context, id string) error
+	InsertFileEvent(ctx context.Context, e FileEvent) error
+	ListFileEvents(ctx context.Context, nodeID string, limit int) ([]FileEvent, error)
 
 	// Runbooks (Feature F9)
 	CreateRunbook(ctx context.Context, rb Runbook) error

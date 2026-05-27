@@ -29,6 +29,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/features"
+	"github.com/kaylaehman/stratum/backend/filewatch"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/chatbot"
@@ -110,6 +111,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		DNS:            dnspkg.New(store, cipher),
 		Features:       features.New(store),
 		Chat:           chatbot.New(store, cipher, nil, func(context.Context) bool { return true }),
+		FileWatch:      filewatch.New(store, filesSvc.Exec),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

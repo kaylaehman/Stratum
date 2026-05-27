@@ -87,6 +87,10 @@ const (
 	ActionDNSConfig     = "dns.config"
 	ActionFeatureToggle = "feature.toggle"
 	ActionChatConfig    = "chat.config"
+
+	ActionWatchAdd    = "watch.add"
+	ActionWatchDelete = "watch.delete"
+	ActionWatchScan   = "watch.scan"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -195,6 +199,9 @@ var actionCatalog = []ActionInfo{
 	{ActionDNSConfig, "DNS endpoint configured", "dns", TargetNode},
 	{ActionFeatureToggle, "Feature toggled", "feature", TargetUser},
 	{ActionChatConfig, "Chat bot configured", "chat", TargetUser},
+	{ActionWatchAdd, "File watch added", "watch", TargetNode},
+	{ActionWatchDelete, "File watch removed", "watch", TargetNode},
+	{ActionWatchScan, "File change scan", "watch", TargetNode},
 }
 
 var actionByName = func() map[string]ActionInfo {

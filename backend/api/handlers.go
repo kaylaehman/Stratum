@@ -17,6 +17,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/db"
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/features"
+	"github.com/kaylaehman/stratum/backend/filewatch"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
@@ -69,6 +70,7 @@ type Handlers struct {
 	DNS            *dnspkg.Service
 	Features       *features.Service
 	Chat           *chatbot.Service
+	FileWatch      *filewatch.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
