@@ -1,0 +1,86 @@
+package activity
+
+// This file is the action/target taxonomy: the single source of truth for the
+// audit action names emitters use and the filter UI enumerates. Adding a
+// Phase-2 action (secret.access, template.deploy, container.start, ...) is a
+// one-line addition to actionCatalog below.
+
+// Action constants — every mutating endpoint emits one of these. Keep in sync
+// with the emitters (api/*.go); the coverage-audit test asserts the wiring.
+const (
+	ActionAuthLogin  = "auth.login"
+	ActionAuthLogout = "auth.logout"
+	ActionSetupAdmin = "setup.admin"
+
+	ActionNodeCreate = "node.create"
+	ActionNodeUpdate = "node.update"
+	ActionNodeDelete = "node.delete"
+	ActionNodeProbe  = "node.probe"
+
+	ActionFSWrite  = "fs.write"
+	ActionFSUpload = "fs.upload"
+	ActionFSMkdir  = "fs.mkdir"
+	ActionFSRename = "fs.rename"
+	ActionFSDelete = "fs.delete"
+
+	ActionSecurityAcknowledge = "security.acknowledge"
+	ActionSecurityAckRevoke   = "security.revoke_acknowledge"
+)
+
+// Target type constants for ActivityEntry.TargetType.
+const (
+	TargetNode            = "node"
+	TargetContainer       = "container"
+	TargetFile            = "file"
+	TargetSecret          = "secret"
+	TargetAcknowledgement = "acknowledgement"
+	TargetUser            = "user"
+)
+
+// ActionInfo describes one action for the filter UI: a stable name, a
+// human-readable label, the category (action name prefix, e.g. "fs") used for
+// prefix filtering, and the target type it most commonly acts on.
+type ActionInfo struct {
+	Action   string `json:"action"`
+	Label    string `json:"label"`
+	Category string `json:"category"`
+	Target   string `json:"target"`
+}
+
+// actionCatalog is the ordered taxonomy. Order is the display order in the UI.
+var actionCatalog = []ActionInfo{
+	{ActionAuthLogin, "User logged in", "auth", TargetUser},
+	{ActionAuthLogout, "User logged out", "auth", TargetUser},
+	{ActionSetupAdmin, "Initial admin created", "setup", TargetUser},
+
+	{ActionNodeCreate, "Host added", "node", TargetNode},
+	{ActionNodeUpdate, "Host updated", "node", TargetNode},
+	{ActionNodeDelete, "Host removed", "node", TargetNode},
+	{ActionNodeProbe, "Host re-probed", "node", TargetNode},
+
+	{ActionFSWrite, "File written", "fs", TargetFile},
+	{ActionFSUpload, "File uploaded", "fs", TargetFile},
+	{ActionFSMkdir, "Directory created", "fs", TargetFile},
+	{ActionFSRename, "File renamed", "fs", TargetFile},
+	{ActionFSDelete, "File deleted", "fs", TargetFile},
+
+	{ActionSecurityAcknowledge, "Security flag acknowledged", "security", TargetContainer},
+	{ActionSecurityAckRevoke, "Security acknowledgement revoked", "security", TargetAcknowledgement},
+}
+
+var actionByName = func() map[string]ActionInfo {
+	m := make(map[string]ActionInfo, len(actionCatalog))
+	for _, a := range actionCatalog {
+		m[a.Action] = a
+	}
+	return m
+}()
+
+// Catalog returns the taxonomy in display order (for GET /api/activity/actions).
+func Catalog() []ActionInfo { return actionCatalog }
+
+// LookupAction returns the ActionInfo for a name and whether it is known.
+func LookupAction(name string) (ActionInfo, bool) {
+	a, ok := actionByName[name]
+	return a, ok
+}

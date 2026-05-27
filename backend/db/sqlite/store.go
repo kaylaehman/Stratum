@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	appdb "github.com/kaylaehman/stratum/backend/db"
@@ -213,7 +214,7 @@ func (s *Store) ListActivity(ctx context.Context, f appdb.ActivityFilter) ([]app
 	if limit <= 0 {
 		limit = 100
 	}
-	q := `SELECT id, user_id, action, target_type, target_id, detail_json, result, created_at
+	q := `SELECT rowid, id, user_id, action, target_type, target_id, detail_json, result, created_at
 	      FROM activity_log WHERE 1=1`
 	var args []any
 	if f.UserID != nil {
@@ -224,7 +225,7 @@ func (s *Store) ListActivity(ctx context.Context, f appdb.ActivityFilter) ([]app
 		q += ` AND action = ?`
 		args = append(args, *f.Action)
 	}
-	q += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	q += ` ORDER BY rowid DESC LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -235,21 +236,111 @@ func (s *Store) ListActivity(ctx context.Context, f appdb.ActivityFilter) ([]app
 
 	var out []appdb.ActivityEntry
 	for rows.Next() {
-		var e appdb.ActivityEntry
-		var userID, targetType, targetID, detail, createdAt sql.NullString
-		if err := rows.Scan(&e.ID, &userID, &e.Action, &targetType, &targetID, &detail, &e.Result, &createdAt); err != nil {
-			return nil, fmt.Errorf("sqlite: scan activity: %w", err)
-		}
-		e.UserID = ptrFromNull(userID)
-		e.TargetType = ptrFromNull(targetType)
-		e.TargetID = ptrFromNull(targetID)
-		e.DetailJSON = ptrFromNull(detail)
-		if e.CreatedAt, err = scanTS(createdAt); err != nil {
+		e, err := scanActivity(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// QueryActivityLog runs the filtered, keyset-paginated audit query behind
+// GET /api/activity. Ordering is by rowid DESC (strict insertion order — the
+// canonical "order things happened"); the cursor seeks past a rowid. Every
+// filter is a bound parameter (no string interpolation); the q substring is an
+// escaped LIKE so a literal `%`/`_` in a path can't widen the match.
+func (s *Store) QueryActivityLog(ctx context.Context, f appdb.ActivityQuery) ([]appdb.ActivityEntry, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	q := `SELECT rowid, id, user_id, action, target_type, target_id, detail_json, result, created_at
+	      FROM activity_log WHERE 1=1`
+	var args []any
+	if f.UserID != nil {
+		q += ` AND user_id = ?`
+		args = append(args, *f.UserID)
+	}
+	if f.Action != nil {
+		q += ` AND action = ?`
+		args = append(args, *f.Action)
+	}
+	if f.ActionPrefix != nil {
+		q += ` AND action LIKE ? ESCAPE '\'`
+		args = append(args, escapeLike(*f.ActionPrefix)+"%")
+	}
+	if f.TargetType != nil {
+		q += ` AND target_type = ?`
+		args = append(args, *f.TargetType)
+	}
+	if f.TargetID != nil {
+		q += ` AND target_id = ?`
+		args = append(args, *f.TargetID)
+	}
+	if f.Result != nil {
+		q += ` AND result = ?`
+		args = append(args, *f.Result)
+	}
+	if f.From != nil {
+		q += ` AND created_at >= ?`
+		args = append(args, tsText(*f.From))
+	}
+	if f.To != nil {
+		q += ` AND created_at <= ?`
+		args = append(args, tsText(*f.To))
+	}
+	if f.Q != "" {
+		like := "%" + escapeLike(f.Q) + "%"
+		q += ` AND (action LIKE ? ESCAPE '\' OR target_id LIKE ? ESCAPE '\' OR detail_json LIKE ? ESCAPE '\')`
+		args = append(args, like, like, like)
+	}
+	if f.CursorRowID != nil {
+		q += ` AND rowid < ?`
+		args = append(args, *f.CursorRowID)
+	}
+	q += ` ORDER BY rowid DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: query activity: %w", err)
+	}
+	defer rows.Close()
+
+	var out []appdb.ActivityEntry
+	for rows.Next() {
+		e, err := scanActivity(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// escapeLike escapes the LIKE wildcards (% and _) and the escape char itself so
+// the value matches literally under `ESCAPE '\'`.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+func scanActivity(sc rowScanner) (appdb.ActivityEntry, error) {
+	var e appdb.ActivityEntry
+	var userID, targetType, targetID, detail, createdAt sql.NullString
+	if err := sc.Scan(&e.RowID, &e.ID, &userID, &e.Action, &targetType, &targetID, &detail, &e.Result, &createdAt); err != nil {
+		return appdb.ActivityEntry{}, fmt.Errorf("sqlite: scan activity: %w", err)
+	}
+	e.UserID = ptrFromNull(userID)
+	e.TargetType = ptrFromNull(targetType)
+	e.TargetID = ptrFromNull(targetID)
+	e.DetailJSON = ptrFromNull(detail)
+	var err error
+	if e.CreatedAt, err = scanTS(createdAt); err != nil {
+		return appdb.ActivityEntry{}, err
+	}
+	return e, nil
 }
 
 // nullableEmpty stores "" as SQL NULL for optional text columns.

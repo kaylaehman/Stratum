@@ -33,9 +33,13 @@ type Session struct {
 	RevokedAt   *time.Time
 }
 
-// ActivityEntry is one append-only audit row.
+// ActivityEntry is one append-only audit row. RowID is SQLite's implicit
+// monotonic rowid, populated on read and used as the keyset-pagination cursor
+// (it is strictly insertion-ordered, unlike the random UUID id or the
+// variable-precision created_at text).
 type ActivityEntry struct {
 	ID         string
+	RowID      int64
 	UserID     *string
 	Action     string
 	TargetType *string
@@ -50,6 +54,24 @@ type ActivityFilter struct {
 	UserID *string
 	Action *string
 	Limit  int // 0 => default applied by the store
+}
+
+// ActivityQuery is the filtered, keyset-paginated query behind GET /api/activity.
+// All fields are optional. Ordering is by rowid DESC (newest first); CursorRowID,
+// when set, seeks strictly past it. Limit is honored as given (the query layer
+// requests limit+1 to detect a next page).
+type ActivityQuery struct {
+	UserID       *string
+	Action       *string // exact match
+	ActionPrefix *string // prefix match, e.g. "fs." matches fs.write, fs.delete, ...
+	TargetType   *string
+	TargetID     *string
+	Result       *string
+	From         *time.Time // created_at >= From
+	To           *time.Time // created_at <= To
+	Q            string     // substring over action/target_id/detail_json (escaped LIKE)
+	Limit        int        // 0 => default applied by the store
+	CursorRowID  *int64     // seek: rowid < CursorRowID
 }
 
 // Node is a registered host. CredentialsEncrypted is an opaque sealed blob;
@@ -186,6 +208,7 @@ type Store interface {
 	// Activity (append-only; no update/delete by design)
 	AppendActivity(ctx context.Context, e ActivityEntry) error
 	ListActivity(ctx context.Context, f ActivityFilter) ([]ActivityEntry, error)
+	QueryActivityLog(ctx context.Context, q ActivityQuery) ([]ActivityEntry, error)
 
 	// Nodes
 	CreateNode(ctx context.Context, n Node) error

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,6 +62,18 @@ func (s *Store) Append(ctx context.Context, e Entry) error {
 		if err != nil {
 			return fmt.Errorf("activity: marshal detail: %w", err)
 		}
+		// Defense-in-depth secret scrub. The table is append-only AND undeletable,
+		// so a single emitter that forgets to redact would be a PERMANENT,
+		// CSV-exportable leak. Re-walk the marshaled detail and redact the values
+		// of any sensitive-looking key. This is a backstop, not a substitute for
+		// redaction at the emitter.
+		var generic any
+		if err := json.Unmarshal(b, &generic); err == nil {
+			scrubbed := scrubSecrets(generic)
+			if sb, err := json.Marshal(scrubbed); err == nil {
+				b = sb
+			}
+		}
 		ds := string(b)
 		detail = &ds
 	}
@@ -79,6 +92,54 @@ func (s *Store) Append(ctx context.Context, e Entry) error {
 // List returns recent audit rows matching the filter, newest first.
 func (s *Store) List(ctx context.Context, f db.ActivityFilter) ([]db.ActivityEntry, error) {
 	return s.db.ListActivity(ctx, f)
+}
+
+const redacted = "[REDACTED]"
+
+// sensitiveKeySubstrings: a JSON object key containing any of these (case-
+// insensitive), or ending in "_key", has its value redacted. Cert/CA fields are
+// public and intentionally not matched.
+var sensitiveKeySubstrings = []string{
+	"password", "passwd", "secret", "token", "passphrase",
+	"private_key", "credential", "encryption_key", "jwt",
+}
+
+func isSensitiveKey(k string) bool {
+	lk := strings.ToLower(k)
+	if strings.HasSuffix(lk, "_key") || lk == "key" {
+		return true
+	}
+	for _, sub := range sensitiveKeySubstrings {
+		if strings.Contains(lk, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// scrubSecrets recursively replaces the values of sensitive-looking object keys
+// with a redaction marker, leaving structure and non-secret values intact.
+func scrubSecrets(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			if isSensitiveKey(k) {
+				if val != nil {
+					t[k] = redacted
+				}
+				continue
+			}
+			t[k] = scrubSecrets(val)
+		}
+		return t
+	case []any:
+		for i, item := range t {
+			t[i] = scrubSecrets(item)
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // --- context plumbing for middleware enrichment ---
