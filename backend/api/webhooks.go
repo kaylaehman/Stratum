@@ -54,9 +54,16 @@ type webhookBody struct {
 	Enabled  bool     `json:"enabled"`
 }
 
-func (b webhookBody) valid() bool {
-	return b.Name != "" && b.URL != "" && webhooks.ValidProvider(b.Provider)
+// validate checks required fields, the provider, and that the URL is a real
+// https provider-webhook endpoint (SSRF guard — see webhooks.ValidateURL).
+func (b webhookBody) validate() error {
+	if b.Name == "" || b.URL == "" || !webhooks.ValidProvider(b.Provider) {
+		return errBadWebhookFields
+	}
+	return webhooks.ValidateURL(b.Provider, b.URL)
 }
+
+var errBadWebhookFields = errors.New("name, url, and a valid provider are required")
 
 // CreateWebhook adds a notification webhook. Admin-gated + audited.
 func (h *Handlers) CreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -64,8 +71,12 @@ func (h *Handlers) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body webhookBody
-	if err := decodeJSON(r, &body); err != nil || !body.valid() {
-		writeError(w, http.StatusBadRequest, "name_url_provider_required")
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if err := body.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, webhookErrCode(err))
 		return
 	}
 	c := db.WebhookConfig{
@@ -87,8 +98,12 @@ func (h *Handlers) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	var body webhookBody
-	if err := decodeJSON(r, &body); err != nil || !body.valid() {
-		writeError(w, http.StatusBadRequest, "name_url_provider_required")
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if err := body.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, webhookErrCode(err))
 		return
 	}
 	c := db.WebhookConfig{
@@ -146,6 +161,14 @@ func (h *Handlers) TestWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// webhookErrCode maps a validation error to a stable client error code.
+func webhookErrCode(err error) string {
+	if errors.Is(err, webhooks.ErrInvalidURL) {
+		return "invalid_webhook_url"
+	}
+	return "name_url_provider_required"
 }
 
 func auditWebhook(r *http.Request, action, id, name string) {

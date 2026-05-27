@@ -24,16 +24,27 @@ func TestWebhookCRUD(t *testing.T) {
 
 	// Invalid provider => 400.
 	bad, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/webhooks", token, map[string]any{
-		"name": "x", "url": "http://h", "provider": "teams",
+		"name": "x", "url": "https://hooks.slack.com/services/x", "provider": "teams",
 	}))
 	bad.Body.Close()
 	if bad.StatusCode != http.StatusBadRequest {
 		t.Errorf("invalid provider = %d, want 400", bad.StatusCode)
 	}
 
-	// Create.
+	// SSRF guard: a non-provider host (or http) must be rejected.
+	for _, badURL := range []string{"http://hooks.slack.com/x", "https://169.254.169.254/latest", "https://evil.example.com/hook"} {
+		ssrf, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/webhooks", token, map[string]any{
+			"name": "x", "url": badURL, "provider": "slack",
+		}))
+		ssrf.Body.Close()
+		if ssrf.StatusCode != http.StatusBadRequest {
+			t.Errorf("SSRF url %q = %d, want 400", badURL, ssrf.StatusCode)
+		}
+	}
+
+	// Create (valid Slack webhook host).
 	createResp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/webhooks", token, map[string]any{
-		"name": "alerts", "url": "http://example.test/hook", "provider": "slack",
+		"name": "alerts", "url": "https://hooks.slack.com/services/T/B/xyz", "provider": "slack",
 		"triggers": []string{"port.new"}, "enabled": true,
 	}))
 	if createResp.StatusCode != http.StatusCreated {
@@ -47,7 +58,7 @@ func TestWebhookCRUD(t *testing.T) {
 
 	// Update.
 	upd, _ := c.Do(authReq(t, http.MethodPut, srv.URL+"/api/webhooks/"+created.ID, token, map[string]any{
-		"name": "alerts2", "url": "http://example.test/hook", "provider": "discord", "enabled": false,
+		"name": "alerts2", "url": "https://discord.com/api/webhooks/123/abc", "provider": "discord", "enabled": false,
 	}))
 	upd.Body.Close()
 	if upd.StatusCode != http.StatusNoContent {

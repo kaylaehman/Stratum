@@ -8,13 +8,46 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
 	"github.com/kaylaehman/stratum/backend/db"
 )
+
+// ErrInvalidURL is returned when a webhook URL fails SSRF validation.
+var ErrInvalidURL = errors.New("webhooks: url must be an https provider webhook endpoint")
+
+// allowedHosts pins each provider to its real webhook host. Because these are
+// specifically Slack/Discord incoming webhooks, the URL must target the
+// provider's known host — this allowlist removes the SSRF surface entirely (no
+// pointing the server at metadata endpoints, loopback, or RFC1918 hosts), which
+// is more robust than DNS/IP filtering (no rebinding TOCTOU).
+var allowedHosts = map[string][]string{
+	"slack":   {"hooks.slack.com"},
+	"discord": {"discord.com", "discordapp.com"},
+}
+
+// ValidateURL enforces https + a provider host allowlist on a webhook URL.
+func ValidateURL(provider, rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return ErrInvalidURL
+	}
+	hosts, ok := allowedHosts[provider]
+	if !ok {
+		return ErrInvalidURL
+	}
+	for _, h := range hosts {
+		if u.Hostname() == h {
+			return nil
+		}
+	}
+	return ErrInvalidURL
+}
 
 // Trigger keys. Event sources reference these; webhooks subscribe to them.
 const (
@@ -49,13 +82,23 @@ type Dispatcher struct {
 
 	mu       sync.Mutex
 	lastSent map[string]time.Time // key: webhookID + "|" + trigger
+
+	// skipValidate disables the post-time SSRF re-validation. Test-only (set via
+	// the export_test seam) so delivery can be exercised against a local server.
+	skipValidate bool
 }
 
-// New builds a Dispatcher.
+// New builds a Dispatcher. The HTTP client refuses redirects so a 3xx from an
+// allowlisted host can't bounce the request to an internal target.
 func New(store db.Store) *Dispatcher {
 	return &Dispatcher{
-		store:    store,
-		client:   &http.Client{Timeout: 10 * time.Second},
+		store: store,
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		lastSent: map[string]time.Time{},
 	}
 }
@@ -99,6 +142,14 @@ func (d *Dispatcher) allow(webhookID, trigger string) bool {
 }
 
 func (d *Dispatcher) post(ctx context.Context, h db.WebhookConfig, msg Message) error {
+	// Defense in depth: re-validate at send time so a row that somehow bypassed
+	// config-time validation can never drive a server-side request to an
+	// arbitrary host.
+	if !d.skipValidate {
+		if err := ValidateURL(h.Provider, h.URL); err != nil {
+			return err
+		}
+	}
 	body, err := payloadFor(h.Provider, msg)
 	if err != nil {
 		return err

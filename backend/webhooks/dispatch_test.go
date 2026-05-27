@@ -38,6 +38,7 @@ func TestNotifyFanOutAndFilter(t *testing.T) {
 		{ID: "c", Name: "disabled", URL: srv.URL, Provider: "slack", Triggers: []string{"port.new"}, Enabled: false},
 	}}
 	d := webhooks.New(store)
+	d.DisableURLValidationForTest() // deliver to the local httptest server
 	d.Notify(context.Background(), "port.new", webhooks.Message{Title: "New port", Text: "x"})
 
 	mu.Lock()
@@ -59,6 +60,7 @@ func TestTestDeliversAndReportsError(t *testing.T) {
 	defer bad.Close()
 
 	d := webhooks.New(&fakeStore{})
+	d.DisableURLValidationForTest() // deliver to local httptest servers
 	if err := d.Test(context.Background(), db.WebhookConfig{URL: ok.URL, Provider: "slack"}, webhooks.Message{Text: "hi"}); err != nil {
 		t.Errorf("test to healthy endpoint should succeed: %v", err)
 	}
