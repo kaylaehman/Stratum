@@ -18,6 +18,7 @@ import { SharedMountsView } from '../components/containers/SharedMountsView'
 import { ReverseMountPanel } from '../components/containers/ReverseMountPanel'
 import { SnapshotsPanel } from '../components/containers/SnapshotsPanel'
 import { MemoryPanel } from '../components/ai/MemoryPanel'
+import { SSOPanel } from '../components/security/SSOPanel'
 import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
@@ -237,6 +238,11 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
           containerId={containerId}
           containerName={c?.name ?? containerId}
         />
+      )}
+
+      {/* SSO Passthrough config (admin only) */}
+      {isAdmin && c && (
+        <SSOPanel nodeId={nodeId} containerName={c.name} />
       )}
 
       {/* Health Check */}

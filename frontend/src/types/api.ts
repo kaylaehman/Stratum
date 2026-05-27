@@ -1428,6 +1428,40 @@ export interface FileEventsResponse {
   events: FileEvent[]
 }
 
+// SSO Passthrough types (Feature F2)
+
+export type SSOMethod = 'local' | 'totp' | 'oidc' | 'forward'
+
+export interface SSOConfig {
+  id: string
+  node_id: string
+  container_name: string
+  enabled: boolean
+  method: SSOMethod
+  provider_url: string
+  client_id: string
+  allowed_groups: string[]
+  session_duration_secs: number
+  has_client_secret: boolean
+  updated_at: string
+}
+
+export interface SSOListResponse {
+  configs: SSOConfig[]
+}
+
+export interface SSOUpsertRequest {
+  node_id: string
+  container_name: string
+  enabled: boolean
+  method: SSOMethod
+  provider_url?: string
+  client_id?: string
+  client_secret?: string
+  allowed_groups: string[]
+  session_duration_secs: number
+}
+
 // DNS Record Management types (Feature F3)
 
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'PTR' | 'TXT' | 'SRV'
