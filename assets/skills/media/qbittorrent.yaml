@@ -1,0 +1,168 @@
+id: qbittorrent
+name: qBittorrent
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/qbittorrent"
+  port_hints: [8080, 6881]
+category: media
+description: Free, open-source BitTorrent client with web UI and Sonarr/Radarr integration
+docs_url: https://hub.docker.com/r/linuxserver/qbittorrent
+
+common_issues:
+  - id: permission-denied-downloads
+    name: Permission denied on /downloads
+    symptoms:
+      - "permission denied"
+      - "I/O error"
+      - "Cannot save torrent"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of /downloads
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown downloads to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {downloads_path}"
+        requires_approval: true
+    resolution: |
+      /downloads ownership corrected. qBittorrent can now write completed
+      torrents and Sonarr/Radarr will be able to import them.
+
+  - id: temporary-admin-password
+    name: Cannot find admin password on first start
+    symptoms:
+      - "temporary password"
+      - "first run"
+      - "Login fails with admin/adminadmin"
+    trigger_conditions: []
+    steps:
+      - id: step-1
+        description: Surface the temporary admin password from container logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i 'temporary password' | tail -3"
+        expected_output: ""
+      - id: step-2
+        description: Inform about post-login steps
+        type: inform
+        command: ""
+    resolution: |
+      Recent qBittorrent versions generate a random admin password on first
+      start and print it to the container logs. Use it to log in, then change
+      it immediately in Tools → Options → Web UI.
+
+  - id: listen-port-blocked
+    name: BitTorrent listen port closed / firewalled status
+    symptoms:
+      - "qBittorrent is behind NAT"
+      - "Connection status: Firewalled"
+      - "Slow download speeds despite many seeders"
+    trigger_conditions: []
+    steps:
+      - id: step-1
+        description: Check the listen port is exposed in the container
+        type: check
+        command: "docker inspect {container_name} | grep -A 2 6881"
+        expected_output: "6881"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about port-forwarding requirements
+        type: inform
+        command: ""
+    resolution: |
+      The BitTorrent listen port (6881 by default) must be both exposed in
+      Docker and forwarded on the host's router for incoming peer
+      connections. If qBittorrent is behind a VPN (Gluetun), use the VPN
+      provider's port-forwarding feature instead.
+
+  - id: import-uid-mismatch
+    name: Sonarr/Radarr import fails after qBittorrent download
+    symptoms:
+      - "Sonarr cannot import from qBittorrent"
+      - "Radarr import failed - permission denied"
+    trigger_conditions:
+      - log_pattern: "import.*permission"
+    steps:
+      - id: step-1
+        description: Compare qBittorrent UID with Sonarr/Radarr UID
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'PUID|PGID'"
+        expected_output: ""
+      - id: step-2
+        description: Inform about UID parity requirement
+        type: inform
+        command: ""
+    resolution: |
+      Sonarr/Radarr import requires identical PUID/PGID across qBittorrent,
+      Sonarr/Radarr, and the library. The /downloads path inside each
+      container must also map to the same host path. Re-check all three
+      compose files for parity.
+
+default_config:
+  compose_template: |
+    services:
+      qbittorrent:
+        image: linuxserver/qbittorrent:latest
+        container_name: qbittorrent
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          WEBUI_PORT: "8080"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+        ports:
+          - "8080:8080/tcp"
+          - "6881:6881/tcp"
+          - "6881:6881/udp"
+  required_vars:
+    - name: PUID
+      description: User ID (must match Sonarr/Radarr)
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads
+      default: "./downloads"
+  known_mounts:
+    - container_path: /config
+      purpose: qBittorrent settings and torrent state
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /downloads
+      purpose: Completed downloads (Sonarr/Radarr read from here)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Default WebUI password is randomized on first start since 4.6.x — check the
+  container logs for the temporary password line.
+
+  For VPN-routed setups, attach qBittorrent to a Gluetun container with
+  `network_mode: "service:gluetun"` and move the port publishing to Gluetun.
+  Setting WEBUI_PORT differently here lets you keep the web UI reachable
+  through Gluetun on a non-default port.

@@ -1,0 +1,265 @@
+id: jellyfin
+name: Jellyfin Media Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "jellyfin/jellyfin"
+    - "linuxserver/jellyfin"
+  port_hints: [8096]
+category: media
+description: Open-source media server for organizing and streaming video, music, and photos
+docs_url: https://hub.docker.com/r/jellyfin/jellyfin
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot create directory in /config"
+      - "Failed to write to metadata"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents Jellyfin from writing configuration and metadata files. The fix changed ownership to match the container process. Jellyfin should now be able to write to /config.
+
+  - id: no-media-library-scan
+    name: Library not scanning or recognizing media files
+    symptoms:
+      - "No media files found"
+      - "Library stuck at 0 items"
+      - "Scan library completes but finds nothing"
+      - "Files in mounted directory not appearing in library"
+    trigger_conditions:
+      - log_pattern: "no items found"
+      - log_pattern: "scan.*0 items"
+    steps:
+      - id: step-1
+        description: Verify media directories are mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}'"
+        expected_output: "/tv:/tv"
+        on_fail: step-2
+      - id: step-2
+        description: Check if files are actually present in the mounted directory
+        type: check
+        command: "ls -la {media_path} | head -20"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Display contents of mounted media directory
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check for library scan errors in Jellyfin logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Trigger a manual library refresh
+        type: fix
+        command: "docker exec {container_name} curl -X POST 'http://localhost:8096/Library/Refresh'"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Check library scan status after refresh
+        type: check
+        command: "docker logs {container_name} | tail -10"
+    resolution: |
+      Jellyfin library scan was triggered manually. The server will now index media files in the mounted directories. Initial scans may take several minutes depending on library size and CPU availability. If files still don't appear, verify the mounted path contains supported media formats and that Jellyfin has read permissions.
+
+  - id: high-cpu-transcoding
+    name: High CPU usage during transcoding
+    symptoms:
+      - "CPU usage above 80% during playback"
+      - "Playback stuttering or buffering"
+      - "Fans running at maximum speed"
+      - "Slow or unresponsive UI during stream"
+    trigger_conditions:
+      - log_pattern: "transcod"
+    steps:
+      - id: step-1
+        description: Check current CPU usage of Jellyfin container
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Display streaming profiles available in Jellyfin
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if hardware acceleration is available
+        type: check
+        command: "docker exec {container_name} vainfo 2>&1 | head -5"
+        expected_output: ""
+        on_fail: step-4
+      - id: step-4
+        description: Display recommendation for hardware acceleration setup
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Jellyfin to apply any hardware acceleration configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor CPU usage after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      High CPU usage during transcoding is often due to software-only encoding. If your host hardware supports it, enable hardware acceleration in Jellyfin Settings → Playback → Transcoding to offload encoding to GPU or dedicated encoder. Without hardware acceleration, CPU usage will remain high during simultaneous streams or high-quality transcodes. Consider adjusting streaming profiles to lower quality or enabling direct play/stream mode when possible.
+
+  - id: remote-access-unavailable
+    name: Remote access not working
+    symptoms:
+      - "Cannot access Jellyfin from outside network"
+      - "Remote access marked as unavailable in Settings"
+      - "Timeout when accessing from external IP"
+      - "Yellow or unavailable indicator in Settings → Remote Access"
+    trigger_conditions:
+      - log_pattern: "remote.*unavailable"
+      - log_pattern: "unable to access"
+    steps:
+      - id: step-1
+        description: Verify Jellyfin is listening on port 8096
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 8096"
+        expected_output: "LISTEN.*8096"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 8096 is published in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '8096'"
+        expected_output: "8096"
+        on_fail: step-3
+      - id: step-3
+        description: Display port mapping status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Jellyfin to force remote access re-initialization
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Wait and check for remote access confirmation in logs
+        type: check
+        command: "sleep 15 && docker logs {container_name} | grep -i 'remote.*available' | tail -5"
+    resolution: |
+      Remote Access requires port 8096 to be properly exposed and reachable from the public internet. The container has been restarted to force Jellyfin to reinitialize remote access detection. If the issue persists, check your router's port forwarding settings, firewall rules, or consider using a reverse proxy with valid HTTPS certificate for better security and reliability.
+
+default_config:
+  compose_template: |
+    services:
+      jellyfin:
+        image: jellyfin/jellyfin:latest
+        container_name: jellyfin
+        restart: unless-stopped
+        network_mode: bridge
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${CACHE_PATH:-./cache}:/cache
+          - ${TV_PATH:-./tv}:/tv:ro
+          - ${MOVIES_PATH:-./movies}:/movies:ro
+          - ${MUSIC_PATH:-./music}:/music:ro
+        ports:
+          - "8096:8096/tcp"
+        devices:
+          - /dev/dri:/dev/dri
+  required_vars:
+    - name: PUID
+      description: User ID to run Jellyfin as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Jellyfin
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (configuration and database)
+      default: "./config"
+    - name: CACHE_PATH
+      description: Host path for /cache (transcoding cache)
+      default: "./cache"
+    - name: TV_PATH
+      description: Host path for /tv (TV series library, read-only)
+      default: "./tv"
+    - name: MOVIES_PATH
+      description: Host path for /movies (movies library, read-only)
+      default: "./movies"
+    - name: MUSIC_PATH
+      description: Host path for /music (music library, read-only)
+      default: "./music"
+  known_mounts:
+    - container_path: /config
+      purpose: Jellyfin configuration, database, and metadata
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /cache
+      purpose: Transcoding cache and temporary files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /tv
+      purpose: TV series library (read-only from Jellyfin perspective)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /movies
+      purpose: Movies library (read-only from Jellyfin perspective)
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /music
+      purpose: Music library (read-only from Jellyfin perspective)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Jellyfin is a free, open-source media server. Both official (jellyfin/jellyfin) and LinuxServer.io (linuxserver/jellyfin) images are supported and widely used.
+
+  Hardware acceleration: For transcoding, enable GPU acceleration if available on your host. The compose template includes /dev/dri mount for this purpose. Supported on Intel Quick Sync, NVIDIA NVENC, AMD VCE.
+
+  Cache directory: Should be on fast local storage (SSD preferred) to avoid transcoding delays. Separate from /config to prevent database bloat.
+
+  Library scan: Jellyfin scans on startup and can be manually triggered. Large libraries may take several minutes to scan.
+
+  Direct streaming: Configure playback profiles to prefer direct play/stream to minimize transcoding load on the host.
+
+  Common gotchas:
+  - Library not scanning: Verify media directories are mounted and contain files in supported formats.
+  - Permission denied on /config: Check UID/GID match between host and container.
+  - Slow playback: Check CPU usage; enable hardware acceleration if available.
+  - Remote access unavailable: Verify port 8096 is open and reachable from external network.

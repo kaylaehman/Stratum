@@ -1,0 +1,103 @@
+id: overseerr
+name: Overseerr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "sctx/overseerr"
+  port_hints: [5055]
+category: media
+description: Media request management and discovery for Plex with Sonarr/Radarr integration
+docs_url: https://hub.docker.com/r/sctx/overseerr
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /app/config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot create db.sqlite3"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the config mount
+        type: check
+        command: "stat {config_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Recursively chown to the configured UID/GID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      The Overseerr image runs as the user defined by PUID/PGID at startup;
+      /app/config must be writable by that user. Ownership corrected.
+
+  - id: arr-test-failed
+    name: Cannot connect to Sonarr or Radarr from Overseerr settings
+    symptoms:
+      - "Sonarr test failed"
+      - "Radarr test failed"
+      - "Server not reachable"
+    trigger_conditions:
+      - log_pattern: "test.*failed"
+    steps:
+      - id: step-1
+        description: Test reachability from Overseerr to the configured upstream
+        type: check
+        command: "docker exec {container_name} curl -sS -m 5 -o /dev/null -w '%{http_code}' http://{upstream_host}:{upstream_port}/ 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Inform about hostname and API key requirements
+        type: inform
+        command: ""
+    resolution: |
+      Use container names on a shared user-defined network, not localhost.
+      Re-copy the API key from Sonarr/Radarr Settings → General. Verify the
+      base URL matches if either app uses a non-root path.
+
+default_config:
+  compose_template: |
+    services:
+      overseerr:
+        image: sctx/overseerr:latest
+        container_name: overseerr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          LOG_LEVEL: info
+        volumes:
+          - ${CONFIG_PATH:-./config}:/app/config
+        ports:
+          - "5055:5055/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /app/config
+      default: "./config"
+  known_mounts:
+    - container_path: /app/config
+      purpose: Overseerr settings, database, and session data
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  First-run setup walks through Plex sign-in, library import, and Sonarr/Radarr
+  configuration via the web UI on port 5055. Plex sign-in requires the host
+  device to be able to reach plex.tv.
+
+  For Jellyfin users, use jellyseerr.yaml instead.

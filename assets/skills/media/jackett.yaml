@@ -1,0 +1,107 @@
+id: jackett
+name: Jackett
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/jackett"
+  port_hints: [9117]
+category: media
+description: API support proxy for torrent trackers — predecessor to Prowlarr, still used by some setups
+docs_url: https://hub.docker.com/r/linuxserver/jackett
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot write to /config"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config ownership corrected to {puid}:{pgid}.
+
+  - id: indexer-cloudflare-blocked
+    name: Indexer test fails with Cloudflare challenge
+    symptoms:
+      - "Cloudflare protection detected"
+      - "403 Forbidden"
+      - "Indexer requires FlareSolverr"
+    trigger_conditions:
+      - log_pattern: "cloudflare"
+    steps:
+      - id: step-1
+        description: Surface the recent Cloudflare-blocked indexer errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -i cloudflare | tail -5"
+        expected_output: ""
+      - id: step-2
+        description: Inform about FlareSolverr requirement
+        type: inform
+        command: ""
+    resolution: |
+      Many trackers gate behind Cloudflare. Deploy FlareSolverr alongside
+      Jackett (see flaresolverr.yaml) and set the FlareSolverr URL in Jackett's
+      indexer configuration. Without this, Cloudflare-protected trackers will
+      keep returning 403.
+default_config:
+  compose_template: |
+    services:
+      jackett:
+        image: linuxserver/jackett:latest
+        container_name: jackett
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          AUTO_UPDATE: "true"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "9117:9117/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: Jackett settings and indexer definitions
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Jackett predates Prowlarr and lacks Prowlarr's app-sync feature — indexers
+  must be manually configured in each downstream app (Sonarr, Radarr, etc.).
+  For new setups, prefer Prowlarr. Keep Jackett only if you depend on indexer
+  definitions that haven't been ported.

@@ -1,0 +1,127 @@
+id: lidarr
+name: Lidarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/lidarr"
+  port_hints: [8686]
+category: media
+description: Music collection manager (Sonarr/Radarr equivalent for music)
+docs_url: https://hub.docker.com/r/linuxserver/lidarr
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot create directory in /config"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config ownership corrected to {puid}:{pgid}.
+
+  - id: import-failed-permissions
+    name: Import failed - permissions on downloads or music
+    symptoms:
+      - "Import failed"
+      - "permission denied.*music"
+      - "permission denied.*downloads"
+    trigger_conditions:
+      - log_pattern: "import.*failed"
+    steps:
+      - id: step-1
+        description: Check ownership of downloads directory
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Check ownership of music library
+        type: check
+        command: "stat {music_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-3
+      - id: step-3
+        description: Recursively chown both paths
+        type: fix
+        command: "chown -R {puid}:{pgid} {downloads_path} {music_path}"
+        requires_approval: true
+    resolution: |
+      Lidarr could not move downloaded music into the library because of
+      ownership mismatch. Both paths now owned by {puid}:{pgid}.
+
+default_config:
+  compose_template: |
+    services:
+      lidarr:
+        image: linuxserver/lidarr:latest
+        container_name: lidarr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${MUSIC_PATH:-./music}:/music
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+        ports:
+          - "8686:8686/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: MUSIC_PATH
+      description: Host path for /music library
+      default: "./music"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads
+      default: "./downloads"
+  known_mounts:
+    - container_path: /config
+      purpose: Lidarr settings and database
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /music
+      purpose: Music library (write — Lidarr renames/moves)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /downloads
+      purpose: Completed downloads from client
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Same UID/GID and path-parity rules as Sonarr/Radarr. Lidarr uses MusicBrainz
+  for metadata; library scans can be slow on first run for large collections.

@@ -1,0 +1,128 @@
+id: readarr
+name: Readarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/readarr"
+  port_hints: [8787]
+category: media
+description: Ebook and audiobook collection manager (Sonarr/Radarr equivalent for books)
+docs_url: https://hub.docker.com/r/linuxserver/readarr
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot create directory in /config"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config ownership corrected to {puid}:{pgid}.
+
+  - id: import-failed-permissions
+    name: Import failed - permissions on downloads or books
+    symptoms:
+      - "Import failed"
+      - "permission denied.*books"
+      - "permission denied.*downloads"
+    trigger_conditions:
+      - log_pattern: "import.*failed"
+    steps:
+      - id: step-1
+        description: Check ownership of downloads directory
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Check ownership of books library
+        type: check
+        command: "stat {books_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-3
+      - id: step-3
+        description: Recursively chown both paths
+        type: fix
+        command: "chown -R {puid}:{pgid} {downloads_path} {books_path}"
+        requires_approval: true
+    resolution: |
+      Readarr could not move downloads into the library — ownership corrected
+      to {puid}:{pgid}.
+
+default_config:
+  compose_template: |
+    services:
+      readarr:
+        image: linuxserver/readarr:develop
+        container_name: readarr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${BOOKS_PATH:-./books}:/books
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+        ports:
+          - "8787:8787/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: BOOKS_PATH
+      description: Host path for /books library
+      default: "./books"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads
+      default: "./downloads"
+  known_mounts:
+    - container_path: /config
+      purpose: Readarr settings and database
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /books
+      purpose: Books/audiobooks library
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /downloads
+      purpose: Completed downloads from client
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Readarr is still in development; LinuxServer ships the develop tag rather
+  than latest. Expect occasional breaking changes between releases. Same
+  UID/GID and path-parity rules as the rest of the arr-stack.

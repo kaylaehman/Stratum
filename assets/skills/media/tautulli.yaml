@@ -1,0 +1,104 @@
+id: tautulli
+name: Tautulli
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/tautulli"
+  port_hints: [8181]
+category: media
+description: Monitoring and statistics dashboard for Plex Media Server
+docs_url: https://hub.docker.com/r/linuxserver/tautulli
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot create directory in /config"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config ownership corrected to {puid}:{pgid}.
+
+  - id: cannot-reach-plex
+    name: Tautulli cannot reach Plex Media Server
+    symptoms:
+      - "Cannot connect to Plex"
+      - "Plex URL not reachable"
+      - "Activity feed empty"
+    trigger_conditions:
+      - log_pattern: "plex.*unreachable"
+    steps:
+      - id: step-1
+        description: Test Plex reachability from inside Tautulli
+        type: check
+        command: "docker exec {container_name} curl -sS -m 5 -o /dev/null -w '%{http_code}' http://{plex_host}:32400/identity 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Inform about Plex network requirements
+        type: inform
+        command: ""
+    resolution: |
+      Tautulli needs to reach Plex on port 32400. If both run in Docker, put
+      them on the same user-defined network and use container names. Verify
+      the Plex token in Tautulli Settings → Plex Media Server.
+
+default_config:
+  compose_template: |
+    services:
+      tautulli:
+        image: linuxserver/tautulli:latest
+        container_name: tautulli
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "8181:8181/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: Tautulli settings, database, and notification history
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Tautulli works only with Plex (not Jellyfin or Emby). For those, use the
+  built-in stats panels or third-party alternatives like Jellystat.

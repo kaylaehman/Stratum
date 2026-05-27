@@ -1,0 +1,122 @@
+id: unmanic
+name: Unmanic
+version: "1.0"
+container_match:
+  image_patterns:
+    - "josh5/unmanic"
+  port_hints: [8888]
+category: media
+description: Automated media library optimizer — transcodes and normalizes files in the background
+docs_url: https://docs.unmanic.app/
+
+common_issues:
+  - id: permission-denied-library
+    name: Cannot write back transcoded files to library
+    symptoms:
+      - "permission denied"
+      - "Could not move file to library"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the library path
+        type: check
+        command: "stat {library_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Recursively chown library to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {library_path}"
+        requires_approval: true
+    resolution: |
+      Library ownership corrected to {puid}:{pgid}. Unmanic transcodes
+      in /tmp then moves the final file back to the library path — both must
+      be writable by the container.
+
+  - id: gpu-acceleration-not-detected
+    name: Hardware acceleration not detected
+    symptoms:
+      - "No GPU devices found"
+      - "Falling back to software encoding"
+      - "CPU usage 100% on every job"
+    trigger_conditions:
+      - log_pattern: "no.*gpu"
+    steps:
+      - id: step-1
+        description: Check /dev/dri is mounted into the container
+        type: check
+        command: "docker exec {container_name} ls -la /dev/dri 2>&1"
+        expected_output: "renderD"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about device passthrough
+        type: inform
+        command: ""
+    resolution: |
+      For Intel/AMD GPU encoding, add `devices: [/dev/dri:/dev/dri]` to the
+      compose file. For NVIDIA, install the NVIDIA Container Toolkit on the
+      host and set `runtime: nvidia` plus `NVIDIA_VISIBLE_DEVICES=all`. Then
+      enable the corresponding encoder plugin in Unmanic's UI.
+
+default_config:
+  compose_template: |
+    services:
+      unmanic:
+        image: josh5/unmanic:latest
+        container_name: unmanic
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${LIBRARY_PATH:-./library}:/library
+          - ${CACHE_PATH:-./cache}:/tmp/unmanic
+        ports:
+          - "8888:8888/tcp"
+        devices:
+          - /dev/dri:/dev/dri
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: LIBRARY_PATH
+      description: Host path for /library (media to optimize)
+      default: "./library"
+    - name: CACHE_PATH
+      description: Host path for transcoding scratch space
+      default: "./cache"
+  known_mounts:
+    - container_path: /config
+      purpose: Unmanic settings and worker state
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /library
+      purpose: Media library (write — Unmanic replaces files in place)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /tmp/unmanic
+      purpose: Transcoding cache (large — prefer SSD)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Unmanic replaces files in place by default. Always test with a small set
+  before pointing it at a full library — failed jobs can leave partial files.
+
+  The cache path can grow very large during transcoding (10s of GB per job
+  for 4K sources). Mount it to fast local storage with capacity headroom.

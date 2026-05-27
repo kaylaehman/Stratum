@@ -1,0 +1,103 @@
+id: recyclarr
+name: Recyclarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/recyclarr/recyclarr"
+  port_hints: []
+category: media
+description: Syncs TRaSH Guides quality definitions and custom formats into Sonarr and Radarr
+docs_url: https://github.com/recyclarr/recyclarr
+
+common_issues:
+  - id: yaml-config-error
+    name: recyclarr.yml fails to parse
+    symptoms:
+      - "Config validation failed"
+      - "Invalid YAML"
+      - "Schema validation error"
+    trigger_conditions:
+      - log_pattern: "yaml.*error"
+    steps:
+      - id: step-1
+        description: Surface the parse error
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'yaml|schema|invalid' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Inform about config validation
+        type: inform
+        command: ""
+    resolution: |
+      Run `docker exec {container_name} recyclarr config list templates` to
+      get a list of available templates. Compare your /config/recyclarr.yml
+      against the published TRaSH Guides examples for the same template.
+
+  - id: sonarr-radarr-auth
+    name: Recyclarr cannot push to Sonarr/Radarr
+    symptoms:
+      - "401 Unauthorized"
+      - "Cannot connect to base_url"
+    trigger_conditions:
+      - log_pattern: "401"
+    steps:
+      - id: step-1
+        description: Test API key against the upstream
+        type: check
+        command: "docker exec {container_name} curl -sS -H 'X-Api-Key: {api_key}' {upstream_url}/api/v3/system/status 2>&1 | head -3"
+        expected_output: ""
+      - id: step-2
+        description: Inform about API key location
+        type: inform
+        command: ""
+    resolution: |
+      Each instance in recyclarr.yml needs base_url and api_key. The API key
+      comes from Sonarr/Radarr Settings → General → Security. Recyclarr never
+      modifies these settings — it only pushes quality and custom-format
+      definitions.
+
+default_config:
+  compose_template: |
+    services:
+      recyclarr:
+        image: ghcr.io/recyclarr/recyclarr:latest
+        container_name: recyclarr
+        restart: unless-stopped
+        user: ${PUID:-1000}:${PGID:-1000}
+        environment:
+          TZ: ${TZ:-UTC}
+          CRON_SCHEDULE: "0 0 * * *"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (holds recyclarr.yml)
+      default: "./config"
+    - name: CRON_SCHEDULE
+      description: When to run sync (cron syntax)
+      default: "0 0 * * *"
+  known_mounts:
+    - container_path: /config
+      purpose: recyclarr.yml and Recyclarr's own state
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Recyclarr is opinionated — it expects you to follow TRaSH Guides. Custom
+  configuration outside the guide is supported but unsupported by default
+  templates.
+
+  First run: `docker exec recyclarr recyclarr sync` to apply config manually.
+  After that the CRON_SCHEDULE drives nightly syncs.

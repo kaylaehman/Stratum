@@ -1,0 +1,204 @@
+id: sonarr
+name: Sonarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/sonarr"
+  port_hints: [8989]
+category: media
+description: TV series collection manager that monitors RSS feeds and automates download and import
+docs_url: https://hub.docker.com/r/linuxserver/sonarr
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot create directory in /config"
+      - "Failed to write database"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was corrected
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      /config ownership was mismatched with the container's UID/GID. Sonarr could not write its database or settings. Ownership has been corrected to {puid}:{pgid}.
+
+  - id: import-failed-permissions
+    name: Import failed - permission denied on downloads
+    symptoms:
+      - "Import failed"
+      - "Could not move file to final destination"
+      - "Access to the path is denied"
+    trigger_conditions:
+      - log_pattern: "import.*failed"
+      - log_pattern: "access.*denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the downloads directory
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Check ownership of the TV library directory
+        type: check
+        command: "stat {tv_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-3
+      - id: step-3
+        description: Display both paths' ownership for comparison
+        type: inform
+        command: ""
+      - id: step-4
+        description: Recursively chown both paths to match Sonarr's UID/GID
+        type: fix
+        command: "chown -R {puid}:{pgid} {downloads_path} {tv_path}"
+        requires_approval: true
+    resolution: |
+      Sonarr could not move imports because the downloads and/or TV library
+      were owned by a different user than the container. UID/GID parity between
+      Sonarr, the download client, and the library is the most common
+      LinuxServer.io gotcha. Fixed by aligning ownership to {puid}:{pgid}.
+
+  - id: connection-refused
+    name: Cannot reach Sonarr on port 8989
+    symptoms:
+      - "Connection refused"
+      - "Cannot reach Sonarr at localhost:8989"
+      - "Bad gateway"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Check Sonarr is listening on port 8989
+        type: check
+        command: "docker exec {container_name} ss -tlnp 2>/dev/null | grep 8989"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Verify the port is published
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 8989"
+        expected_output: "8989"
+        on_fail: step-3
+      - id: step-3
+        description: Restart Sonarr to recover
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Sonarr was restarted. Confirm it is reachable at http://host:8989. If
+      not, verify the port is exposed in the compose file and not blocked by
+      a host firewall.
+
+  - id: download-client-unreachable
+    name: Download client (qBittorrent/Transmission/SABnzbd) unreachable
+    symptoms:
+      - "Unable to connect to download client"
+      - "Download client test failed"
+      - "Queue not updating"
+    trigger_conditions:
+      - log_pattern: "download.*client.*failed"
+    steps:
+      - id: step-1
+        description: Check Sonarr can reach the configured download client host
+        type: check
+        command: "docker exec {container_name} curl -sS -m 5 -o /dev/null -w '%{http_code}' http://{download_client_host}:{download_client_port}/ 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Inform about Docker network requirements
+        type: inform
+        command: ""
+    resolution: |
+      Sonarr could not reach the download client. If both containers are on
+      Docker, they must share a user-defined network (not the default bridge)
+      and address each other by container name, not localhost. Verify the host,
+      port, and API key in Sonarr Settings → Download Clients.
+
+default_config:
+  compose_template: |
+    services:
+      sonarr:
+        image: linuxserver/sonarr:latest
+        container_name: sonarr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${TV_PATH:-./tv}:/tv
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+        ports:
+          - "8989:8989/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run Sonarr as (must match download client and library)
+      default: "1000"
+    - name: PGID
+      description: Group ID for Sonarr
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (database, settings)
+      default: "./config"
+    - name: TV_PATH
+      description: Host path for /tv (TV series library)
+      default: "./tv"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads (completed downloads from client)
+      default: "./downloads"
+  known_mounts:
+    - container_path: /config
+      purpose: Sonarr settings and database
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /tv
+      purpose: TV series library (write — Sonarr renames/moves files here)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /downloads
+      purpose: Completed downloads (must match download client's path)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Path parity: the /downloads path inside Sonarr should be the same as inside
+  the download client (e.g. qBittorrent also mounts /downloads pointing at the
+  same host directory). Otherwise Sonarr cannot find completed files.
+
+  UID/GID parity: Sonarr, the download client, and the TV library should all
+  share the same PUID/PGID, or imports will fail with permission errors.
+
+  Network: when Sonarr and the download client are both containers, they must
+  share a user-defined Docker network and reach each other by container name.

@@ -1,0 +1,105 @@
+id: declutarr
+name: Declutarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/manimatter/declutarr"
+  port_hints: []
+category: media
+description: Queue cleaner for Sonarr, Radarr, Lidarr, and Readarr — removes stalled, slow, and failed downloads
+docs_url: https://github.com/ManiMatter/decluttarr
+
+common_issues:
+  - id: api-key-mismatch
+    name: Cannot authenticate to Sonarr/Radarr/Prowlarr
+    symptoms:
+      - "401 Unauthorized"
+      - "API key invalid"
+      - "Failed to connect to Sonarr"
+    trigger_conditions:
+      - log_pattern: "401"
+      - log_pattern: "API key"
+    steps:
+      - id: step-1
+        description: Surface recent auth failures in Declutarr logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE '401|api.key|unauthorized' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Inform about API key configuration
+        type: inform
+        command: ""
+    resolution: |
+      Declutarr authenticates to each arr-app with its API key. Copy each key
+      exactly from the upstream's Settings → General → Security and paste into
+      the corresponding Declutarr env var (SONARR_KEY, RADARR_KEY, etc.).
+      Keys are case-sensitive and contain no spaces.
+
+  - id: upstream-unreachable
+    name: Declutarr cannot reach the arr apps
+    symptoms:
+      - "Connection refused"
+      - "Cannot reach Sonarr at"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Test reachability of each configured upstream
+        type: check
+        command: "docker exec {container_name} curl -sS -m 5 -o /dev/null -w '%{http_code}' {upstream_url}/api/v3/system/status 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Inform about Docker networking
+        type: inform
+        command: ""
+    resolution: |
+      Declutarr must share a Docker network with the upstream apps and address
+      them by container name (e.g. http://sonarr:8989). Verify each upstream
+      URL in the Declutarr compose env block.
+
+default_config:
+  compose_template: |
+    services:
+      declutarr:
+        image: ghcr.io/manimatter/declutarr:latest
+        container_name: declutarr
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          REMOVE_TIMER: "10"
+          REMOVE_FAILED: "true"
+          REMOVE_STALLED: "true"
+          SONARR_URL: ${SONARR_URL:-http://sonarr:8989}
+          SONARR_KEY: ${SONARR_KEY}
+          RADARR_URL: ${RADARR_URL:-http://radarr:7878}
+          RADARR_KEY: ${RADARR_KEY}
+  required_vars:
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: SONARR_URL
+      description: Sonarr base URL (use container name on shared network)
+      default: "http://sonarr:8989"
+    - name: SONARR_KEY
+      description: Sonarr API key (from Settings → General)
+      default: ""
+    - name: RADARR_URL
+      description: Radarr base URL
+      default: "http://radarr:7878"
+    - name: RADARR_KEY
+      description: Radarr API key
+      default: ""
+  known_mounts: []
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Declutarr has no UI — it runs as a background daemon driven entirely by env
+  vars. All configuration is in the compose file. Add LIDARR_URL/LIDARR_KEY
+  and READARR_URL/READARR_KEY when those apps are part of the stack.
+
+  Common gotcha: API key mismatch with the arr-stack is the single most
+  common configuration failure for Declutarr.

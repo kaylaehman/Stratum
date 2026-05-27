@@ -1,0 +1,165 @@
+id: transmission
+name: Transmission
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/transmission"
+  port_hints: [9091, 51413]
+category: media
+description: Lightweight BitTorrent client with web UI
+docs_url: https://hub.docker.com/r/linuxserver/transmission
+
+common_issues:
+  - id: permission-denied-downloads
+    name: Permission denied writing to /downloads
+    symptoms:
+      - "Permission denied"
+      - "Could not create directory"
+      - "Error: unable to open file"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of /downloads
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown downloads to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {downloads_path}"
+        requires_approval: true
+    resolution: |
+      /downloads ownership corrected to {puid}:{pgid}. Transmission can now
+      write completed torrents.
+
+  - id: peer-port-closed
+    name: Peer port closed - poor connectivity
+    symptoms:
+      - "Port test: Closed"
+      - "Cannot establish incoming connections"
+      - "Slow download speeds"
+    trigger_conditions:
+      - log_pattern: "port.*closed"
+    steps:
+      - id: step-1
+        description: Check if peer port is exposed in container
+        type: check
+        command: "docker inspect {container_name} | grep -A 2 51413"
+        expected_output: "51413"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about port forwarding requirements
+        type: inform
+        command: ""
+    resolution: |
+      Incoming peer connections require port 51413 (TCP/UDP) to be both
+      exposed in Docker and forwarded on the host's router. If Transmission
+      runs behind a VPN (e.g. Gluetun), use the VPN provider's port-forwarding
+      feature instead of host port forwarding.
+
+  - id: ui-auth-locked-out
+    name: Web UI authentication locked out
+    symptoms:
+      - "401 Unauthorized"
+      - "Forgotten Transmission password"
+      - "Cannot log in"
+    trigger_conditions: []
+    steps:
+      - id: step-1
+        description: Stop the container to safely edit settings
+        type: confirm
+        command: ""
+      - id: step-2
+        description: Stop container
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-3
+      - id: step-3
+        description: Disable RPC auth in settings.json (will be re-enabled after recovery)
+        type: fix
+        command: "sed -i 's/\"rpc-authentication-required\": true/\"rpc-authentication-required\": false/' {config_path}/settings.json"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Start container
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+    resolution: |
+      RPC authentication has been temporarily disabled so you can reach the
+      web UI. Immediately re-enable it in Settings → Network with a new
+      password, then save and restart. Leaving auth disabled exposes the
+      web UI to anyone on the network.
+
+default_config:
+  compose_template: |
+    services:
+      transmission:
+        image: linuxserver/transmission:latest
+        container_name: transmission
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+          - ${WATCH_PATH:-./watch}:/watch
+        ports:
+          - "9091:9091/tcp"
+          - "51413:51413/tcp"
+          - "51413:51413/udp"
+  required_vars:
+    - name: PUID
+      description: User ID (match Sonarr/Radarr for import parity)
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads
+      default: "./downloads"
+    - name: WATCH_PATH
+      description: Host path for /watch (drop .torrent files here)
+      default: "./watch"
+  known_mounts:
+    - container_path: /config
+      purpose: Transmission settings and torrent state
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /downloads
+      purpose: Completed torrents
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /watch
+      purpose: Auto-load .torrent files dropped here
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Settings.json is edited in-place by the container at start/stop — never edit
+  while the container is running or the file will be overwritten.
+
+  For VPN-routed Transmission, use Gluetun (see gluetun.yaml) and reference the
+  Gluetun container with `network_mode: "service:gluetun"`. In that case do
+  NOT publish ports here — publish them on the Gluetun service instead.

@@ -1,0 +1,137 @@
+id: prowlarr
+name: Prowlarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/prowlarr"
+  port_hints: [9696]
+category: media
+description: Indexer aggregator and proxy that syncs torrent and usenet indexers to Sonarr, Radarr, Lidarr, and Readarr
+docs_url: https://hub.docker.com/r/linuxserver/prowlarr
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot create directory in /config"
+      - "Failed to write database"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config ownership corrected to {puid}:{pgid}. Prowlarr should now be
+      able to write its database.
+
+  - id: app-sync-failed
+    name: Cannot sync indexers to Sonarr/Radarr/Lidarr/Readarr
+    symptoms:
+      - "Application sync failed"
+      - "Unable to test application"
+      - "Connection to Sonarr failed"
+    trigger_conditions:
+      - log_pattern: "sync.*failed"
+      - log_pattern: "application.*test.*failed"
+    steps:
+      - id: step-1
+        description: Check Prowlarr can reach the downstream app host
+        type: check
+        command: "docker exec {container_name} curl -sS -m 5 -o /dev/null -w '%{http_code}' http://{downstream_host}:{downstream_port}/ 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Inform about Docker networking requirements
+        type: inform
+        command: ""
+    resolution: |
+      App sync requires that Prowlarr reach Sonarr/Radarr/etc by hostname. If
+      both run in Docker, put them on the same user-defined network and use
+      container names (e.g. http://sonarr:8989) — not localhost. Verify the
+      API key and base URL in Prowlarr Settings → Apps.
+
+  - id: indexer-test-failed
+    name: Individual indexer test fails
+    symptoms:
+      - "Indexer test failed"
+      - "Test was aborted due to an error"
+      - "401 unauthorized from indexer"
+    trigger_conditions:
+      - log_pattern: "indexer.*test.*failed"
+    steps:
+      - id: step-1
+        description: Surface the most recent indexer error from logs
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'indexer.*(error|failed)' | tail -5"
+        expected_output: ""
+      - id: step-2
+        description: Inform about common indexer test failure causes
+        type: inform
+        command: ""
+    resolution: |
+      Indexer test failures are usually wrong API keys, expired credentials,
+      or upstream rate-limiting. Re-enter the API key in the indexer's edit
+      panel, or wait and retry. If the indexer requires FlareSolverr for
+      Cloudflare bypass, ensure it is configured in Settings → Indexers.
+
+default_config:
+  compose_template: |
+    services:
+      prowlarr:
+        image: linuxserver/prowlarr:latest
+        container_name: prowlarr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "9696:9696/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: Prowlarr settings, indexer config, and database
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Prowlarr is a centralized indexer manager. Once indexers are configured here,
+  Prowlarr pushes them into Sonarr/Radarr/Lidarr/Readarr automatically — no
+  need to maintain indexers per-app.
+
+  For Cloudflare-protected indexers, pair Prowlarr with FlareSolverr (see
+  flaresolverr.yaml in this category) and point Prowlarr's FlareSolverr URL
+  at it under Settings → Indexers.

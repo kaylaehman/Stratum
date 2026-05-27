@@ -1,0 +1,157 @@
+id: bazarr
+name: Bazarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/bazarr"
+  port_hints: [6767]
+category: media
+description: Companion to Sonarr and Radarr that downloads and manages subtitles for media
+docs_url: https://hub.docker.com/r/linuxserver/bazarr
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot create directory in /config"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config ownership corrected to {puid}:{pgid}.
+
+  - id: cannot-write-subtitles
+    name: Subtitles downloaded but not saved next to media
+    symptoms:
+      - "permission denied.*tv"
+      - "permission denied.*movies"
+      - "Subtitle download succeeded but file not created"
+    trigger_conditions:
+      - log_pattern: "permission denied.*(tv|movies)"
+    steps:
+      - id: step-1
+        description: Check ownership of the TV library
+        type: check
+        command: "stat {tv_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Check ownership of the movies library
+        type: check
+        command: "stat {movies_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-3
+      - id: step-3
+        description: Recursively chown libraries to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {tv_path} {movies_path}"
+        requires_approval: true
+    resolution: |
+      Bazarr writes .srt files next to the media. The libraries were owned by
+      a different user. Ownership corrected to {puid}:{pgid} — subtitle saves
+      should now succeed.
+
+  - id: sonarr-radarr-connection-failed
+    name: Cannot connect to Sonarr or Radarr
+    symptoms:
+      - "Test failed: Sonarr"
+      - "Test failed: Radarr"
+      - "Unable to connect to upstream"
+    trigger_conditions:
+      - log_pattern: "test failed"
+    steps:
+      - id: step-1
+        description: Check Bazarr can reach Sonarr/Radarr by hostname
+        type: check
+        command: "docker exec {container_name} curl -sS -m 5 -o /dev/null -w '%{http_code}' http://{upstream_host}:{upstream_port}/ 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Inform about API key and base URL requirements
+        type: inform
+        command: ""
+    resolution: |
+      Verify in Bazarr Settings → Sonarr/Radarr that the host is reachable
+      (container name when on same Docker network, not localhost), the port
+      matches the upstream, and the API key is copy-pasted exactly from
+      Sonarr/Radarr Settings → General.
+
+default_config:
+  compose_template: |
+    services:
+      bazarr:
+        image: linuxserver/bazarr:latest
+        container_name: bazarr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${TV_PATH:-./tv}:/tv
+          - ${MOVIES_PATH:-./movies}:/movies
+        ports:
+          - "6767:6767/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID (match Sonarr/Radarr)
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config
+      default: "./config"
+    - name: TV_PATH
+      description: Host path for /tv (must match Sonarr's view)
+      default: "./tv"
+    - name: MOVIES_PATH
+      description: Host path for /movies (must match Radarr's view)
+      default: "./movies"
+  known_mounts:
+    - container_path: /config
+      purpose: Bazarr settings and database
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /tv
+      purpose: TV library — Bazarr writes .srt files alongside episodes
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /movies
+      purpose: Movies library — Bazarr writes .srt files alongside movies
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Path parity is essential: Bazarr's /tv must point at the same host directory
+  as Sonarr's /tv (likewise for /movies and Radarr). Otherwise Bazarr will be
+  unable to locate the media files Sonarr/Radarr report.
+
+  Subtitle providers: most providers require free account credentials entered
+  in Settings → Providers. OpenSubtitles in particular requires a registered
+  account and now uses the v1 REST API.

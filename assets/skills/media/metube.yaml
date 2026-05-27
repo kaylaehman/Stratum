@@ -1,0 +1,110 @@
+id: metube
+name: MeTube
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/alexta69/metube"
+  port_hints: [8081]
+category: media
+description: Web UI for yt-dlp — download videos from YouTube and other sites
+docs_url: https://github.com/alexta69/metube
+
+common_issues:
+  - id: permission-denied-downloads
+    name: Permission denied saving downloads
+    symptoms:
+      - "permission denied"
+      - "Could not save file"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of downloads directory
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Recursively chown to UID:GID
+        type: fix
+        command: "chown -R {uid}:{gid} {downloads_path}"
+        requires_approval: true
+    resolution: |
+      Downloads directory ownership corrected. MeTube runs as the UID set by
+      UID/GID env vars (default 1000:1000).
+
+  - id: yt-dlp-outdated
+    name: yt-dlp version too old for current YouTube
+    symptoms:
+      - "Unable to extract video data"
+      - "HTTP Error 403: Forbidden"
+      - "Signature extraction failed"
+    trigger_conditions:
+      - log_pattern: "extract.*failed"
+    steps:
+      - id: step-1
+        description: Check MeTube image age
+        type: check
+        command: "docker inspect {container_name} --format='{{.Created}}'"
+        expected_output: ""
+      - id: step-2
+        description: Pull the latest image to refresh yt-dlp
+        type: confirm
+        command: ""
+      - id: step-3
+        description: Pull latest image
+        type: fix
+        command: "docker pull ghcr.io/alexta69/metube:latest"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Recreate the container with the new image
+        type: fix
+        command: "docker stop {container_name} && docker rm {container_name} && docker compose up -d metube"
+        requires_approval: true
+    resolution: |
+      YouTube's extractor changes frequently; yt-dlp bundled in MeTube must be
+      reasonably fresh. Updating the MeTube image pulls a new yt-dlp build.
+      If extractor errors persist immediately after update, check the yt-dlp
+      project for an active issue.
+
+default_config:
+  compose_template: |
+    services:
+      metube:
+        image: ghcr.io/alexta69/metube:latest
+        container_name: metube
+        restart: unless-stopped
+        environment:
+          UID: ${UID:-1000}
+          GID: ${GID:-1000}
+          OUTPUT_TEMPLATE: "%(title)s.%(ext)s"
+        volumes:
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+        ports:
+          - "8081:8081/tcp"
+  required_vars:
+    - name: UID
+      description: User ID
+      default: "1000"
+    - name: GID
+      description: Group ID
+      default: "1000"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads
+      default: "./downloads"
+    - name: OUTPUT_TEMPLATE
+      description: yt-dlp output filename template
+      default: "%(title)s.%(ext)s"
+  known_mounts:
+    - container_path: /downloads
+      purpose: Downloaded videos
+      recommended_permissions: "755"
+      owner: "{UID}:{GID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  MeTube uses UID/GID env vars (not PUID/PGID). yt-dlp inside the container
+  is updated only when the image is rebuilt — keep the image fresh.

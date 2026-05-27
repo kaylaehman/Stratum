@@ -1,0 +1,140 @@
+id: tdarr
+name: Tdarr
+version: "1.0"
+container_match:
+  image_patterns:
+    - "haveagitgat/tdarr"
+    - "ghcr.io/haveagitgat/tdarr"
+  port_hints: [8265, 8266]
+category: media
+description: Distributed media transcoding system with web UI, plugin-driven workflows, and remote workers
+docs_url: https://docs.tdarr.io/
+
+common_issues:
+  - id: server-worker-mismatch
+    name: Tdarr workers cannot connect to server
+    symptoms:
+      - "Cannot reach Tdarr server"
+      - "Node disconnected"
+      - "Worker UI shows offline"
+    trigger_conditions:
+      - log_pattern: "cannot reach"
+    steps:
+      - id: step-1
+        description: Test reachability of the server from the worker
+        type: check
+        command: "docker exec {container_name} curl -sS -m 5 -o /dev/null -w '%{http_code}' http://{server_host}:8266 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Inform about server/worker networking
+        type: inform
+        command: ""
+    resolution: |
+      The worker (tdarr_node) connects to the server on port 8266 (not 8265
+      which is the web UI). On a shared Docker network, use the container
+      name. Across hosts, expose port 8266 on the server and point the worker
+      at the host IP.
+
+  - id: gpu-not-detected
+    name: GPU encoding unavailable inside container
+    symptoms:
+      - "No GPU detected"
+      - "Falling back to libx264"
+    trigger_conditions:
+      - log_pattern: "no.*gpu"
+    steps:
+      - id: step-1
+        description: Check GPU device passthrough
+        type: check
+        command: "docker exec {container_name} ls -la /dev/dri 2>&1"
+        expected_output: "renderD"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about device passthrough
+        type: inform
+        command: ""
+    resolution: |
+      For Intel/AMD: add `devices: [/dev/dri:/dev/dri]` to the compose file
+      for both the server and any worker that should encode. For NVIDIA: install
+      NVIDIA Container Toolkit on each host running tdarr_node and set
+      `runtime: nvidia` plus `NVIDIA_VISIBLE_DEVICES=all`.
+
+default_config:
+  compose_template: |
+    services:
+      tdarr:
+        image: haveagitgat/tdarr:latest
+        container_name: tdarr
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          serverIP: 0.0.0.0
+          serverPort: "8266"
+          webUIPort: "8265"
+          internalNode: "true"
+          nodeName: "MainNode"
+        volumes:
+          - ${SERVER_PATH:-./server}:/app/server
+          - ${CONFIG_PATH:-./config}:/app/configs
+          - ${LOGS_PATH:-./logs}:/app/logs
+          - ${MEDIA_PATH:-./media}:/media
+          - ${CACHE_PATH:-./cache}:/temp
+        ports:
+          - "8265:8265/tcp"
+          - "8266:8266/tcp"
+        devices:
+          - /dev/dri:/dev/dri
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: SERVER_PATH
+      description: Host path for /app/server (Tdarr server state)
+      default: "./server"
+    - name: CONFIG_PATH
+      description: Host path for /app/configs
+      default: "./config"
+    - name: LOGS_PATH
+      description: Host path for /app/logs
+      default: "./logs"
+    - name: MEDIA_PATH
+      description: Host path for /media library
+      default: "./media"
+    - name: CACHE_PATH
+      description: Host path for /temp (transcoding scratch)
+      default: "./cache"
+  known_mounts:
+    - container_path: /app/server
+      purpose: Tdarr server database
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /app/configs
+      purpose: Library and flow configuration
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /media
+      purpose: Media library (read/write — Tdarr replaces files)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /temp
+      purpose: Transcoding scratch space (large, prefer SSD)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Tdarr ships as a server + internal worker by default. To add remote workers,
+  use the separate tdarr_node image and point its serverIP at this server.
+
+  Tdarr replaces files in place. Always pilot on a small library before
+  pointing at production media.
