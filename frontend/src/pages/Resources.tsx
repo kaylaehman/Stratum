@@ -18,7 +18,7 @@ import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
 import { useContainerLifecycle } from '../lib/api/containers'
 import { useAddBookmark } from '../lib/api/bookmarks'
-import { useMe } from '../hooks/useMe'
+import { useCan } from '../lib/roles'
 import type { TreeSelection, ContainerStatus } from '../types/api'
 import type { ContainerAction } from '../lib/api/containers'
 
@@ -58,10 +58,10 @@ interface LifecycleControlsProps {
 }
 
 function LifecycleControls({ containerId, status }: LifecycleControlsProps) {
-  const { data: me } = useMe()
+  const { isOperator } = useCan()
   const { mutate, isPending, variables, error } = useContainerLifecycle()
 
-  if (me?.role !== 'admin') return null
+  if (!isOperator) return null
 
   const isRunning = status === 'running'
   const inFlight = (action: ContainerAction) =>

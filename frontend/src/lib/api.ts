@@ -110,3 +110,19 @@ export async function apiPost<T>(
 export async function apiGet<T>(url: string, options: RequestInit = {}): Promise<T> {
   return apiFetch<T>(url, { method: 'GET', ...options })
 }
+
+export async function apiPut<T>(
+  url: string,
+  body: unknown,
+  options: RequestInit = {},
+): Promise<T> {
+  return apiFetch<T>(url, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+    ...options,
+  })
+}
+
+export async function apiDelete<T>(url: string, options: RequestInit = {}): Promise<T> {
+  return apiFetch<T>(url, { method: 'DELETE', ...options })
+}

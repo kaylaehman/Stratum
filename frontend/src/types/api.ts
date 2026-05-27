@@ -1,8 +1,42 @@
+export type UserRole = 'viewer' | 'operator' | 'admin'
+
 export interface User {
   id: string
   username: string
   email?: string
-  role: string
+  role: UserRole
+  created_at?: string
+}
+
+// RBAC / User management types (Feature 30)
+
+export interface UsersListResponse {
+  users: User[]
+}
+
+export interface CreateUserRequest {
+  username: string
+  password: string
+  email?: string
+  role: UserRole
+}
+
+export interface UpdateRoleRequest {
+  role: UserRole
+}
+
+export interface SessionView {
+  id: string
+  user_agent?: string
+  ip?: string
+  created_at: string
+  expires_at: string
+  current: boolean
+  active: boolean
+}
+
+export interface SessionsListResponse {
+  sessions: SessionView[]
 }
 
 export interface LoginResponse {

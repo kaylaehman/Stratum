@@ -27,12 +27,14 @@ import {
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useBookmarks, useRemoveBookmark } from '../../lib/api/bookmarks'
+import { useCan } from '../../lib/roles'
 import type { BookmarkResourceType } from '../../types/api'
 
 interface NavItem {
   icon: React.ReactNode
   label: string
   to: string
+  adminOnly?: boolean
 }
 
 const navItems: NavItem[] = [
@@ -51,11 +53,11 @@ const navItems: NavItem[] = [
   { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
   { icon: <ArrowUpCircle size={14} />, label: 'Updates', to: '/updates' },
   { icon: <LayoutTemplate size={14} />, label: 'Templates', to: '/templates' },
-  { icon: <KeyRound size={14} />, label: 'Secrets', to: '/secrets' },
-  { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts' },
+  { icon: <KeyRound size={14} />, label: 'Secrets', to: '/secrets', adminOnly: true },
+  { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
   { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
   { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
-  { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications' },
+  { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications', adminOnly: true },
   { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },
 ]
 
@@ -150,6 +152,8 @@ function BookmarksSection() {
 }
 
 export function Sidebar() {
+  const { isAdmin } = useCan()
+
   return (
     <nav
       className="w-52 shrink-0 flex flex-col pt-2 pb-4"
@@ -164,24 +168,27 @@ export function Sidebar() {
         </span>
       </div>
       <ul className="flex flex-col gap-0.5 px-2">
-        {navItems.map((item) => (
-          <li key={item.to}>
-            <NavLink
-              to={item.to}
-              end={item.to === '/'}
-              className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-xs transition-colors"
-              style={({ isActive }) => ({
-                backgroundColor: isActive ? 'var(--accent-glow)' : 'transparent',
-                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                borderRadius: '3px',
-                textDecoration: 'none',
-              })}
-            >
-              {item.icon}
-              {item.label}
-            </NavLink>
-          </li>
-        ))}
+        {navItems.map((item) => {
+          if (item.adminOnly && !isAdmin) return null
+          return (
+            <li key={item.to}>
+              <NavLink
+                to={item.to}
+                end={item.to === '/'}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-xs transition-colors"
+                style={({ isActive }) => ({
+                  backgroundColor: isActive ? 'var(--accent-glow)' : 'transparent',
+                  color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+                  borderRadius: '3px',
+                  textDecoration: 'none',
+                })}
+              >
+                {item.icon}
+                {item.label}
+              </NavLink>
+            </li>
+          )
+        })}
       </ul>
       <BookmarksSection />
     </nav>
