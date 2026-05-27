@@ -5,6 +5,9 @@ import { FileBrowser } from '../components/filesystem/FileBrowser'
 import { UidGidVisualizer } from '../components/permissions/UidGidVisualizer'
 import { FileUidPanel } from '../components/permissions/FileUidPanel'
 import { DiagnosticCard } from '../components/permissions/DiagnosticCard'
+import { MountList } from '../components/containers/MountList'
+import { SharedMountsView } from '../components/containers/SharedMountsView'
+import { ReverseMountPanel } from '../components/containers/ReverseMountPanel'
 import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
@@ -111,6 +114,9 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
       <div style={{ maxWidth: '720px' }}>
         <UidGidVisualizer containerId={containerId} />
       </div>
+
+      {/* Bind mounts */}
+      <MountList containerId={containerId} nodeId={nodeId} />
 
       {/* File permission verdict */}
       <div
@@ -233,7 +239,7 @@ function DetailPane() {
   const node = data?.nodes.find((n) => n.id === selection.nodeId)
 
   return (
-    <div className="flex-1 overflow-auto p-5">
+    <div className="flex-1 overflow-auto p-5 flex flex-col gap-4">
       <div
         className="p-4"
         style={{
@@ -275,6 +281,13 @@ function DetailPane() {
           )
         })()}
       </div>
+
+      {selection.kind === 'node' && (
+        <>
+          <SharedMountsView nodeId={selection.nodeId} />
+          <ReverseMountPanel nodeId={selection.nodeId} />
+        </>
+      )}
     </div>
   )
 }

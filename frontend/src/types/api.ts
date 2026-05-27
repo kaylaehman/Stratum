@@ -388,6 +388,47 @@ export interface DiagnosticResult {
   fixes: SuggestedFix[]
 }
 
+// Bind Mount Tracer types
+
+export interface MountView {
+  container_id: string
+  type: 'bind' | 'volume' | string
+  source: string
+  destination: string
+  volume_name?: string
+  rw: boolean
+  shared: boolean
+  traceable: boolean
+}
+
+export interface MountsResponse {
+  mounts: MountView[]
+}
+
+export type MountRelation = 'equal' | 'a_parent_of_b' | 'b_parent_of_a'
+
+export interface ReverseHit {
+  container_id: string
+  source: string
+  destination: string
+  rw: boolean
+  relation: MountRelation
+}
+
+export interface ReverseMountsResponse {
+  containers: ReverseHit[]
+}
+
+export interface SharedEntry {
+  kind: 'bind' | 'volume'
+  key: string
+  container_ids: string[]
+}
+
+export interface SharedMountsResponse {
+  shared: SharedEntry[]
+}
+
 // Log streaming types
 
 export type LogStream = 'stdout' | 'stderr'
