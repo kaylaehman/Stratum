@@ -184,6 +184,9 @@ func (h *Handlers) ContainerSecurity(w http.ResponseWriter, r *http.Request) {
 // SecurityBadges returns a sparse {containerID: true} overlay of containers with
 // an unacknowledged flag (the SP2 tree merges this client-side). Fast: no rescan.
 func (h *Handlers) SecurityBadges(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
 	rows, err := h.Store.ListContainerSecurity(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
