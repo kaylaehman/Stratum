@@ -29,6 +29,12 @@ type Entry struct {
 	TargetID   *string
 	Detail     any
 	Result     string
+
+	// Suppressed, when set by a handler, tells the activity middleware NOT to
+	// write its deferred row. Streaming handlers (e.g. file upload) set this and
+	// call Append directly at the point the outcome is known, avoiding a double
+	// entry (foundation design §5.4).
+	Suppressed bool
 }
 
 // Store is the append-only activity writer/reader.
