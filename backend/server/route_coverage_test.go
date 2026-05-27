@@ -45,6 +45,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/logs/subscribe":             true,
 		"POST /api/logs/unsubscribe":           true,
 		"POST /api/webhooks/{id}/test":         true, // sends a test message; no Stratum state change
+		"POST /api/templates/{id}/render":      true, // pure string substitution; no state change
 	}
 
 	// Per-user preference mutations (bookmarks): user-owned state, not
@@ -84,6 +85,10 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"PUT /api/webhooks/{id}":                true,
 		"DELETE /api/webhooks/{id}":             true,
 		"POST /api/updates/rescan":              true,
+		"POST /api/templates":                   true,
+		"PUT /api/templates/{id}":               true,
+		"DELETE /api/templates/{id}":            true,
+		"POST /api/templates/{id}/deploy":       true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

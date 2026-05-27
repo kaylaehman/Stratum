@@ -40,6 +40,11 @@ const (
 	ActionWebhookDelete = "webhook.delete"
 
 	ActionUpdatesRescan = "updates.rescan"
+
+	ActionTemplateCreate = "template.create"
+	ActionTemplateUpdate = "template.update"
+	ActionTemplateDelete = "template.delete"
+	ActionTemplateDeploy = "template.deploy"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -52,6 +57,7 @@ const (
 	TargetUser            = "user"
 	TargetVolume          = "volume"
 	TargetWebhook         = "webhook"
+	TargetTemplate        = "template"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -98,6 +104,11 @@ var actionCatalog = []ActionInfo{
 	{ActionWebhookDelete, "Notification webhook deleted", "webhook", TargetWebhook},
 
 	{ActionUpdatesRescan, "Image updates re-checked", "updates", TargetContainer},
+
+	{ActionTemplateCreate, "Template created", "template", TargetTemplate},
+	{ActionTemplateUpdate, "Template updated", "template", TargetTemplate},
+	{ActionTemplateDelete, "Template deleted", "template", TargetTemplate},
+	{ActionTemplateDeploy, "Template deployed", "template", TargetTemplate},
 }
 
 var actionByName = func() map[string]ActionInfo {

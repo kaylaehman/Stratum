@@ -189,6 +189,34 @@ type ImageUpdateRow struct {
 	CheckedAt     time.Time
 }
 
+// TemplateVar is one substitution variable in a template (Feature 14).
+type TemplateVar struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Default     string `json:"default"`
+}
+
+// Template is a saved, versioned Docker Compose stack (Feature 14).
+type Template struct {
+	ID          string
+	Name        string
+	Description string
+	Tags        []string
+	ComposeYAML string
+	Variables   []TemplateVar
+	Version     int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// TemplateVersion is an immutable snapshot of a template at one version.
+type TemplateVersion struct {
+	Version     int           `json:"version"`
+	ComposeYAML string        `json:"compose_yaml"`
+	Variables   []TemplateVar `json:"variables"`
+	CreatedAt   time.Time     `json:"created_at"`
+}
+
 // WebhookConfig is a Slack/Discord notification target (Feature 26).
 type WebhookConfig struct {
 	ID        string
@@ -327,6 +355,15 @@ type Store interface {
 	// Image updates (Feature 15, detection)
 	UpsertImageUpdate(ctx context.Context, row ImageUpdateRow) error
 	ListImageUpdates(ctx context.Context) ([]ImageUpdateRow, error)
+
+	// Templates (Feature 14)
+	CreateTemplate(ctx context.Context, t Template) error
+	ListTemplates(ctx context.Context) ([]Template, error)
+	GetTemplate(ctx context.Context, id string) (Template, error)
+	UpdateTemplate(ctx context.Context, t Template) error
+	DeleteTemplate(ctx context.Context, id string) error
+	AddTemplateVersion(ctx context.Context, id string, v TemplateVersion) error
+	ListTemplateVersions(ctx context.Context, id string) ([]TemplateVersion, error)
 
 	// Notification webhooks (Feature 26)
 	CreateWebhook(ctx context.Context, c WebhookConfig) error
