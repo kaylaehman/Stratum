@@ -178,6 +178,30 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
+// ImageScanRow is a cached CVE scan summary for an image digest (Feature 20).
+type ImageScanRow struct {
+	ImageDigest string
+	Image       string
+	ScannedAt   time.Time
+	Critical    int
+	High        int
+	Medium      int
+	Low         int
+	Unknown     int
+}
+
+// CVEResultRow is one vulnerability for a scanned image digest.
+type CVEResultRow struct {
+	ID               string
+	ImageDigest      string
+	CVEID            string
+	Severity         string
+	Package          string
+	InstalledVersion string
+	FixedVersion     string
+	Title            string
+}
+
 // ImageUpdateRow is a container's cached image update-availability (Feature 15).
 type ImageUpdateRow struct {
 	ContainerID   string
@@ -374,6 +398,13 @@ type Store interface {
 	// Image updates (Feature 15, detection)
 	UpsertImageUpdate(ctx context.Context, row ImageUpdateRow) error
 	ListImageUpdates(ctx context.Context) ([]ImageUpdateRow, error)
+
+	// CVE scans (Feature 20)
+	UpsertImageScan(ctx context.Context, row ImageScanRow) error
+	ListImageScans(ctx context.Context) ([]ImageScanRow, error)
+	GetImageScan(ctx context.Context, imageDigest string) (ImageScanRow, error)
+	ReplaceCVEResults(ctx context.Context, imageDigest string, rows []CVEResultRow) error
+	ListCVEResults(ctx context.Context, imageDigest string) ([]CVEResultRow, error)
 
 	// Secrets vault (Feature 12)
 	CreateSecretGroup(ctx context.Context, g SecretGroup) error

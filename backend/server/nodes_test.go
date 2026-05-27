@@ -26,6 +26,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/depgraph"
+	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
@@ -90,6 +91,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Updater:        updates.New(store, updates.ClientProvider(noDocker), time.Minute),
 		Secrets:        secrets.New(store, cipher),
 		Scheduler:      scheduler.New(filesSvc.Exec),
+		CVE:            cve.New(store, cve.ClientProvider(noDocker), cve.NewScanner()),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

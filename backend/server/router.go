@@ -82,6 +82,10 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/containers/security-badges", d.Handlers.SecurityBadges)
 			r.Get("/containers/{id}/security", d.Handlers.ContainerSecurity)
 
+			// Image CVE scans (admin-gated; on-demand scan is audited below).
+			r.Get("/security/cve", d.Handlers.CVEScans)
+			r.Get("/security/cve/{digest}", d.Handlers.CVEDetail)
+
 			// Volume health (read-only; cross-node).
 			r.Get("/volumes", d.Handlers.ListVolumes)
 
@@ -175,6 +179,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/secrets/{id}/reveal", d.Handlers.RevealSecret)
 			audited.Post("/nodes/{id}/sshkeys/delete", d.Handlers.DeleteSSHKey)
 			audited.Put("/nodes/{id}/cron", d.Handlers.SetCron)
+			audited.Post("/containers/{id}/cve-scan", d.Handlers.CVEScanContainer)
 		})
 	})
 

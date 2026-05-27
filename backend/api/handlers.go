@@ -8,6 +8,7 @@ import (
 
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/auth"
+	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/fs"
@@ -48,6 +49,7 @@ type Handlers struct {
 	Updater        *updates.Service
 	Secrets        *secrets.Service
 	Scheduler      *scheduler.Service
+	CVE            *cve.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

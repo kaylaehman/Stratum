@@ -56,6 +56,8 @@ const (
 	ActionSSHKeyDelete = "sshkey.delete"
 
 	ActionCronSet = "cron.set"
+
+	ActionCVEScan = "cve.scan"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -132,6 +134,8 @@ var actionCatalog = []ActionInfo{
 	{ActionSSHKeyDelete, "SSH key removed", "sshkey", TargetSSHKey},
 
 	{ActionCronSet, "Crontab updated", "cron", TargetNode},
+
+	{ActionCVEScan, "Image CVE scan", "cve", TargetContainer},
 }
 
 var actionByName = func() map[string]ActionInfo {

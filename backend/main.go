@@ -35,6 +35,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/depgraph"
+	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
@@ -122,6 +123,7 @@ func run(logger *slog.Logger) error {
 	secretSvc := secrets.New(store, cipher)
 	filesSvc := fs.NewService(store, cipher, uploadMaxBytes())
 	schedulerSvc := scheduler.New(filesSvc.Exec)
+	cveSvc := cve.New(store, cve.ClientProvider(dockerForNode), cve.NewScanner())
 
 	handlers := &api.Handlers{
 		Store:          store,
@@ -143,6 +145,7 @@ func run(logger *slog.Logger) error {
 		Updater:        updateSvc,
 		Secrets:        secretSvc,
 		Scheduler:      schedulerSvc,
+		CVE:            cveSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
