@@ -62,6 +62,31 @@ func (s *Service) ResolveUsers(ctx context.Context, nodeID string) (*permissions
 	return s.userdb.Resolve(ctx, nodeID)
 }
 
+// Exec runs a command on a node over SSH (every arg shell-quoted by the ssh
+// package). Used by the diagnostic getfacl path. Callers pass "--" before path
+// arguments.
+func (s *Service) Exec(ctx context.Context, nodeID, cmd string, args ...string) (string, error) {
+	node, err := s.store.GetNode(ctx, nodeID)
+	if err != nil {
+		return "", err
+	}
+	creds, err := nodes.OpenCredentials(s.cipher, node.CredentialsEncrypted)
+	if err != nil {
+		return "", err
+	}
+	client, err := appssh.Dial(ctx, node.Host, node.Port, appssh.Credentials{
+		User:          creds.SSHUser,
+		Password:      creds.SSHPassword,
+		PrivateKeyPEM: creds.SSHPrivateKey,
+		Passphrase:    creds.SSHPassphrase,
+	}, node.SSHHostKey)
+	if err != nil {
+		return "", err
+	}
+	defer client.Close()
+	return appssh.Run(ctx, client, cmd, args...)
+}
+
 // StatEntry returns a single file's Entry (owner/group resolved) for SP4's
 // per-file access analysis.
 func (s *Service) StatEntry(ctx context.Context, nodeID, p string) (Entry, error) {

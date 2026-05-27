@@ -42,3 +42,13 @@ func TestFileUIDRequiresAuth(t *testing.T) {
 		t.Fatalf("file-uid without auth = %d, want 401", resp.StatusCode)
 	}
 }
+
+func TestDiagnosticUnknownContainer404(t *testing.T) {
+	srv, token := newNodeTestServer(t)
+	c := &http.Client{}
+	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/containers/nope/diagnostic", token, map[string]string{"host_path": "/etc/hosts"}))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("diagnostic unknown container = %d, want 404", resp.StatusCode)
+	}
+}

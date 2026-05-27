@@ -60,6 +60,7 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/containers/{id}/uid-analysis.csv", d.Handlers.UIDAnalysisCSV)
 			r.Get("/containers/{id}/uid-analysis.json", d.Handlers.UIDAnalysisJSON)
 			r.Get("/containers/{id}/file-uid", d.Handlers.FileUID)
+			r.Post("/containers/{id}/diagnostic", d.Handlers.Diagnostic)
 
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
