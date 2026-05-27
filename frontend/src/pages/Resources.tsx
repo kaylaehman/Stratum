@@ -4,6 +4,7 @@ import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
 import { UidGidVisualizer } from '../components/permissions/UidGidVisualizer'
 import { FileUidPanel } from '../components/permissions/FileUidPanel'
+import { DiagnosticCard } from '../components/permissions/DiagnosticCard'
 import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
@@ -44,6 +45,7 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
   const { data: inspect } = useContainerInspect(containerId)
   const [hostPath, setHostPath] = useState('')
   const [submittedPath, setSubmittedPath] = useState('')
+  const [showDiagnostic, setShowDiagnostic] = useState(false)
 
   const node = tree?.nodes.find((n) => n.id === nodeId)
   const c = node?.containers.find((x) => x.id === containerId)
@@ -127,7 +129,9 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            setSubmittedPath(hostPath.trim())
+            const trimmed = hostPath.trim()
+            setSubmittedPath(trimmed)
+            setShowDiagnostic(false)
           }}
           className="flex items-center gap-2"
         >
@@ -162,6 +166,27 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
         </form>
         {submittedPath && (
           <FileUidPanel containerId={containerId} hostPath={submittedPath} />
+        )}
+        {submittedPath && (
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setShowDiagnostic((v) => !v)}
+              className="text-xs px-3 py-1.5 self-start"
+              style={{
+                background: showDiagnostic ? 'rgba(232,64,64,0.10)' : 'var(--bg-elevated)',
+                border: `1px solid ${showDiagnostic ? 'var(--status-error)' : 'var(--border-default)'}`,
+                color: showDiagnostic ? 'var(--status-error)' : 'var(--text-secondary)',
+                borderRadius: '3px',
+                cursor: 'pointer',
+              }}
+            >
+              {showDiagnostic ? 'Hide diagnostic' : 'Why is this broken?'}
+            </button>
+            {showDiagnostic && (
+              <DiagnosticCard containerId={containerId} hostPath={submittedPath} />
+            )}
+          </div>
         )}
       </div>
     </div>

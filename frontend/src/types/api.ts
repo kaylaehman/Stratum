@@ -325,3 +325,65 @@ export interface FileVerdict {
   exec_granted: boolean
   reason: string
 }
+
+// Diagnostic ("Why Is This Broken?") types
+
+export type DiagnosticStepStatus = 'ok' | 'warn' | 'bad'
+
+export interface DiagnosticStep {
+  kind: string
+  label: string
+  detail: string
+  status: DiagnosticStepStatus
+}
+
+export interface SuggestedFix {
+  command: string
+  rationale: string
+  warning?: string
+}
+
+export interface DiagnosticBindMount {
+  exposed: boolean
+  container_path?: string
+  rw: boolean
+  via_source?: string
+  via_destination?: string
+  is_named_volume: boolean
+  volume_name?: string
+}
+
+export interface DiagnosticVerdict {
+  access_granted: boolean
+  summary: string
+}
+
+export interface DiagnosticAcl {
+  available: boolean
+  entries?: string[]
+}
+
+export interface DiagnosticEffectiveAccess {
+  read: boolean
+  write: boolean
+  exec: boolean
+  decided_by: string
+  category: string
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export interface DiagnosticResult {
+  host_path: string
+  file_uid: number
+  file_gid: number
+  file_mode: string
+  run_uid: number
+  run_gid: number
+  is_root: boolean
+  bind_mount: DiagnosticBindMount
+  verdict: DiagnosticVerdict
+  acl: DiagnosticAcl
+  effective_access: DiagnosticEffectiveAccess
+  steps: DiagnosticStep[]
+  fixes: SuggestedFix[]
+}
