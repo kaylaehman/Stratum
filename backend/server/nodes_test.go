@@ -25,6 +25,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
@@ -79,6 +80,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Security:       security.NewScanner(store, security.ClientProvider(noDocker), ctrUsers, time.Minute),
 		Volumes:        volumes.New(store, volumes.ClientProvider(noDocker), mountIdx, 0),
 		Topology:       topology.New(store, topology.ClientProvider(noDocker)),
+		DepGraph:       depgraph.New(store, depgraph.ClientProvider(noDocker), mountIdx),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

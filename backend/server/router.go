@@ -92,6 +92,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Network topology (read-only; per node).
 			r.Get("/nodes/{id}/topology", d.Handlers.NodeTopology)
 
+			// Dependency graph (read-only; per node).
+			r.Get("/nodes/{id}/depgraph", d.Handlers.NodeDependencyGraph)
+
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
