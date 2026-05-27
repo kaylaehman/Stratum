@@ -257,6 +257,7 @@ type Store interface {
 	// Volume health (Feature 7) — size-trend samples
 	InsertVolumeSample(ctx context.Context, s VolumeSample) error
 	ListVolumeSamplesByNode(ctx context.Context, nodeID string) ([]VolumeSample, error)
+	PruneVolumeSamplesBefore(ctx context.Context, cutoff time.Time) (int64, error)
 
 	Close() error
 }

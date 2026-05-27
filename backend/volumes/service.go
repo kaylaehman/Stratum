@@ -188,7 +188,12 @@ func (s *Service) Sample(ctx context.Context, nodeID string) error {
 	return nil
 }
 
-// SampleAll records a size sample for every volume on every docker-capable node.
+// sampleRetention bounds how long size-trend samples are kept. The table is
+// regenerable (not an audit trail), so old points are pruned to cap growth.
+const sampleRetention = 90 * 24 * time.Hour
+
+// SampleAll records a size sample for every volume on every docker-capable node,
+// then prunes samples older than the retention window.
 func (s *Service) SampleAll(ctx context.Context) {
 	nodes, err := s.store.ListNodes(ctx)
 	if err != nil {
@@ -201,6 +206,7 @@ func (s *Service) SampleAll(ctx context.Context) {
 		}
 		_ = s.Sample(ctx, n.ID)
 	}
+	_, _ = s.store.PruneVolumeSamplesBefore(ctx, time.Now().Add(-sampleRetention))
 }
 
 // RunDailySampler samples once immediately, then every interval, until ctx is

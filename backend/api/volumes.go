@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -10,6 +12,10 @@ import (
 	"github.com/kaylaehman/stratum/backend/capabilities"
 	"github.com/kaylaehman/stratum/backend/volumes"
 )
+
+// volumeListNodeTimeout bounds a single node's volume listing so one slow daemon
+// (DiskUsage computes du and can be slow) cannot stall the whole cross-node list.
+const volumeListNodeTimeout = 15 * time.Second
 
 // ListVolumes lists volumes across all docker-capable nodes with health status.
 // Read-only; available to any authenticated user.
@@ -26,9 +32,12 @@ func (h *Handlers) ListVolumes(w http.ResponseWriter, r *http.Request) {
 		if !caps.Docker {
 			continue
 		}
-		vols, err := h.Volumes.ListForNode(ctx, n.ID)
+		// Bound each node so a slow/hung daemon can't stall the whole response.
+		nodeCtx, cancel := context.WithTimeout(ctx, volumeListNodeTimeout)
+		vols, err := h.Volumes.ListForNode(nodeCtx, n.ID)
+		cancel()
 		if err != nil {
-			continue // a single unreachable node must not fail the whole list
+			continue // a single unreachable/slow node must not fail the whole list
 		}
 		out = append(out, vols...)
 	}

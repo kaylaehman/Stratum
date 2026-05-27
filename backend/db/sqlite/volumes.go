@@ -22,6 +22,18 @@ func (s *Store) InsertVolumeSample(ctx context.Context, v appdb.VolumeSample) er
 	return nil
 }
 
+// PruneVolumeSamplesBefore deletes size-trend samples older than cutoff, bounding
+// growth of the (non-audit, regenerable) volume_samples table. Returns the number
+// of rows removed.
+func (s *Store) PruneVolumeSamplesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM volume_samples WHERE sampled_at < ?`, tsText(cutoff))
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: prune volume samples: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 func (s *Store) ListVolumeSamplesByNode(ctx context.Context, nodeID string) ([]appdb.VolumeSample, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, node_id, volume_name, size_bytes, ref_count, sampled_at
