@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Play, Square, RotateCw, Loader } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
@@ -11,7 +12,10 @@ import { ReverseMountPanel } from '../components/containers/ReverseMountPanel'
 import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
-import type { TreeSelection } from '../types/api'
+import { useContainerLifecycle } from '../lib/api/containers'
+import { useMe } from '../hooks/useMe'
+import type { TreeSelection, ContainerStatus } from '../types/api'
+import type { ContainerAction } from '../lib/api/containers'
 
 function selectionTitle(sel: TreeSelection): string {
   switch (sel.kind) {
@@ -39,6 +43,74 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
       >
         {value}
       </span>
+    </div>
+  )
+}
+
+interface LifecycleControlsProps {
+  containerId: string
+  status: ContainerStatus
+}
+
+function LifecycleControls({ containerId, status }: LifecycleControlsProps) {
+  const { data: me } = useMe()
+  const { mutate, isPending, variables, error } = useContainerLifecycle()
+
+  if (me?.role !== 'admin') return null
+
+  const isRunning = status === 'running'
+  const inFlight = (action: ContainerAction) =>
+    isPending && variables?.containerId === containerId && variables?.action === action
+
+  function btn(
+    action: ContainerAction,
+    icon: React.ReactNode,
+    label: string,
+    disabled: boolean,
+  ) {
+    const loading = inFlight(action)
+    return (
+      <button
+        key={action}
+        type="button"
+        disabled={disabled || isPending}
+        onClick={() => mutate({ containerId, action })}
+        title={label}
+        className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+        style={{
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          color: disabled || isPending ? 'var(--text-muted)' : 'var(--text-secondary)',
+          borderRadius: '3px',
+          cursor: disabled || isPending ? 'not-allowed' : 'pointer',
+          opacity: disabled || isPending ? 0.5 : 1,
+        }}
+      >
+        {loading ? <Loader size={12} className="animate-spin" /> : icon}
+        {label}
+      </button>
+    )
+  }
+
+  const errorMsg = error
+    ? (error as { body?: { error?: string } }).body?.error === 'node_unreachable'
+      ? 'Action failed — node unreachable'
+      : 'Action failed — lifecycle error'
+    : null
+
+  return (
+    <div className="flex flex-col gap-1.5 mt-2 pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Controls</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        {btn('start', <Play size={12} />, 'Start', isRunning)}
+        {btn('stop', <Square size={12} />, 'Stop', !isRunning)}
+        {btn('restart', <RotateCw size={12} />, 'Restart', !isRunning)}
+      </div>
+      {errorMsg && (
+        <span className="font-mono text-xs mt-0.5" style={{ color: 'var(--status-error)' }}>
+          {errorMsg}
+        </span>
+      )}
     </div>
   )
 }
@@ -78,6 +150,7 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
             <Row label="Status" value={c.status} mono />
             {c.compose_project && <Row label="Compose project" value={c.compose_project} mono />}
             <Row label="Docker ID" value={c.docker_id.slice(0, 12)} mono />
+            <LifecycleControls containerId={containerId} status={c.status} />
           </div>
         )}
         {inspect && (
