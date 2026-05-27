@@ -28,6 +28,7 @@ import {
 import { useCan } from '../lib/roles'
 import { ApiError } from '../lib/api'
 import type { TwoFASetupResponse, UserRole } from '../types/api'
+import { AISettingsSection } from '../components/ai/AISettingsSection'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1047,6 +1048,8 @@ export default function Settings() {
         <SessionsSection />
 
         {isAdmin && <UsersSection />}
+
+        {isAdmin && <AISettingsSection />}
       </div>
     </div>
   )

@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { Topbar } from './Topbar'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from '../search/CommandPalette'
+import { AIAssistantPanel } from '../ai/AIAssistantPanel'
 import { useAuthStore } from '../../store/auth'
+import { useCan } from '../../lib/roles'
 import { apiPost } from '../../lib/api'
 
 interface AppShellProps {
@@ -15,6 +17,7 @@ interface AppShellProps {
 export function AppShell({ children, treeSlot }: AppShellProps) {
   const navigate = useNavigate()
   const { user, clearAuth } = useAuthStore()
+  const { isOperator } = useCan()
   const [searchOpen, setSearchOpen] = useState(false)
 
   // Global Ctrl+K / Cmd+K shortcut
@@ -67,6 +70,7 @@ export function AppShell({ children, treeSlot }: AppShellProps) {
         </main>
       </div>
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {isOperator && <AIAssistantPanel />}
     </div>
   )
 }

@@ -1157,6 +1157,42 @@ export interface RollbackResponse {
   new_container_id: string
 }
 
+// AI Assistant types (Feature 31)
+
+export type AIProvider = 'ollama' | 'claude' | ''
+
+export interface AIConfig {
+  provider: AIProvider
+  ollama_base_url: string
+  ollama_model: string
+  claude_model: string
+  has_api_key: boolean
+  configured: boolean
+}
+
+export interface SetAIConfigRequest {
+  provider: AIProvider
+  ollama_base_url?: string
+  ollama_model?: string
+  claude_model?: string
+  api_key?: string
+}
+
+export type AITask = 'explain_log' | 'diagnose' | 'explain_config' | 'suggest_fix' | ''
+
+export interface AIAskRequest {
+  task?: AITask
+  prompt: string
+  context?: string
+}
+
+export interface AIAskResponse {
+  answer: string
+  provider: string
+  input_tokens: number
+  output_tokens: number
+}
+
 // Two-Factor Auth (TOTP) types (Feature 7 Phase 2)
 
 export interface TwoFAStatus {
