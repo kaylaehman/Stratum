@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,11 +31,24 @@ type ClientProvider func(ctx context.Context, nodeID string) (*docker.Client, er
 type Service struct {
 	store    db.Store
 	provider ClientProvider
+
+	// locks serialise all recreate/snapshot work per container (keyed by
+	// node/name) so two concurrent updates can't race the rename→recreate
+	// choreography (e.g. clobber each other's backup). Single-process backend.
+	locks sync.Map // "nodeID/name" -> *sync.Mutex
 }
 
 // New wires the store + docker client provider.
 func New(store db.Store, provider ClientProvider) *Service {
 	return &Service{store: store, provider: provider}
+}
+
+// lock serialises operations for one container and returns the unlock func.
+func (s *Service) lock(nodeID, name string) func() {
+	mui, _ := s.locks.LoadOrStore(nodeID+"/"+name, &sync.Mutex{})
+	mu := mui.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // List returns a container's rollback snapshots (newest first). The container is
@@ -55,6 +69,8 @@ func (s *Service) Snapshot(ctx context.Context, containerID, reason string) (db.
 	if err != nil {
 		return db.Snapshot{}, err
 	}
+	unlock := s.lock(ctr.NodeID, ctr.Name)
+	defer unlock()
 	return s.snapshotContainer(ctx, ctr, client, reason)
 }
 
@@ -66,18 +82,26 @@ func (s *Service) Update(ctx context.Context, containerID string) (string, error
 	if err != nil {
 		return "", err
 	}
+	unlock := s.lock(ctr.NodeID, ctr.Name)
+	defer unlock()
+
 	spec, err := client.CaptureSpec(ctx, ctr.DockerID)
 	if err != nil {
 		return "", fmt.Errorf("capture spec: %w", err)
-	}
-	if _, err := s.snapshotContainer(ctx, ctr, client, "pre-update"); err != nil {
-		return "", fmt.Errorf("snapshot: %w", err)
 	}
 	ref := spec.Config.Image
 	if ref == "" {
 		return "", fmt.Errorf("container has no image reference to pull")
 	}
+	snap, err := s.snapshotContainer(ctx, ctr, client, "pre-update")
+	if err != nil {
+		return "", fmt.Errorf("snapshot: %w", err)
+	}
+	// If the pull fails, nothing destructive happened yet — drop the pre-update
+	// snapshot so repeated failed updates don't evict real checkpoints. (If the
+	// recreate itself fails below, we KEEP the snapshot: it's the recovery path.)
 	if err := client.PullImage(ctx, ref); err != nil {
+		_ = s.store.DeleteSnapshot(ctx, snap.ID)
 		return "", fmt.Errorf("pull %s: %w", ref, err)
 	}
 	newID, err := client.ApplySpec(ctx, spec)
@@ -87,14 +111,23 @@ func (s *Service) Update(ctx context.Context, containerID string) (string, error
 	return newID, nil
 }
 
+// ErrSnapshotMismatch is returned when a snapshot does not belong to the
+// container the rollback was requested against.
+var ErrSnapshotMismatch = fmt.Errorf("recreate: snapshot does not belong to this container")
+
 // Rollback restores a container from a snapshot: it pins the image to the
-// snapshot's digest (when known), pulls it, and recreates. The container's
-// CURRENT state is snapshotted first (best-effort) so a rollback is itself
-// reversible. Returns the new docker container id.
-func (s *Service) Rollback(ctx context.Context, snapshotID string) (string, error) {
+// snapshot's digest (when known), pulls it, and recreates. wantNodeID/wantName
+// identify the container the caller is rolling back; the snapshot MUST belong to
+// it (guards against replaying one container's spec onto another). The
+// container's CURRENT state is snapshotted first (best-effort) so a rollback is
+// itself reversible. Returns the new docker container id.
+func (s *Service) Rollback(ctx context.Context, snapshotID, wantNodeID, wantName string) (string, error) {
 	snap, err := s.store.GetSnapshot(ctx, snapshotID)
 	if err != nil {
 		return "", err
+	}
+	if snap.NodeID != wantNodeID || snap.ContainerName != wantName {
+		return "", ErrSnapshotMismatch
 	}
 	client, err := s.provider(ctx, snap.NodeID)
 	if err != nil {
@@ -108,11 +141,19 @@ func (s *Service) Rollback(ctx context.Context, snapshotID string) (string, erro
 		return "", fmt.Errorf("snapshot spec is incomplete")
 	}
 
+	unlock := s.lock(snap.NodeID, snap.ContainerName)
+	defer unlock()
+
 	// Snapshot the current container (by name) before clobbering it, so the
 	// rollback can itself be undone. Best-effort: the current container may be
-	// broken/absent, which is exactly why we're rolling back.
+	// broken/absent, which is exactly why we're rolling back. Use the CURRENT
+	// container's own image ref (cur.Config.Image), not the rollback target's.
 	if cur, cerr := client.CaptureSpec(ctx, snap.ContainerName); cerr == nil {
-		s.storeSpec(ctx, db.Container{NodeID: snap.NodeID, Name: snap.ContainerName, Image: spec.Config.Image}, cur, "", "pre-rollback")
+		curImage := snap.ContainerName
+		if cur.Config != nil {
+			curImage = cur.Config.Image
+		}
+		s.storeSpec(ctx, db.Container{NodeID: snap.NodeID, Name: snap.ContainerName, Image: curImage}, cur, "", "pre-rollback")
 	}
 
 	// Pin the image to the snapshotted digest when we have one, so we restore the

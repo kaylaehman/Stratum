@@ -24,6 +24,16 @@ type RecreateSpec struct {
 }
 
 // CaptureSpec inspects a container and returns everything needed to recreate it.
+//
+// Fidelity caveat: this is an inspect-and-replay recreate, not a compose redeploy.
+// Named volumes and bind mounts (the data that matters) are preserved because
+// ApplySpec never removes volumes. However, ANONYMOUS volumes (declared via
+// VOLUME in the image with no host binding) are tied to the old container id and
+// are discarded when the backup is removed — the recreated container gets a
+// fresh empty anonymous volume. Likewise, a few HostConfig fields captured from a
+// running container (resolved device majors, deprecated MacAddress) replay
+// verbatim and could, on an upgraded host, cause ContainerCreate to reject the
+// spec (which ApplySpec surfaces as an error with the original left intact).
 func (c *Client) CaptureSpec(ctx context.Context, id string) (*RecreateSpec, error) {
 	r, err := c.cli.ContainerInspect(ctx, id)
 	if err != nil {
@@ -93,7 +103,10 @@ func (c *Client) ApplySpec(ctx context.Context, spec *RecreateSpec) (newID strin
 		return "", errors.New("docker: invalid recreate spec")
 	}
 
-	backupName := fmt.Sprintf("%s__stratum_bak_%d", spec.Name, time.Now().Unix())
+	// UnixNano (not Unix seconds) so two recreates of the same container racing
+	// within the same second can't mint the same backup name. The recreate
+	// service also serialises per-container, but this is cheap defence-in-depth.
+	backupName := fmt.Sprintf("%s__stratum_bak_%d", spec.Name, time.Now().UnixNano())
 	var (
 		backupID      string
 		backupRunning bool
@@ -108,13 +121,17 @@ func (c *Client) ApplySpec(ctx context.Context, spec *RecreateSpec) (newID strin
 		}
 	}
 
-	// Roll back to the backup on any failure past this point.
+	// Roll back to the backup on any failure past this point. If the rename-back
+	// ALSO fails, the original is stranded under the backup name and needs manual
+	// recovery — surface that in the error so the audit log/operator sees it.
 	restore := func(cause error) (string, error) {
 		if newID != "" {
 			_ = c.cli.ContainerRemove(ctx, newID, container.RemoveOptions{Force: true})
 		}
 		if backupID != "" {
-			if rerr := c.cli.ContainerRename(ctx, backupID, spec.Name); rerr == nil && backupRunning {
+			if rerr := c.cli.ContainerRename(ctx, backupID, spec.Name); rerr != nil {
+				return "", fmt.Errorf("%w; AND restore failed — original container is stranded as %q: %v", cause, backupName, rerr)
+			} else if backupRunning {
 				_ = c.cli.ContainerStart(ctx, backupID, container.StartOptions{})
 			}
 		}

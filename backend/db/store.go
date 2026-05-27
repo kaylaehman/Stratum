@@ -473,6 +473,7 @@ type Store interface {
 	// Snapshots / rollback (Feature 15/17)
 	CreateSnapshot(ctx context.Context, s Snapshot) error
 	GetSnapshot(ctx context.Context, id string) (Snapshot, error)
+	DeleteSnapshot(ctx context.Context, id string) error
 	ListSnapshotsByContainer(ctx context.Context, nodeID, containerName string) ([]Snapshot, error)
 	// PruneSnapshots keeps the newest `keep` snapshots for (nodeID, containerName)
 	// and deletes the rest.

@@ -11,6 +11,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/kaylaehman/stratum/backend/recreate"
 )
 
 // recreateTimeout bounds an image pull + container recreate. Detached from the
@@ -109,8 +110,10 @@ func (h *Handlers) RollbackContainer(w http.ResponseWriter, r *http.Request) {
 	snapID := chi.URLParam(r, "snap")
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), recreateTimeout)
 	defer cancel()
-	newID, err := h.Recreate.Rollback(ctx, snapID)
-	if errors.Is(err, db.ErrNotFound) {
+	newID, err := h.Recreate.Rollback(ctx, snapID, ctr.NodeID, ctr.Name)
+	if errors.Is(err, db.ErrNotFound) || errors.Is(err, recreate.ErrSnapshotMismatch) {
+		// Same 404 for "no such snapshot" and "snapshot belongs to another
+		// container" — don't disclose other containers' snapshot ids.
 		writeError(w, http.StatusNotFound, "snapshot_not_found")
 		return
 	} else if err != nil {

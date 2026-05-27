@@ -30,6 +30,17 @@ func (s *Store) GetSnapshot(ctx context.Context, id string) (appdb.Snapshot, err
 	return scanSnapshot(s.db.QueryRowContext(ctx, `SELECT `+snapshotColumns+` FROM snapshots WHERE id = ?`, id))
 }
 
+func (s *Store) DeleteSnapshot(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM snapshots WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete snapshot: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return appdb.ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListSnapshotsByContainer(ctx context.Context, nodeID, containerName string) ([]appdb.Snapshot, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+snapshotColumns+` FROM snapshots WHERE node_id = ? AND container_name = ? ORDER BY created_at DESC`,
@@ -54,13 +65,16 @@ func (s *Store) PruneSnapshots(ctx context.Context, nodeID, containerName string
 	if keep < 0 {
 		keep = 0
 	}
+	// rowid is the insertion-order tiebreaker so two snapshots written in the
+	// same created_at tick (e.g. pre-rollback + the rollback itself) order
+	// deterministically and the newest is never pruned.
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM snapshots
 		 WHERE node_id = ? AND container_name = ?
-		   AND id NOT IN (
-		       SELECT id FROM snapshots
+		   AND rowid NOT IN (
+		       SELECT rowid FROM snapshots
 		       WHERE node_id = ? AND container_name = ?
-		       ORDER BY created_at DESC LIMIT ?
+		       ORDER BY created_at DESC, rowid DESC LIMIT ?
 		   )`,
 		nodeID, containerName, nodeID, containerName, keep)
 	if err != nil {
