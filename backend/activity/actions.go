@@ -78,6 +78,8 @@ const (
 	ActionMemoryCreate = "memory.create"
 	ActionMemoryUpdate = "memory.update"
 	ActionMemoryDelete = "memory.delete"
+
+	ActionProxyConfig = "proxy.config"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -178,6 +180,8 @@ var actionCatalog = []ActionInfo{
 	{ActionMemoryCreate, "AI memory added", "memory", TargetAI},
 	{ActionMemoryUpdate, "AI memory updated", "memory", TargetAI},
 	{ActionMemoryDelete, "AI memory deleted", "memory", TargetAI},
+
+	{ActionProxyConfig, "Reverse-proxy endpoint configured", "proxy", TargetNode},
 }
 
 var actionByName = func() map[string]ActionInfo {

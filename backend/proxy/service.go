@@ -1,0 +1,132 @@
+package proxy
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/kaylaehman/stratum/backend/crypto"
+	"github.com/kaylaehman/stratum/backend/db"
+)
+
+// httpTimeout bounds a single admin-API call to a proxy tool.
+const httpTimeout = 15 * time.Second
+
+// Service detects a node's proxy tool from its container inventory and, when an
+// admin endpoint is configured, lists its rules through the matching adapter.
+type Service struct {
+	store  db.Store
+	cipher *crypto.Cipher
+	http   *http.Client
+}
+
+// New wires the store + secret cipher. The shared http client is injected into
+// the API-based adapters so they're testable and bounded.
+func New(store db.Store, cipher *crypto.Cipher) *Service {
+	hc := &http.Client{Timeout: httpTimeout}
+	// Point the registered API adapters at the bounded client.
+	for _, a := range Adapters() {
+		switch v := a.(type) {
+		case *Traefik:
+			v.HTTP = hc
+		case *NPM:
+			v.HTTP = hc
+		}
+	}
+	return &Service{store: store, cipher: cipher, http: hc}
+}
+
+// Status is the API view for a node: the detected tool (if any), its
+// capabilities, whether an admin endpoint is configured, the live rules (when
+// listable), and the catalog of supported tools for the empty state.
+type Status struct {
+	Detected     string       `json:"detected"` // adapter name or ""
+	Capabilities Capabilities `json:"capabilities"`
+	Configured   bool         `json:"configured"` // admin endpoint set
+	Endpoint     string       `json:"endpoint,omitempty"`
+	HasToken     bool         `json:"has_token"`
+	Rules        []Rule       `json:"rules"`
+	RuleError    string       `json:"rule_error,omitempty"` // why rules couldn't be listed
+	Supported    []ToolInfo   `json:"supported"`
+}
+
+// detect returns the adapter for a node based on its container images.
+func (s *Service) detect(ctx context.Context, nodeID string) (Adapter, error) {
+	containers, err := s.store.ListContainersByNode(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	images := make([]string, 0, len(containers))
+	for _, c := range containers {
+		images = append(images, c.Image)
+	}
+	return DetectByImages(images), nil
+}
+
+// conn builds the admin connection (endpoint + decrypted token) for a node.
+func (s *Service) conn(ctx context.Context, nodeID string) (Conn, bool) {
+	cfg, err := s.store.GetProxyConfig(ctx, nodeID)
+	if err != nil {
+		return Conn{}, false
+	}
+	c := Conn{Endpoint: cfg.Endpoint}
+	if len(cfg.TokenEncrypted) > 0 {
+		if pt, derr := s.cipher.Open(cfg.TokenEncrypted); derr == nil {
+			c.Token = string(pt)
+		}
+	}
+	return c, cfg.Endpoint != ""
+}
+
+// Status detects the node's proxy and lists rules when possible.
+func (s *Service) Status(ctx context.Context, nodeID string) (Status, error) {
+	st := Status{Supported: SupportedTools(), Rules: []Rule{}}
+	adapter, err := s.detect(ctx, nodeID)
+	if err != nil {
+		return st, err
+	}
+	if adapter == nil {
+		return st, nil // no supported proxy detected
+	}
+	st.Detected = adapter.Name()
+	st.Capabilities = adapter.Capabilities()
+
+	conn, configured := s.conn(ctx, nodeID)
+	st.Configured = configured
+	st.Endpoint = conn.Endpoint
+	st.HasToken = conn.Token != ""
+
+	if adapter.Capabilities().List && configured {
+		rules, lerr := adapter.ListRules(ctx, conn)
+		if lerr != nil {
+			st.RuleError = lerr.Error()
+		} else {
+			st.Rules = rules
+		}
+	} else if adapter.Capabilities().List && !configured {
+		st.RuleError = "admin endpoint not configured"
+	}
+	return st, nil
+}
+
+// SetConfig stores a node's proxy admin endpoint + optional token (sealed).
+func (s *Service) SetConfig(ctx context.Context, nodeID, endpoint string, token *string) error {
+	existing, _ := s.store.GetProxyConfig(ctx, nodeID)
+	cfg := db.ProxyConfig{NodeID: nodeID, Endpoint: endpoint, TokenEncrypted: existing.TokenEncrypted}
+	if token != nil {
+		if *token == "" {
+			cfg.TokenEncrypted = nil
+		} else {
+			sealed, err := s.cipher.Seal([]byte(*token))
+			if err != nil {
+				return err
+			}
+			cfg.TokenEncrypted = sealed
+		}
+	}
+	return s.store.UpsertProxyConfig(ctx, cfg)
+}
+
+// ErrNoAdapter is returned when an action targets a node with no detected proxy.
+var ErrNoAdapter = errors.New("proxy: no supported proxy detected on this node")

@@ -122,6 +122,9 @@ func NewRouter(d *Deps) http.Handler {
 			// AI agent memory (read; create/update/delete audited below).
 			r.Get("/memory", d.Handlers.ListMemory)
 
+			// Reverse proxy detection + rules (admin gate in handler; config audited below).
+			r.Get("/nodes/{id}/proxy", d.Handlers.NodeProxy)
+
 			// Wake-on-LAN config read (set/wake are audited mutations below).
 			r.Get("/nodes/{id}/wol", d.Handlers.GetWOL)
 
@@ -223,6 +226,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/ai/config", d.Handlers.AIConfigSet)
 			audited.Post("/ai/ask", d.Handlers.AIAsk)
 			audited.Post("/certs/rescan", d.Handlers.CertRescan)
+			audited.Put("/nodes/{id}/proxy/config", d.Handlers.SetNodeProxyConfig)
 			audited.Post("/memory", d.Handlers.CreateMemory)
 			audited.Put("/memory/{id}", d.Handlers.UpdateMemory)
 			audited.Delete("/memory/{id}", d.Handlers.DeleteMemory)

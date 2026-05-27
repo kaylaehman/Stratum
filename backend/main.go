@@ -34,6 +34,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/proxy"
 	"github.com/kaylaehman/stratum/backend/recreate"
 	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/depgraph"
@@ -133,6 +134,7 @@ func run(logger *slog.Logger) error {
 	twoFASvc := twofa.New(store, cipher)
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
 	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL)
+	proxySvc := proxy.New(store, cipher)
 	certSvc := certs.New(store, filesSvc.Exec, 6*time.Hour)
 	certSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
@@ -164,6 +166,7 @@ func run(logger *slog.Logger) error {
 		Recreate:       recreateSvc,
 		AI:             aiSvc,
 		Certs:          certSvc,
+		Proxy:          proxySvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

@@ -251,6 +251,15 @@ type Snapshot struct {
 	CreatedAt     time.Time
 }
 
+// ProxyConfig is a node's reverse-proxy admin endpoint + sealed API token
+// (Feature F1). TokenEncrypted is AES-sealed; the plaintext is never returned.
+type ProxyConfig struct {
+	NodeID         string
+	Endpoint       string
+	TokenEncrypted []byte
+	UpdatedAt      time.Time
+}
+
 // AgentMemory is a persistent per-scope note the AI assistant uses (Feature F9).
 // Scope is "global" | "node" | "container"; ScopeID is "" for global. Source is
 // "user" | "ai" | "observed"; AI-proposed memories stay Confirmed=false until a
@@ -528,6 +537,10 @@ type Store interface {
 	// Certificates (Feature F4) — replaced wholesale per node on scan
 	ReplaceCertsByNode(ctx context.Context, nodeID string, certs []CertInfo) error
 	ListCerts(ctx context.Context) ([]CertInfo, error)
+
+	// Reverse-proxy per-node admin config (Feature F1)
+	GetProxyConfig(ctx context.Context, nodeID string) (ProxyConfig, error)
+	UpsertProxyConfig(ctx context.Context, c ProxyConfig) error
 
 	// Agent memory (Feature F9)
 	CreateAgentMemory(ctx context.Context, m AgentMemory) error

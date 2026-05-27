@@ -23,6 +23,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/kaylaehman/stratum/backend/proxy"
 	"github.com/kaylaehman/stratum/backend/recreate"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
@@ -61,6 +62,7 @@ type Handlers struct {
 	Recreate       *recreate.Service
 	AI             *ai.Service
 	Certs          *certs.Service
+	Proxy          *proxy.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
