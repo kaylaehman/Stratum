@@ -15,10 +15,10 @@ import (
 	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/depgraph"
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/features"
 	"github.com/kaylaehman/stratum/backend/filewatch"
-	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
@@ -32,6 +32,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
+	"github.com/kaylaehman/stratum/backend/sso"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
@@ -71,6 +72,7 @@ type Handlers struct {
 	Features       *features.Service
 	Chat           *chatbot.Service
 	FileWatch      *filewatch.Service
+	SSO            *sso.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

@@ -290,6 +290,24 @@ type Runbook struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+// SSOConfig is per-container access-control configuration (Feature F2). It is
+// configuration only — the enforcing auth gateway is a follow-on.
+// ClientSecretEncrypted is AES-sealed; the plaintext is never returned.
+type SSOConfig struct {
+	ID                    string    `json:"id"`
+	NodeID                string    `json:"node_id"`
+	ContainerName         string    `json:"container_name"`
+	Enabled               bool      `json:"enabled"`
+	Method                string    `json:"method"`
+	ProviderURL           string    `json:"provider_url"`
+	ClientID              string    `json:"client_id"`
+	ClientSecretEncrypted []byte    `json:"-"`
+	AllowedGroups         []string  `json:"allowed_groups"`
+	SessionDurationSecs   int       `json:"session_duration_secs"`
+	HasClientSecret       bool      `json:"has_client_secret"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
 // FileWatch is a configured path to monitor for changes (Feature 22).
 type FileWatch struct {
 	ID        string    `json:"id"`
@@ -602,6 +620,11 @@ type Store interface {
 	// Chat bot config (Feature F8) — single row
 	GetChatConfig(ctx context.Context) (ChatConfig, error)
 	UpsertChatConfig(ctx context.Context, c ChatConfig) error
+
+	// SSO passthrough config (Feature F2) — per (node, container)
+	ListSSOConfigs(ctx context.Context) ([]SSOConfig, error)
+	UpsertSSOConfig(ctx context.Context, c SSOConfig) (SSOConfig, error)
+	DeleteSSOConfig(ctx context.Context, id string) error
 
 	// File change detection (Feature 22)
 	CreateFileWatch(ctx context.Context, w FileWatch) error

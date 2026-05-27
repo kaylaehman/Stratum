@@ -136,6 +136,8 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/nodes/{id}/watches":              true,
 		"DELETE /api/nodes/{id}/watches/{watchID}":  true,
 		"POST /api/nodes/{id}/watches/scan":         true,
+		"PUT /api/sso":                              true,
+		"DELETE /api/sso/{id}":                      true,
 		"POST /api/users":                           true,
 		"PUT /api/users/{id}/role":                  true,
 		"DELETE /api/users/{id}":                    true,

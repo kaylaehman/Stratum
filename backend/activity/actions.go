@@ -91,6 +91,8 @@ const (
 	ActionWatchAdd    = "watch.add"
 	ActionWatchDelete = "watch.delete"
 	ActionWatchScan   = "watch.scan"
+
+	ActionSSOConfig = "sso.config"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -202,6 +204,7 @@ var actionCatalog = []ActionInfo{
 	{ActionWatchAdd, "File watch added", "watch", TargetNode},
 	{ActionWatchDelete, "File watch removed", "watch", TargetNode},
 	{ActionWatchScan, "File change scan", "watch", TargetNode},
+	{ActionSSOConfig, "SSO access configured", "sso", TargetContainer},
 }
 
 var actionByName = func() map[string]ActionInfo {

@@ -141,6 +141,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/nodes/{id}/watches", d.Handlers.ListWatches)
 			r.Get("/fileevents", d.Handlers.FileEvents)
 
+			// SSO passthrough config (admin gate in handler; mutations audited below).
+			r.Get("/sso", d.Handlers.ListSSO)
+
 			// Wake-on-LAN config read (set/wake are audited mutations below).
 			r.Get("/nodes/{id}/wol", d.Handlers.GetWOL)
 
@@ -249,6 +252,8 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/{id}/watches", d.Handlers.AddWatch)
 			audited.Delete("/nodes/{id}/watches/{watchID}", d.Handlers.RemoveWatch)
 			audited.Post("/nodes/{id}/watches/scan", d.Handlers.ScanWatches)
+			audited.Put("/sso", d.Handlers.UpsertSSO)
+			audited.Delete("/sso/{id}", d.Handlers.DeleteSSO)
 			audited.Post("/memory", d.Handlers.CreateMemory)
 			audited.Put("/memory/{id}", d.Handlers.UpdateMemory)
 			audited.Delete("/memory/{id}", d.Handlers.DeleteMemory)
