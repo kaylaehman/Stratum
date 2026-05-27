@@ -1206,6 +1206,29 @@ export interface AIAskResponse {
   output_tokens: number
 }
 
+// Certificate Management types (Feature F4)
+
+export interface CertInfo {
+  id: string
+  node_id: string
+  source: string
+  domain: string
+  sans: string[]
+  issuer: string
+  path: string
+  not_before?: string
+  not_after?: string
+  last_checked: string
+}
+
+export interface CertsResponse {
+  certs: CertInfo[]
+}
+
+export interface RescanCertsResponse {
+  certs: CertInfo[]
+}
+
 // Two-Factor Auth (TOTP) types (Feature 7 Phase 2)
 
 export interface TwoFAStatus {
