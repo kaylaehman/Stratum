@@ -1,0 +1,217 @@
+id: ntfy
+name: ntfy Push Notification Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "binwiederhier/ntfy"
+  port_hints: [80, 2586]
+category: communication
+description: Simple, self-hosted push notification server with minimal dependencies
+docs_url: https://hub.docker.com/r/binwiederhier/ntfy
+
+common_issues:
+  - id: port-conflict-or-unavailable
+    name: Server not accessible on configured port
+    symptoms:
+      - "Connection refused"
+      - "Failed to connect to ntfy server"
+      - "Port already in use"
+      - "No response on http://localhost:80"
+    trigger_conditions:
+      - log_pattern: "listen.*error"
+      - log_pattern: "address already in use"
+    steps:
+      - id: step-1
+        description: Verify ntfy is listening on the configured port
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep -E '80|2586'"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port is already in use on the host
+        type: check
+        command: "ss -tlnp | grep -E '80|2586'"
+        expected_output: ""
+      - id: step-3
+        description: Display current port binding status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart ntfy container to reinitialize port binding
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify container is running and accessible
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost/v1/ping"
+        expected_output: "ok"
+    resolution: |
+      ntfy port binding has been restored. The server should now be accessible on the configured port (80 or 2586). If the issue persists, check that no other service is using the port and that your Docker port mapping is correctly configured.
+
+  - id: cache-directory-permission
+    name: Cache directory permission denied or inaccessible
+    symptoms:
+      - "failed to create cache"
+      - "permission denied"
+      - "cannot write to cache"
+      - "database lock error"
+    trigger_conditions:
+      - log_pattern: "cache.*error"
+      - log_pattern: "permission denied.*cache"
+    steps:
+      - id: step-1
+        description: Check cache directory ownership and permissions
+        type: check
+        command: "stat {cache_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display cache directory status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Ensure cache directory exists and has correct permissions
+        type: fix
+        command: "mkdir -p {cache_path} && chmod 755 {cache_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify permissions were set correctly
+        type: check
+        command: "stat {cache_path} | grep -E 'Uid|Access'"
+    resolution: |
+      Cache directory permissions have been corrected. ntfy uses the cache directory to store message history and configuration. The fix ensured the directory exists and is readable/writable by the container process.
+
+  - id: auth-token-invalid
+    name: Authentication or token errors
+    symptoms:
+      - "unauthorized"
+      - "invalid token"
+      - "token expired"
+      - "403 Forbidden"
+    trigger_conditions:
+      - log_pattern: "unauthorized"
+      - log_pattern: "invalid.*token"
+    steps:
+      - id: step-1
+        description: Check ntfy auth configuration
+        type: check
+        command: "docker exec {container_name} cat /etc/ntfy/server.yml 2>/dev/null | grep -A 5 'auth'"
+        expected_output: ""
+      - id: step-2
+        description: Verify NTFY_AUTH_DEFAULT_ACCESS setting
+        type: check
+        command: "docker exec {container_name} env | grep -i auth"
+        expected_output: ""
+      - id: step-3
+        description: Display auth configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart ntfy to reload auth configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify auth system is functioning
+        type: check
+        command: "docker logs {container_name} | grep -i auth | tail -5"
+    resolution: |
+      ntfy auth configuration has been reloaded. Token issues are typically resolved by restarting the container. For persistent authentication issues, verify the NTFY_AUTH_DEFAULT_ACCESS environment variable is set correctly (typically 'deny-all' for private deployments or 'allow-all' for public).
+
+  - id: high-disk-usage-cache
+    name: High disk usage from cache files
+    symptoms:
+      - "disk space running out"
+      - "cache directory very large"
+      - "cache files not being cleaned up"
+      - "/var/lib/ntfy growing unbounded"
+    trigger_conditions:
+      - log_pattern: "disk"
+    steps:
+      - id: step-1
+        description: Check cache directory disk usage
+        type: check
+        command: "du -sh {cache_path}"
+        expected_output: ""
+      - id: step-2
+        description: List large cache files
+        type: check
+        command: "find {cache_path} -type f -size +10M -exec ls -lh {} \\; | head -10"
+        expected_output: ""
+      - id: step-3
+        description: Display cache disk usage statistics
+        type: inform
+        command: ""
+      - id: step-4
+        description: Inform user about cache cleanup
+        type: inform
+        command: ""
+      - id: step-5
+        description: Clean up old cache files (older than 30 days)
+        type: fix
+        command: "find {cache_path} -type f -mtime +30 -delete"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify disk usage after cleanup
+        type: check
+        command: "du -sh {cache_path}"
+    resolution: |
+      Old cache files have been removed. ntfy stores messages in cache for 12 hours by default. Disk usage should stabilize once cleanup completes. Consider configuring message retention policy via NTFY_CACHE_DURATION environment variable to control how long messages are kept.
+
+default_config:
+  compose_template: |
+    services:
+      ntfy:
+        image: binwiederhier/ntfy:latest
+        container_name: ntfy
+        restart: unless-stopped
+        command: serve
+        environment:
+          NTFY_BASE_URL: ${NTFY_BASE_URL:-http://localhost}
+          NTFY_LISTEN_HTTP: 0.0.0.0:80
+          NTFY_AUTH_DEFAULT_ACCESS: ${NTFY_AUTH_DEFAULT_ACCESS:-deny-all}
+          NTFY_CACHE_DURATION: ${NTFY_CACHE_DURATION:-12h}
+        volumes:
+          - ${CACHE_PATH:-./cache}:/var/lib/ntfy
+        ports:
+          - "80:80/tcp"
+  required_vars:
+    - name: NTFY_BASE_URL
+      description: Public base URL for ntfy (used for push links)
+      default: "http://localhost"
+    - name: NTFY_AUTH_DEFAULT_ACCESS
+      description: Default access policy (allow-all or deny-all)
+      default: "deny-all"
+    - name: NTFY_CACHE_DURATION
+      description: How long to keep messages in cache
+      default: "12h"
+    - name: CACHE_PATH
+      description: Host path for /var/lib/ntfy cache directory
+      default: "./cache"
+  known_mounts:
+    - container_path: /var/lib/ntfy
+      purpose: Cache directory for message storage and history
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  ntfy is a lightweight push notification server with minimal resource requirements. Perfect for self-hosted alerts and integrations.
+
+  Configuration:
+  - NTFY_BASE_URL: Must be set to your public URL for external clients to work correctly.
+  - NTFY_AUTH_DEFAULT_ACCESS: Set to 'deny-all' for private use (authenticated access required); 'allow-all' for public access.
+  - NTFY_CACHE_DURATION: Messages are kept in cache for this duration (default 12 hours).
+
+  Access control: ntfy supports optional BasicAuth. For private deployments, set NTFY_AUTH_DEFAULT_ACCESS=deny-all and configure user credentials.
+
+  Notifications: ntfy works with any client capable of HTTP POST requests. Common integrations include Alertmanager, Home Assistant, Grafana, and custom scripts.
+
+  Performance: Minimal CPU/RAM usage; scales well on low-power hardware. Suitable for homelab environments.

@@ -1,0 +1,205 @@
+id: stalwart
+name: Stalwart Mail Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "stalwartlabs/mail-server"
+  port_hints: [25, 143, 465, 587, 993]
+category: email
+description: All-in-one SMTP, IMAP, and JMAP mail server written in Rust
+docs_url: https://stalwart.com/
+
+common_issues:
+  - id: admin-secret-missing
+    name: Admin web interface not accessible — ADMIN_SECRET not set
+    symptoms:
+      - "401 Unauthorized" on admin panel
+      - "ADMIN_SECRET not found"
+      - "Cannot log into web UI"
+    trigger_conditions:
+      - log_pattern: "ADMIN_SECRET"
+    steps:
+      - id: step-1
+        description: Check if ADMIN_SECRET environment variable is set
+        type: check
+        command: "docker inspect {container_name} | grep ADMIN_SECRET"
+        expected_output: "ADMIN_SECRET"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about ADMIN_SECRET requirement
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a secure ADMIN_SECRET and restart container
+        type: fix
+        command: "docker exec {container_name} openssl rand -base64 32"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Update environment variable in compose and restart
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Stalwart requires an ADMIN_SECRET environment variable to secure the
+      admin web interface. Generate a strong random secret (32+ bytes) and
+      set it in the compose file under the `stalwart` service environment.
+      Restart the container for the change to take effect.
+
+  - id: smtp-relay-auth-failure
+    name: Outbound mail cannot authenticate — SMTP relay credentials incorrect
+    symptoms:
+      - "535 5.7.8 Authentication credentials invalid"
+      - "SMTP authentication failed"
+      - "Outgoing mail rejected"
+    trigger_conditions:
+      - log_pattern: "Authentication credentials invalid"
+    steps:
+      - id: step-1
+        description: Check SMTP relay configuration in config file
+        type: check
+        command: "docker exec {container_name} cat /etc/stalwart/stalwart.toml | grep -A 10 relay"
+        expected_output: "relay"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about relay credentials
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify username and password in config match provider
+        type: confirm
+        command: ""
+      - id: step-4
+        description: Update relay credentials in stalwart.toml
+        type: fix
+        command: "docker exec {container_name} sed -i 's/username = .*/username = \"{relay_user}\"/g' /etc/stalwart/stalwart.toml"
+        requires_approval: true
+    resolution: |
+      Stalwart's SMTP relay feature requires valid credentials from your
+      upstream mail provider (Gmail, SendGrid, AWS SES, etc). Verify the
+      username and password are correct in /etc/stalwart/stalwart.toml and
+      restart the container.
+
+  - id: permission-denied-data
+    name: Permission denied on /var/lib/stalwart
+    symptoms:
+      - "permission denied"
+      - "Cannot create database file"
+      - "Cannot write to data directory"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the data directory
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Fix ownership of /var/lib/stalwart
+        type: fix
+        command: "chown -R 101:101 {data_path}"
+        requires_approval: true
+    resolution: |
+      The stalwartlabs/mail-server image runs as the `stalwart` user
+      (UID 101). The /var/lib/stalwart data directory must be writable by
+      that user. The fix recursively changes ownership to UID 101.
+
+  - id: smtp-port-blocked
+    name: Incoming mail rejected — port 25 unreachable
+    symptoms:
+      - "Connection timed out" from external senders
+      - "Inbound mail fails"
+      - "MX record points here but no one can connect"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Inform about SMTP port 25 firewall requirement
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if port 25 is published in compose
+        type: check
+        command: "docker inspect {container_name} | grep '25'"
+        expected_output: "25"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about compose port mapping
+        type: inform
+        command: ""
+    resolution: |
+      Inbound SMTP requires port 25 to be reachable from the public internet.
+      Verify port 25 is published in your docker-compose.yml under `ports`.
+      Additionally, your host firewall (iptables, ufw, cloud provider rules)
+      must allow inbound traffic on port 25. Test with `telnet yourhost.com 25`
+      from an external machine.
+
+default_config:
+  compose_template: |
+    services:
+      stalwart:
+        image: stalwartlabs/mail-server:latest
+        container_name: stalwart
+        restart: unless-stopped
+        environment:
+          ADMIN_SECRET: ${ADMIN_SECRET}
+          DOMAIN: ${DOMAIN}
+        volumes:
+          - ${DATA_PATH:-./data}:/var/lib/stalwart
+          - ${CONFIG_PATH:-./config}:/etc/stalwart
+        ports:
+          - "25:25"
+          - "143:143"
+          - "465:465"
+          - "587:587"
+          - "993:993"
+          - "8080:8080"
+  required_vars:
+    - name: ADMIN_SECRET
+      description: Secure password for admin web interface
+      default: ""
+    - name: DOMAIN
+      description: Primary mail domain (e.g. mail.example.com)
+      default: "mail.example.com"
+    - name: DATA_PATH
+      description: Host path for mail database and data files
+      default: "./data"
+    - name: CONFIG_PATH
+      description: Host path for Stalwart configuration
+      default: "./config"
+  known_mounts:
+    - container_path: /var/lib/stalwart
+      purpose: Mail database, indexes, and message store
+      recommended_permissions: "700"
+      owner: "101:101"
+    - container_path: /etc/stalwart
+      purpose: stalwart.toml configuration file
+      recommended_permissions: "750"
+      owner: "101:101"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Stalwart is a modern, all-in-one mail server implementing SMTP, IMAP, and
+  JMAP protocols. The admin web interface runs on port 8080 and requires the
+  ADMIN_SECRET environment variable for access.
+
+  Ports:
+  - 25: SMTP (incoming mail)
+  - 143: IMAP (plaintext)
+  - 465: SMTPS (TLS)
+  - 587: SMTP Submission (TLS with auth)
+  - 993: IMAPS (TLS)
+  - 8080: Admin web interface
+
+  For inbound mail, your MX record must point to this host, and port 25 must
+  be reachable from the internet. Most residential ISPs block port 25 — if you
+  cannot open port 25, you cannot receive inbound mail directly; you must use
+  a mail relay service (Gmail, SendGrid, AWS SES) and configure
+  outbound-only.
+
+  The first run may take a moment to initialize the database. Check logs for
+  any schema errors. ADMIN_SECRET must be set before first access to the admin
+  panel.

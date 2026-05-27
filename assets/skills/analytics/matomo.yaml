@@ -1,0 +1,237 @@
+id: matomo
+name: Matomo Analytics
+version: "1.0"
+container_match:
+  image_patterns:
+    - "matomo"
+  port_hints: [80]
+category: analytics
+description: Open-source Google Analytics alternative — full data ownership and control
+docs_url: https://matomo.org/docs/docker/
+
+common_issues:
+  - id: database-connection-error
+    name: Cannot connect to MariaDB — initialization failed
+    symptoms:
+      - "Cannot connect to database"
+      - "MySQL error"
+      - "Database connection refused"
+    trigger_conditions:
+      - log_pattern: "cannot connect|mysql.*error|connection.*refused"
+    steps:
+      - id: step-1
+        description: Verify MariaDB container is running and healthy
+        type: check
+        command: "docker ps --filter name={db_container} --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test connectivity from Matomo to MariaDB
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {db_host} 3306' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Verify MATOMO_DATABASE_* environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep MATOMO_DATABASE"
+        expected_output: "MATOMO_DATABASE_"
+      - id: step-4
+        description: Confirm credentials match MariaDB environment
+        type: inform
+        command: ""
+    resolution: |
+      Matomo requires MATOMO_DATABASE_HOST, MATOMO_DATABASE_DBNAME,
+      MATOMO_DATABASE_USERNAME, and MATOMO_DATABASE_PASSWORD to be set correctly.
+      Both containers must be on the same Docker network. Verify the database
+      service name in compose matches MATOMO_DATABASE_HOST (typically `mariadb` or `db`).
+      If containers just started, wait 10–15 seconds for MariaDB to fully initialize.
+
+  - id: web-server-not-responding
+    name: Port 80 not responding — web server misconfiguration
+    symptoms:
+      - "Connection refused on port 80"
+      - "Cannot access web interface"
+      - "HTTP 500 or 502"
+    trigger_conditions:
+      - log_pattern: "listening|startup|error"
+    steps:
+      - id: step-1
+        description: Check if the Matomo container is running
+        type: check
+        command: "docker ps --filter name={container_name} --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Verify Apache is listening on port 80
+        type: check
+        command: "docker exec {container_name} ss -tlnp 2>/dev/null | grep 80"
+        expected_output: "80"
+      - id: step-3
+        description: Check Matomo application logs
+        type: check
+        command: "docker logs {container_name} --tail 30 2>&1 | head -20"
+        expected_output: ""
+      - id: step-4
+        description: Restart Matomo to recover
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Matomo's built-in Apache web server may fail to start due to configuration
+      conflicts or incomplete initialization. Restart the container and monitor
+      logs. If the issue persists, verify port 80 is not already in use by another
+      service on the host.
+
+  - id: permission-denied-config
+    name: Permission denied writing to /var/www/html or config directory
+    symptoms:
+      - "permission denied"
+      - "Cannot write to config"
+      - "EACCES"
+    trigger_conditions:
+      - log_pattern: "permission denied|eacces"
+    steps:
+      - id: step-1
+        description: Check ownership of the HTML directory
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: 33"
+        on_fail: step-2
+      - id: step-2
+        description: Verify www-data user can write
+        type: check
+        command: "docker exec {container_name} touch /var/www/html/.write-test && rm /var/www/html/.write-test 2>&1 && echo OK || echo FAILED"
+        expected_output: "OK"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about ownership requirements
+        type: inform
+        command: ""
+      - id: step-4
+        description: Fix ownership and permissions on host path
+        type: fix
+        command: "chown -R 33:33 {config_path} && chmod -R 750 {config_path}"
+        requires_approval: true
+    resolution: |
+      Matomo runs as www-data (UID 33) and requires read/write access to
+      /var/www/html for configuration and plugin storage. Ensure the host bind
+      mount is owned by UID 33:33 and has appropriate permissions (750 or 755).
+
+  - id: trusted-host-error
+    name: "Access denied — 'The request was not authorized'"
+    symptoms:
+      - "Not authorized"
+      - "trusted_hosts"
+      - "Request not allowed"
+    trigger_conditions:
+      - log_pattern: "not authorized|trusted"
+    steps:
+      - id: step-1
+        description: Identify the current hostname being used
+        type: check
+        command: "docker exec {container_name} cat /var/www/html/config/config.ini.php 2>/dev/null | grep -A3 '\\[General\\]' | head -5"
+        expected_output: ""
+      - id: step-2
+        description: Display configured trusted hosts
+        type: check
+        command: "docker exec {container_name} grep -i 'trusted_hosts\\|force_ssl\\|assume_secure_protocol' /var/www/html/config/config.ini.php 2>&1 | head -10"
+        expected_output: ""
+      - id: step-3
+        description: Inform about trusted hosts configuration
+        type: inform
+        command: ""
+    resolution: |
+      Matomo validates the request Host header against a whitelist of trusted hosts.
+      Access the web interface using the same hostname/IP as configured in
+      config/config.ini.php. If you changed the URL or are behind a reverse proxy,
+      update the trusted_hosts list in the config file or re-run the setup wizard.
+
+default_config:
+  compose_template: |
+    services:
+      matomo:
+        image: matomo:latest
+        container_name: matomo
+        restart: unless-stopped
+        depends_on:
+          - mariadb
+        environment:
+          MATOMO_DATABASE_HOST: mariadb
+          MATOMO_DATABASE_DBNAME: ${DB_NAME:-matomo}
+          MATOMO_DATABASE_USERNAME: ${DB_USER:-matomo}
+          MATOMO_DATABASE_PASSWORD: ${DB_PASSWORD}
+          MATOMO_DATABASE_TABLES_PREFIX: matomo_
+          MATOMO_GENERAL_SALT: ${GENERAL_SALT}
+        ports:
+          - "80:80"
+        volumes:
+          - ${CONFIG_PATH:-./config}:/var/www/html
+
+      mariadb:
+        image: mariadb:10.11
+        container_name: matomo_mariadb
+        restart: unless-stopped
+        environment:
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+          MYSQL_DATABASE: ${DB_NAME:-matomo}
+          MYSQL_USER: ${DB_USER:-matomo}
+          MYSQL_PASSWORD: ${DB_PASSWORD}
+        volumes:
+          - ${DB_PATH:-./db}:/var/lib/mysql
+        command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+    volumes: {}
+
+  required_vars:
+    - name: DB_USER
+      description: MariaDB username for Matomo
+      default: "matomo"
+    - name: DB_PASSWORD
+      description: MariaDB password
+      default: ""
+    - name: DB_ROOT_PASSWORD
+      description: MariaDB root password
+      default: ""
+    - name: DB_NAME
+      description: MariaDB database name
+      default: "matomo"
+    - name: GENERAL_SALT
+      description: Random salt for password hashing (min 16 chars)
+      default: ""
+    - name: CONFIG_PATH
+      description: Host path for Matomo /var/www/html (config + plugins)
+      default: "./config"
+    - name: DB_PATH
+      description: Host path for MariaDB datadir
+      default: "./db"
+
+  known_mounts:
+    - container_path: /var/www/html
+      purpose: Matomo application, configuration, plugins, and tracking data
+      recommended_permissions: "750"
+      owner: "33:33"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Matomo is a full-featured analytics platform with a web UI for configuration.
+  First access triggers the setup wizard. During setup, define the super-user admin
+  account and tracked websites.
+
+  GENERAL_SALT should be a random string for secure password hashing. Generate with:
+  `openssl rand -hex 8`
+
+  Character set: MariaDB is configured with utf8mb4 for full Unicode support.
+
+  Reverse proxy: if behind Traefik or nginx, ensure the Host header matches
+  the configured trusted_hosts in config/config.ini.php, or set
+  assume_secure_protocol=1 and force_ssl=1 to trust proxy headers.
+
+  Plugins: Matomo supports installing plugins via the web UI. Plugins are stored
+  in /var/www/html/plugins and need to be writable by www-data (UID 33).
+
+  Scaling: for very high-traffic deployments, consider separating archiving
+  (report generation) into a dedicated cron container using the official
+  matomo:cron image.

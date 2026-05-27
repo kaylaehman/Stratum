@@ -1,0 +1,494 @@
+id: bitwarden
+name: Bitwarden Self-Host
+version: "1.0"
+container_match:
+  image_patterns:
+    - "bitwarden/self-host"
+    - "bitwarden/server"
+  port_hints: [80, 443, 5432, 6379]
+category: security
+description: Official Bitwarden self-hosted password manager with identity, API, and organizational support
+docs_url: https://hub.docker.com/r/bitwarden/self-host
+
+common_issues:
+  - id: web-ui-not-loading
+    name: Web UI returns 502 or fails to load
+    symptoms:
+      - "502 Bad Gateway"
+      - "Connection refused"
+      - "Blank page or loader spinning indefinitely"
+      - "Nginx returns 502 or 503"
+      - "Identity service error"
+    trigger_conditions:
+      - log_pattern: "502\\|503"
+      - log_pattern: "connection.*refused"
+      - log_pattern: "upstream.*error"
+    steps:
+      - id: step-1
+        description: Check if all Bitwarden services are running
+        type: check
+        command: "docker ps --filter 'label=com.bitwarden.product=self-host' --format='{{.Names}} {{.State}}'"
+        expected_output: "running"
+        on_fail: step-2
+      - id: step-2
+        description: Display status of all Bitwarden containers
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Nginx error logs
+        type: check
+        command: "docker logs {container_name}-nginx 2>&1 | grep -i 'error' | tail -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify database service is healthy
+        type: check
+        command: "docker exec {container_name}-mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P {SA_PASSWORD} -Q 'SELECT 1' 2>&1 | grep -q '^1$' && echo 'OK' || echo 'FAIL'"
+        expected_output: "OK"
+        on_fail: step-5
+      - id: step-5
+        description: Check database logs for connection errors
+        type: check
+        command: "docker logs {container_name}-mssql | grep -i 'error\\|fail' | tail -5"
+        expected_output: ""
+      - id: step-6
+        description: Restart the identity service
+        type: fix
+        command: "docker restart {container_name}-identity"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait for services to stabilize and verify web UI
+        type: check
+        command: "sleep 10 && docker exec {container_name}-nginx curl -s http://localhost/health || echo 'Still starting'"
+
+  - id: database-connection-error
+    name: Database connection failure or locked
+    symptoms:
+      - "Cannot connect to database"
+      - "Login fails with database error"
+      - "API returns 500 database error"
+      - "Vault locked or inaccessible"
+      - "Timeout connecting to MSSQL"
+    trigger_conditions:
+      - log_pattern: "database.*connection"
+      - log_pattern: "sqlserver.*error"
+      - log_pattern: "timeout.*connection"
+    steps:
+      - id: step-1
+        description: Verify MSSQL container is running
+        type: check
+        command: "docker ps --filter name={container_name}-mssql --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check MSSQL startup logs
+        type: check
+        command: "docker logs {container_name}-mssql 2>&1 | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Test MSSQL connectivity with correct credentials
+        type: check
+        command: "docker exec {container_name}-mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P {SA_PASSWORD} -Q 'SELECT @@VERSION' 2>&1 | head -3"
+        expected_output: "Microsoft SQL Server"
+        on_fail: step-4
+      - id: step-4
+        description: Verify SA_PASSWORD environment variable is set
+        type: check
+        command: "docker inspect {container_name}-mssql --format='{{range .Config.Env}}{{println .}}{{end}}' | grep SA_PASSWORD"
+        expected_output: "SA_PASSWORD"
+        on_fail: step-5
+      - id: step-5
+        description: Inform about missing SA_PASSWORD
+        type: inform
+        command: ""
+      - id: step-6
+        description: Confirm intention to restart MSSQL service
+        type: confirm
+        command: "Restarting MSSQL will temporarily disconnect all Bitwarden services. Active users will be logged out."
+      - id: step-7
+        description: Restart MSSQL container
+        type: fix
+        command: "docker restart {container_name}-mssql"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor MSSQL initialization
+        type: check
+        command: "sleep 15 && docker logs {container_name}-mssql | grep -i 'accept.*connection' | tail -1"
+
+  - id: certificate-expired
+    name: HTTPS certificate expired or invalid
+    symptoms:
+      - "HTTPS connection warning in browser"
+      - "SSL certificate error"
+      - "Certificate expired"
+      - "NET::ERR_CERT_AUTHORITY_INVALID"
+      - "Redirects fail or are insecure"
+    trigger_conditions:
+      - log_pattern: "certificate.*expired"
+      - log_pattern: "ssl.*error"
+    steps:
+      - id: step-1
+        description: Check certificate details
+        type: check
+        command: "docker exec {container_name}-nginx openssl x509 -in /etc/bitwarden/certs/certificate.crt -noout -text | grep -A 1 'Validity\\|Not After'"
+        expected_output: "After"
+        on_fail: step-2
+      - id: step-2
+        description: Verify certificate files exist
+        type: check
+        command: "docker exec {container_name}-nginx ls -la /etc/bitwarden/certs/"
+        expected_output: "certificate.crt"
+        on_fail: step-3
+      - id: step-3
+        description: Display certificate status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Inform user about Let's Encrypt or self-signed certificate options
+        type: inform
+        command: ""
+      - id: step-5
+        description: Confirm intention to apply new certificate
+        type: confirm
+        command: "Certificate update will require Nginx restart. HTTPS connections may briefly fail."
+      - id: step-6
+        description: Restart Nginx to apply certificate changes
+        type: fix
+        command: "docker restart {container_name}-nginx"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify certificate is valid
+        type: check
+        command: "sleep 3 && docker exec {container_name}-nginx curl -kI https://localhost | head -3"
+
+  - id: admin-console-access-denied
+    name: Cannot access admin console or panel
+    symptoms:
+      - "404 Not Found on /admin"
+      - "Access denied to admin console"
+      - "Admin panel requires authentication"
+      - "Cannot manage organization or users"
+      - "Redirect loop on admin access"
+    trigger_conditions:
+      - log_pattern: "admin.*denied"
+      - log_pattern: "404.*admin"
+    steps:
+      - id: step-1
+        description: Verify you are logged in as organization owner
+        type: check
+        command: "docker logs {container_name}-identity | grep -i 'login.*success' | tail -3"
+        expected_output: ""
+      - id: step-2
+        description: Check admin console URL in web vault
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify admin organization ID is correct
+        type: check
+        command: "docker exec {container_name}-mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P {SA_PASSWORD} -Q 'SELECT TOP 5 Id, Name FROM Organization' 2>&1 | head -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify user has admin role assigned
+        type: check
+        command: "docker logs {container_name}-api | grep -i 'user.*admin\\|role.*admin' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Clear browser cache and cookies for the domain
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart API service to refresh authorization cache
+        type: fix
+        command: "docker restart {container_name}-api"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Attempt to access admin console again
+        type: check
+        command: "sleep 5 && docker logs {container_name}-api | grep -i 'admin' | tail -3"
+
+  - id: backup-restore-failed
+    name: Backup or restore operation failed
+    symptoms:
+      - "Backup job did not complete"
+      - "Restore failed with error"
+      - "Cannot access backup files"
+      - "Backup directory permissions error"
+      - "No space left on device during backup"
+    trigger_conditions:
+      - log_pattern: "backup.*fail"
+      - log_pattern: "restore.*error"
+    steps:
+      - id: step-1
+        description: Check backup directory permissions and disk space
+        type: check
+        command: "docker exec {container_name}-mssql df -h /var/opt/mssql/backup | tail -1"
+        expected_output: ""
+      - id: step-2
+        description: Verify backup directory is mounted correctly
+        type: check
+        command: "docker inspect {container_name}-mssql --format='{{range .Mounts}}{{.Destination}}:{{.Source}} {{end}}' | grep -i backup"
+        expected_output: "backup"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about missing or incorrect backup mount
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check for backup files in the backup directory
+        type: check
+        command: "ls -lah {backup_path}/ | head -20"
+        expected_output: ""
+      - id: step-5
+        description: Display recent backup and restore logs
+        type: check
+        command: "docker logs {container_name}-mssql | grep -iE 'backup|restore' | tail -10"
+        expected_output: ""
+      - id: step-6
+        description: Confirm intention to retry backup process
+        type: confirm
+        command: "This will trigger a new backup job. Ensure sufficient disk space is available."
+      - id: step-7
+        description: Restart backup job
+        type: fix
+        command: "docker exec {container_name}-mssql /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P {SA_PASSWORD} -Q 'BACKUP DATABASE [vault] TO DISK=''/var/opt/mssql/backup/vault.bak''; GO'"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Monitor backup completion
+        type: check
+        command: "sleep 30 && ls -lh {backup_path}/ | grep -E 'vault.bak|vault_.*\.bak' | tail -1"
+
+default_config:
+  compose_template: |
+    services:
+      bitwarden-nginx:
+        image: bitwarden/nginx:latest
+        container_name: bitwarden-nginx
+        restart: unless-stopped
+        depends_on:
+          - bitwarden-api
+          - bitwarden-identity
+          - bitwarden-web
+        environment:
+          VIRTUAL_HOST: ${DOMAIN}
+          VIRTUAL_PORT: 80
+          LETSENCRYPT_HOST: ${DOMAIN}
+          LETSENCRYPT_EMAIL: ${LE_EMAIL}
+        volumes:
+          - ${DATA_PATH}/nginx:/etc/bitwarden/certs
+          - ${DATA_PATH}/logs:/var/log/bitwarden
+          - ${DATA_PATH}/web-vault:/etc/bitwarden/web
+        ports:
+          - "80:80"
+          - "443:443"
+
+      bitwarden-api:
+        image: bitwarden/api:latest
+        container_name: bitwarden-api
+        restart: unless-stopped
+        depends_on:
+          - bitwarden-mssql
+          - bitwarden-redis
+        environment:
+          ASPNETCORE_ENVIRONMENT: Production
+          globalSettings__baseServiceUri__vault: https://${DOMAIN}
+          globalSettings__baseServiceUri__api: https://${DOMAIN}/api
+          globalSettings__baseServiceUri__identity: https://${DOMAIN}/identity
+          globalSettings__baseServiceUri__admin: https://${DOMAIN}/admin
+          globalSettings__baseServiceUri__notifications: https://${DOMAIN}/notifications
+          globalSettings__sqlServer__connectionString: Server=bitwarden-mssql;Database=vault;User Id=sa;Password=${SA_PASSWORD};
+          globalSettings__redis__connectionString: bitwarden-redis:6379
+          globalSettings__mail__replyToEmail: ${MAIL_FROM}
+          globalSettings__mail__smtp__host: ${SMTP_HOST}
+          globalSettings__mail__smtp__port: ${SMTP_PORT}
+          globalSettings__mail__smtp__ssl: "true"
+          globalSettings__mail__smtp__username: ${SMTP_USER}
+          globalSettings__mail__smtp__password: ${SMTP_PASSWORD}
+          globalSettings__installation__id: ${INSTALL_ID}
+          globalSettings__installation__key: ${INSTALL_KEY}
+          globalSettings__duo__aKey: ${DUO_AKEY}
+          globalSettings__duo__sKey: ${DUO_SKEY}
+          globalSettings__duo__host: ${DUO_HOST}
+        volumes:
+          - ${DATA_PATH}/logs:/app/logs
+        networks:
+          - bitwarden
+
+      bitwarden-identity:
+        image: bitwarden/identity:latest
+        container_name: bitwarden-identity
+        restart: unless-stopped
+        depends_on:
+          - bitwarden-mssql
+        environment:
+          ASPNETCORE_ENVIRONMENT: Production
+          globalSettings__baseServiceUri__vault: https://${DOMAIN}
+          globalSettings__baseServiceUri__api: https://${DOMAIN}/api
+          globalSettings__baseServiceUri__identity: https://${DOMAIN}/identity
+          globalSettings__sqlServer__connectionString: Server=bitwarden-mssql;Database=vault;User Id=sa;Password=${SA_PASSWORD};
+          globalSettings__installation__id: ${INSTALL_ID}
+          globalSettings__installation__key: ${INSTALL_KEY}
+        volumes:
+          - ${DATA_PATH}/logs:/app/logs
+        networks:
+          - bitwarden
+
+      bitwarden-web:
+        image: bitwarden/web:latest
+        container_name: bitwarden-web
+        restart: unless-stopped
+        environment:
+          VIRTUAL_HOST: ${DOMAIN}
+          VIRTUAL_PORT: 80
+        volumes:
+          - ${DATA_PATH}/web:/app
+        networks:
+          - bitwarden
+
+      bitwarden-mssql:
+        image: mcr.microsoft.com/mssql/server:2019-latest
+        container_name: bitwarden-mssql
+        restart: unless-stopped
+        environment:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: ${SA_PASSWORD}
+          MSSQL_PID: Express
+        volumes:
+          - ${DATA_PATH}/mssql/data:/var/opt/mssql/data
+          - ${DATA_PATH}/mssql/log:/var/opt/mssql/log
+          - ${DATA_PATH}/mssql/backup:/var/opt/mssql/backup
+        networks:
+          - bitwarden
+
+      bitwarden-redis:
+        image: redis:latest
+        container_name: bitwarden-redis
+        restart: unless-stopped
+        command: redis-server --appendonly yes
+        volumes:
+          - ${DATA_PATH}/redis:/data
+        networks:
+          - bitwarden
+
+    networks:
+      bitwarden:
+        driver: bridge
+
+  required_vars:
+    - name: DOMAIN
+      description: Domain name for Bitwarden (e.g., vault.example.com)
+      default: "vault.local"
+    - name: SA_PASSWORD
+      description: SQL Server SA (admin) password (minimum 8 chars, must include upper, lower, digit, special)
+      default: "P@ssw0rd123!"
+    - name: INSTALL_ID
+      description: Installation ID (obtain from Bitwarden account settings)
+      default: ""
+    - name: INSTALL_KEY
+      description: Installation key (obtain from Bitwarden account settings)
+      default: ""
+    - name: MAIL_FROM
+      description: Email from address for notifications
+      default: "bitwarden@example.com"
+    - name: SMTP_HOST
+      description: SMTP server hostname
+      default: "mail.example.com"
+    - name: SMTP_PORT
+      description: SMTP server port
+      default: "587"
+    - name: SMTP_USER
+      description: SMTP username
+      default: ""
+    - name: SMTP_PASSWORD
+      description: SMTP password
+      default: ""
+    - name: DUO_AKEY
+      description: Duo API integration key (optional)
+      default: ""
+    - name: DUO_SKEY
+      description: Duo secret integration key (optional)
+      default: ""
+    - name: DUO_HOST
+      description: Duo API hostname (optional)
+      default: ""
+    - name: LE_EMAIL
+      description: Email for Let's Encrypt certificate
+      default: "admin@example.com"
+    - name: DATA_PATH
+      description: Host path for Bitwarden data persistence
+      default: "./bitwarden"
+
+  known_mounts:
+    - container_path: /var/opt/mssql/data
+      purpose: MSSQL database data files
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/opt/mssql/backup
+      purpose: MSSQL backup directory
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/log/bitwarden
+      purpose: Application and Nginx logs
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /etc/bitwarden/certs
+      purpose: HTTPS certificates and keys
+      recommended_permissions: "700"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Bitwarden Self-Host is the official self-hosted version of Bitwarden password manager. It includes all enterprise features and is designed for organizations to maintain complete control over their data.
+
+  KEY DIFFERENCES FROM VAULTWARDEN:
+  - Bitwarden Self-Host is the official product (fully supported by Bitwarden Inc.)
+  - Vaultwarden is a community-maintained Rust reimplementation (lightweight, simpler setup)
+  - This skill covers the official Bitwarden Self-Host with MSSQL database and all microservices
+  - Use Bitwarden Self-Host for: enterprise deployments, official support needed, full feature parity
+  - Use Vaultwarden for: minimal resource usage, simple homelab setup, minimal dependencies
+
+  Multi-container architecture:
+  - bitwarden-nginx: Reverse proxy, TLS termination, load balancing
+  - bitwarden-api: Core API service
+  - bitwarden-identity: OAuth2/OIDC identity provider
+  - bitwarden-web: Web vault UI
+  - bitwarden-mssql: SQL Server database (Microsoft SQL Server 2019)
+  - bitwarden-redis: Caching layer
+
+  Prerequisites:
+  - Installation ID and Installation Key obtained from your Bitwarden account settings
+  - Domain name with DNS configured
+  - SMTP server credentials for email notifications
+  - Minimum 4GB RAM for MSSQL; 8GB recommended for organizations > 100 users
+
+  Important configuration:
+  - SA_PASSWORD must meet SQL Server complexity requirements: 8+ chars, uppercase, lowercase, digit, special char
+  - INSTALL_ID and INSTALL_KEY are mandatory for licensing; get from https://vault.bitwarden.com/admin
+  - HTTPS is enforced; configure valid certificate via Let's Encrypt or self-signed
+  - Backup MSSQL /var/opt/mssql/data directory regularly
+
+  Initial setup:
+  1. Set all required environment variables (especially INSTALL_ID, INSTALL_KEY)
+  2. Start all containers and wait for MSSQL to initialize (2-3 minutes)
+  3. Navigate to https://{DOMAIN} and create first organization/user
+  4. Configure SMTP for email notifications
+  5. Optionally enable Duo authentication
+  6. Invite users or enable registration (if desired)
+
+  Backup and restore:
+  - MSSQL database backup: docker exec bitwarden-mssql sqlcmd to run backup query
+  - Restore: Stop API/Identity, restore database, restart all services
+  - Backup directory: {DATA_PATH}/mssql/backup - store securely offsite
+
+  Security considerations:
+  - Use HTTPS with valid certificate (Let's Encrypt preferred)
+  - Restrict network access to Bitwarden ports (only HTTP/HTTPS from users)
+  - Regularly patch containers (bitwarden images, MSSQL, Redis)
+  - Enable two-factor authentication for admin accounts
+  - Store INSTALL_KEY and SA_PASSWORD securely
+  - Monitor logs in {DATA_PATH}/logs for authentication failures or errors

@@ -1,0 +1,266 @@
+id: roundcube
+name: Roundcube Webmail
+version: "1.0"
+container_match:
+  image_patterns:
+    - "roundcube/roundcubemail"
+  port_hints: [80]
+category: email
+description: IMAP webmail client with multi-user support and plugin ecosystem
+docs_url: https://hub.docker.com/r/roundcube/roundcubemail
+
+common_issues:
+  - id: db-connection-failed
+    name: Database connection failed on startup
+    symptoms:
+      - "Database connection failed"
+      - "SQLSTATE connection error"
+      - "Cannot connect to database"
+      - "Configuration error: database"
+    trigger_conditions:
+      - log_pattern: "database.*connection"
+      - log_pattern: "SQLSTATE"
+    steps:
+      - id: step-1
+        description: Check database environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -i database"
+        expected_output: "ROUNDCUBEMAIL_DB"
+        on_fail: step-2
+      - id: step-2
+        description: Display current database configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify database connectivity from container
+        type: check
+        command: "docker exec {container_name} php -r \"echo 'Config: ' . getenv('ROUNDCUBEMAIL_DB_TYPE');\""
+        expected_output: "Config:"
+        on_fail: step-4
+      - id: step-4
+        description: Check database server is reachable
+        type: check
+        command: "docker exec {container_name} curl -s {db_host}:{db_port} 2>&1 | head -1"
+        expected_output: ""
+      - id: step-5
+        description: Restart Roundcube to retry database initialization
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor logs for successful database connection
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'database\\|connection' | tail -5"
+    resolution: |
+      Roundcube could not establish a connection to its database. This is typically due to missing or misconfigured ROUNDCUBEMAIL_DB_* environment variables, or the database server being unreachable. The container has been restarted to attempt re-initialization. If using PostgreSQL or MySQL, ensure the database service is running and credentials are correct.
+
+  - id: imap-host-misconfiguration
+    name: IMAP host not configured
+    symptoms:
+      - "Connection error: IMAP server"
+      - "Cannot connect to mail server"
+      - "Login failed: no IMAP"
+      - "Mail server configuration missing"
+    trigger_conditions:
+      - log_pattern: "IMAP.*connection"
+      - log_pattern: "mail.*server"
+    steps:
+      - id: step-1
+        description: Check ROUNDCUBEMAIL_DEFAULT_HOST configuration
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep ROUNDCUBEMAIL_DEFAULT_HOST"
+        expected_output: "ROUNDCUBEMAIL_DEFAULT_HOST"
+        on_fail: step-2
+      - id: step-2
+        description: Display current IMAP host setting
+        type: inform
+        command: ""
+      - id: step-3
+        description: Verify IMAP port is accessible from container
+        type: check
+        command: "docker exec {container_name} timeout 5 bash -c \"echo > /dev/tcp/{imap_host}/143\" && echo 'IMAP port accessible' || echo 'IMAP port not reachable'"
+        expected_output: "accessible"
+        on_fail: step-4
+      - id: step-4
+        description: Display IMAP connectivity diagnostic
+        type: inform
+        command: ""
+      - id: step-5
+        description: Update IMAP configuration in container config
+        type: fix
+        command: "docker exec {container_name} bash -c \"echo 'ROUNDCUBEMAIL_DEFAULT_HOST={imap_host}' >> /var/www/html/config/config.inc.php\""
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Restart Roundcube to apply new IMAP settings
+        type: check
+        command: "docker restart {container_name} && sleep 3 && docker logs {container_name} | grep -i 'config\\|imap' | tail -3"
+    resolution: |
+      Roundcube requires ROUNDCUBEMAIL_DEFAULT_HOST to be set to your IMAP server hostname or IP address. This tells Roundcube where to connect for mail retrieval. Ensure the IMAP server is reachable from the container's network and that the correct port (typically 143 for unencrypted, 993 for TLS) is being used.
+
+  - id: permission-denied-config
+    name: Permission denied on /var/www/html mount
+    symptoms:
+      - "Permission denied when writing config"
+      - "Cannot write to configuration directory"
+      - "EACCES error on startup"
+      - "Failed to create config file"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check ownership of the web root directory
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the web root to www-data user
+        type: fix
+        command: "chown -R 33:33 {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Set appropriate directory permissions
+        type: fix
+        command: "chmod -R 755 {config_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify permissions and restart Roundcube
+        type: check
+        command: "docker restart {container_name} && sleep 3 && docker logs {container_name} | tail -10"
+    resolution: |
+      Roundcube's PHP process runs as the www-data user (UID 33). The web root directory must be owned by www-data for Roundcube to write configuration files. Ownership has been corrected and the container restarted. Roundcube should now be able to initialize its configuration directory on first run.
+
+common_issues:
+  - id: password-reset-not-working
+    name: Password reset or plugin installation fails
+    symptoms:
+      - "Cannot change password"
+      - "Plugin installation failed"
+      - "Settings changes not saved"
+      - "Error writing plugin or password"
+    trigger_conditions:
+      - log_pattern: "write.*failed"
+      - log_pattern: "plugin.*error"
+    steps:
+      - id: step-1
+        description: Check if plugins directory exists and is writable
+        type: check
+        command: "docker exec {container_name} test -d /var/www/html/plugins && test -w /var/www/html/plugins && echo 'Writable' || echo 'Not writable'"
+        expected_output: "Writable"
+        on_fail: step-2
+      - id: step-2
+        description: Check PHP error logs for write errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'write\\|permission\\|denied' | tail -5"
+        expected_output: ""
+      - id: step-3
+        description: Inform about potential PHP session storage issue
+        type: inform
+        command: ""
+      - id: step-4
+        description: Ensure temp directory is writable by www-data
+        type: fix
+        command: "docker exec {container_name} chmod 755 /tmp && chmod 755 /var/tmp"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart PHP-FPM service
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify service is running and responsive
+        type: check
+        command: "sleep 5 && docker exec {container_name} curl -s http://localhost | head -5"
+    resolution: |
+      Password changes and plugin installations require write access to temporary directories and the plugins folder. These have been corrected and the Roundcube service has been restarted. Temporary storage locations are now writable by the www-data process. Try the operation again.
+
+default_config:
+  compose_template: |
+    services:
+      roundcube:
+        image: roundcube/roundcubemail:latest
+        container_name: roundcube
+        restart: unless-stopped
+        environment:
+          ROUNDCUBEMAIL_DEFAULT_HOST: ${IMAP_HOST:-imap.example.com}
+          ROUNDCUBEMAIL_IMAP_PORT: ${IMAP_PORT:-143}
+          ROUNDCUBEMAIL_SMTP_SERVER: ${SMTP_HOST:-smtp.example.com}
+          ROUNDCUBEMAIL_SMTP_PORT: ${SMTP_PORT:-587}
+          ROUNDCUBEMAIL_DB_TYPE: ${DB_TYPE:-sqlite}
+          ROUNDCUBEMAIL_DB_HOST: ${DB_HOST:-localhost}
+          ROUNDCUBEMAIL_DB_USER: ${DB_USER:-roundcube}
+          ROUNDCUBEMAIL_DB_PASSWORD: ${DB_PASSWORD:-changeme}
+          ROUNDCUBEMAIL_DB_NAME: ${DB_NAME:-roundcube}
+        volumes:
+          - ${DATA_PATH:-./data}:/var/www/html
+          - ${LOGS_PATH:-./logs}:/var/log/roundcube
+        ports:
+          - "80:80"
+  required_vars:
+    - name: IMAP_HOST
+      description: IMAP server hostname or IP
+      default: "imap.example.com"
+    - name: IMAP_PORT
+      description: IMAP server port
+      default: "143"
+    - name: SMTP_HOST
+      description: SMTP server hostname or IP
+      default: "smtp.example.com"
+    - name: SMTP_PORT
+      description: SMTP server port
+      default: "587"
+    - name: DB_TYPE
+      description: Database type (sqlite, postgres, mysql)
+      default: "sqlite"
+    - name: DB_HOST
+      description: Database hostname (for postgres/mysql)
+      default: "localhost"
+    - name: DB_USER
+      description: Database user
+      default: "roundcube"
+    - name: DB_PASSWORD
+      description: Database password
+      default: "changeme"
+    - name: DB_NAME
+      description: Database name
+      default: "roundcube"
+  known_mounts:
+    - container_path: /var/www/html
+      purpose: Roundcube application files, configuration, and plugin data
+      recommended_permissions: "755"
+      owner: "33:33"
+    - container_path: /var/log/roundcube
+      purpose: Application logs and PHP error logs
+      recommended_permissions: "755"
+      owner: "33:33"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Roundcube is a browser-based IMAP client that allows users to access email through a web interface.
+
+  Database: Supports SQLite (for single-user), PostgreSQL, and MySQL. SQLite is file-based and suitable for single-user homelab deployments. For multi-user scenarios, use PostgreSQL or MySQL.
+
+  IMAP/SMTP: Configure ROUNDCUBEMAIL_DEFAULT_HOST to point to your mail server. Common patterns: localhost (if mail server is on same host), mail.example.com, or IP address. Ensure ports 143 (IMAP) or 993 (IMAPS) and 587 (SMTP) or 465 (SMTPS) are accessible.
+
+  TLS/SSL: For encrypted mail connections, use ports 993 (IMAPS) and 465 (SMTPS). Roundcube will auto-detect based on port selection.
+
+  Plugins: Roundcube includes a plugin system for adding features like two-factor authentication, address book sync, and calendar integration. Plugins are installed via the UI if the plugins directory is writable.
+
+  Common gotchas:
+  - IMAP server not configured: Set ROUNDCUBEMAIL_DEFAULT_HOST and test connectivity.
+  - Database initialization fails: Ensure database is running and credentials are correct.
+  - Password changes not saved: Check that /tmp and /var/tmp are writable by www-data (UID 33).
+  - Self-signed SSL certificates: Roundcube may reject untrusted certs; test from another client first.

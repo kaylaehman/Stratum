@@ -1,0 +1,264 @@
+id: fail2ban
+name: Fail2ban Intrusion Prevention
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/fail2ban"
+  port_hints: []
+category: security
+description: Brute-force attack prevention by monitoring logs and banning IPs
+docs_url: https://hub.docker.com/r/linuxserver/fail2ban
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot write to jail.local"
+      - "Fail2ban cannot read configuration"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "cannot.*jail.local"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents Fail2ban from reading its configuration and writing log files. The fix changed ownership to match the container process. Fail2ban should now be able to read and write to /config.
+
+  - id: jails-not-monitoring
+    name: Fail2ban jails not monitoring or banning IPs
+    symptoms:
+      - "No bans detected even after login attempts"
+      - "Jail enabled but not tracking failures"
+      - "Log shows 0 failures found"
+      - "No iptables rules added by fail2ban"
+    trigger_conditions:
+      - log_pattern: "jail.*disabled"
+      - log_pattern: "0 failures"
+    steps:
+      - id: step-1
+        description: Check if fail2ban service is running
+        type: check
+        command: "docker exec {container_name} fail2ban-client status | head -3"
+        expected_output: "Status"
+        on_fail: step-2
+      - id: step-2
+        description: Display fail2ban service status
+        type: inform
+        command: ""
+      - id: step-3
+        description: List all configured jails
+        type: check
+        command: "docker exec {container_name} fail2ban-client status"
+        expected_output: "jail"
+        on_fail: step-4
+      - id: step-4
+        description: Display jail configuration details
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify jail.local is correctly mounted from host
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{if eq .Destination \"/config/jail.local\"}}{{.Source}}:{{.Destination}} {{end}}{{end}}'"
+        expected_output: ""
+        on_fail: step-6
+      - id: step-6
+        description: Display current mount configuration
+        type: inform
+        command: ""
+      - id: step-7
+        description: Check for jail-enabled file in config
+        type: check
+        command: "ls -la {config_path}/jail.d/ 2>/dev/null | head -10"
+        expected_output: ""
+      - id: step-8
+        description: Inform about jail configuration structure
+        type: inform
+        command: ""
+      - id: step-9
+        description: Restart fail2ban to reload jail configurations
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-10
+      - id: step-10
+        description: Verify jails are active after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} fail2ban-client status | grep -E 'Number of jails|enabled'"
+    resolution: |
+      Fail2ban jails require proper configuration files in /config/jail.d/ (or jail.local for custom rules). Jails that are not enabled do not monitor their target logs. The container has been restarted to reload jail configurations. Ensure that your jail configuration files are mounted into the container and that the target log files (e.g., /var/log/auth.log from the monitored service) are also mounted as read-only mounts so Fail2ban can tail them.
+
+  - id: logs-not-accessible
+    name: Fail2ban cannot access monitored log files
+    symptoms:
+      - "Permission denied when reading log files"
+      - "Jail enabled but no failures detected"
+      - "Log shows cannot open monitored file"
+      - "Fail2ban runs but does not ban IPs"
+    trigger_conditions:
+      - log_pattern: "permission denied.*log"
+      - log_pattern: "cannot open.*auth.log"
+    steps:
+      - id: step-1
+        description: Verify monitored log files are mounted into container
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep -o '/.*:/.* '"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Display all mounted paths in container
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check permissions on host log files
+        type: check
+        command: "ls -la {log_path}/*.log 2>&1 | head -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify log file permissions for container read access
+        type: inform
+        command: ""
+      - id: step-5
+        description: Ensure log files are mounted read-only into container
+        type: inform
+        command: ""
+      - id: step-6
+        description: Add read permission to log files for fail2ban container user
+        type: fix
+        command: "chmod o+r {log_path}/*.log"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Restart fail2ban to retry reading monitored logs
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify fail2ban can now read monitored logs
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'Jail.*enabled' | tail -5"
+    resolution: |
+      Fail2ban requires read access to the log files it monitors (typically /var/log/auth.log, /var/log/syslog, etc.). Log files must be mounted as read-only mounts into the container. If the container user does not have read permission on the host log files, Fail2ban cannot detect failed login attempts or other events to ban. Permissions have been adjusted and Fail2ban has been restarted to resume monitoring.
+
+default_config:
+  compose_template: |
+    services:
+      fail2ban:
+        image: linuxserver/fail2ban:latest
+        container_name: fail2ban
+        restart: unless-stopped
+        network_mode: host
+        cap_add:
+          - NET_ADMIN
+          - NET_RAW
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          VERBOSITY: ${VERBOSITY:-1}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${LOG_PATH:-/var/log}:/var/log:ro
+          - /var/lib/docker/containers:/var/lib/docker/containers:ro
+        privileged: false
+  required_vars:
+    - name: PUID
+      description: User ID to run Fail2ban as
+      default: "1000"
+    - name: PGID
+      description: Group ID for Fail2ban
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (jail.local and jail.d directory)
+      default: "./config"
+    - name: LOG_PATH
+      description: Host path to monitored log directory (mounted read-only)
+      default: "/var/log"
+    - name: VERBOSITY
+      description: Fail2ban verbosity level (1=default, 2=debug)
+      default: "1"
+  known_mounts:
+    - container_path: /config
+      purpose: Fail2ban configuration (jail.local, jail.d/, filter.d/)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /var/log
+      purpose: Monitored log files (mounted read-only) — auth.log, syslog, etc.
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/docker/containers
+      purpose: Docker container logs for monitoring (mounted read-only)
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Fail2ban is a brute-force attack prevention tool that monitors log files and bans IPs with repeated failed login attempts by updating firewall rules (iptables or nftables).
+
+  Key configuration:
+  - /config/jail.local: Define custom jail rules (overrides defaults)
+  - /config/jail.d/: Directory for additional jail definitions
+  - /config/filter.d/: Custom log parsing filters
+  - network_mode: host is required so fail2ban can update host firewall rules
+
+  Required capabilities:
+  - NET_ADMIN: Required to modify iptables/nftables firewall rules
+  - NET_RAW: Required for raw socket access
+
+  Log file monitoring:
+  - Host log files (e.g., /var/log/auth.log) must be mounted into the container as read-only (ro)
+  - Docker container logs can be monitored by mounting /var/lib/docker/containers as read-only
+  - Fail2ban will tail these logs and look for patterns defined in jail filters
+
+  Common jails:
+  - sshd: SSH brute-force attempts
+  - recidive: Repeat offenders
+  - nginx-http-auth: Nginx HTTP authentication failures
+  - dovecot-auth: Mail server authentication failures
+
+  Firewall integration:
+  - iptables backend (default on older systems)
+  - nftables backend (default on modern systems)
+  - Fail2ban automatically detects and uses the available backend
+
+  Ban action:
+  - Default: DROP packets from banned IP
+  - Customizable: send email notification, log to database, webhook call
+
+  Unban:
+  - Bans persist in memory only — restarting the container unbans all IPs
+  - Use `/config/jail.local` to set `bantime` (seconds) for automatic expiration
+  - Manually unban via: `docker exec fail2ban fail2ban-client set <jail> unbanip <ip>`
+
+  Data persistence:
+  - /config must be on persistent storage — contains all jail and filter definitions
+  - Without persistent /config, all custom jails and bans are lost on restart

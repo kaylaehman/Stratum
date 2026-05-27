@@ -1,0 +1,338 @@
+id: posthog
+name: PostHog Analytics
+version: "1.0"
+container_match:
+  image_patterns:
+    - "posthog/posthog"
+  port_hints: [8000]
+category: analytics
+description: Open-source product analytics — event capture, feature flags, session replay, multi-service stack
+docs_url: https://posthog.com/docs/self-host
+
+common_issues:
+  - id: postgres-connection-failed
+    name: PostgreSQL connection refused on startup
+    symptoms:
+      - "Connection refused"
+      - "Cannot connect to database"
+      - "PostgreSQL error"
+    trigger_conditions:
+      - log_pattern: "connection.*refused|postgres.*error|database.*unavailable"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running and healthy
+        type: check
+        command: "docker ps --filter name=postgres --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test connectivity from PostHog to PostgreSQL
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv postgres 5432' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Verify DATABASE_URL environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep DATABASE_URL"
+        expected_output: "postgresql://"
+        on_fail: step-4
+      - id: step-4
+        description: Inform about network and database setup
+        type: inform
+        command: ""
+    resolution: |
+      PostHog requires PostgreSQL to be running and reachable via DATABASE_URL.
+      Ensure both containers are on the same Docker network and the DATABASE_URL
+      references the correct PostgreSQL service name (typically `postgres`). Database
+      must exist before PostHog starts. Wait 10–15 seconds for PostgreSQL to fully
+      initialize before starting PostHog.
+
+  - id: clickhouse-unavailable
+    name: ClickHouse connection unavailable — analytics not collecting
+    symptoms:
+      - "ClickHouse error"
+      - "Cannot connect to ClickHouse"
+      - "Analytics events not recorded"
+      - "CLICKHOUSE_HOST"
+    trigger_conditions:
+      - log_pattern: "clickhouse|CH_.*error|events.*failed"
+    steps:
+      - id: step-1
+        description: Verify ClickHouse container is running
+        type: check
+        command: "docker ps --filter name=clickhouse --format '{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test ClickHouse HTTP API accessibility
+        type: check
+        command: "docker exec {container_name} sh -c 'curl -s http://clickhouse:8123/ping' 2>&1"
+        expected_output: "Ok"
+        on_fail: step-3
+      - id: step-3
+        description: Check CLICKHOUSE_HOST environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep CLICKHOUSE_HOST"
+        expected_output: "clickhouse"
+      - id: step-4
+        description: Inform about ClickHouse initialization time
+        type: inform
+        command: ""
+    resolution: |
+      ClickHouse can take 30–60 seconds to initialize after startup. Ensure the
+      ClickHouse container is running and reachable at the address specified in
+      CLICKHOUSE_HOST (typically `clickhouse`). PostHog uses ClickHouse for
+      high-performance event storage; without it, analytics data is not recorded.
+      If ClickHouse just started, wait 1–2 minutes for full initialization before
+      retrying event capture.
+
+  - id: redis-connection-error
+    name: Redis connection failed — session and cache unavailable
+    symptoms:
+      - "Redis connection error"
+      - "Cannot connect to Redis"
+      - "REDIS_URL"
+      - "Cache unavailable"
+    trigger_conditions:
+      - log_pattern: "redis.*error|REDIS.*refused|cache.*failed"
+    steps:
+      - id: step-1
+        description: Verify Redis container is running
+        type: check
+        command: "docker ps --filter name=redis --format '{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test Redis connectivity from PostHog
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv redis 6379' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Verify REDIS_URL environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep REDIS_URL"
+        expected_output: "redis://"
+      - id: step-4
+        description: Inform about Redis role in PostHog
+        type: inform
+        command: ""
+    resolution: |
+      PostHog uses Redis for session management, task queuing, and caching. Both
+      containers must be on the same Docker network. Verify REDIS_URL references
+      the correct Redis service (typically `redis://redis:6379`). Without Redis,
+      PostHog cannot properly manage sessions or queue async tasks like event
+      processing and feature flag updates.
+
+  - id: worker-task-queue-stalled
+    name: Worker tasks not processing — events backlogged in queue
+    symptoms:
+      - "Worker not picking up tasks"
+      - "Event processing lag"
+      - "Queue depth increasing"
+      - "Celery error"
+    trigger_conditions:
+      - log_pattern: "worker.*error|celery.*task.*failed|queue.*backlog"
+    steps:
+      - id: step-1
+        description: Check if PostHog worker container is running
+        type: check
+        command: "docker ps --filter name=worker --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Verify worker can connect to Redis
+        type: check
+        command: "docker exec {worker_container} sh -c 'nc -zv redis 6379' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Check worker logs for task failures
+        type: check
+        command: "docker logs {worker_container} --tail 30 2>&1 | grep -i 'error\\|failed\\|exception'"
+        expected_output: ""
+      - id: step-4
+        description: Restart worker to resume task processing
+        type: fix
+        command: "docker restart {worker_container}"
+        requires_approval: true
+    resolution: |
+      PostHog uses Celery workers to process analytics events asynchronously. If
+      workers are down or disconnected from Redis, events queue up but are not
+      processed. Verify the worker container is running and can reach Redis on
+      port 6379. Check worker logs for exceptions (task_id not found, connection
+      refused, etc.). Restart the worker container to resume processing; queued
+      events will be handled once the worker is online again.
+
+default_config:
+  compose_template: |
+    services:
+      posthog:
+        image: posthog/posthog:latest
+        container_name: posthog
+        restart: unless-stopped
+        depends_on:
+          - postgres
+          - redis
+          - clickhouse
+        environment:
+          DATABASE_URL: postgresql://${DB_USER:-posthog}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-posthog}
+          REDIS_URL: redis://redis:6379/
+          CLICKHOUSE_HOST: clickhouse
+          CLICKHOUSE_DATABASE: ${CH_DB:-posthog}
+          CLICKHOUSE_USER: ${CH_USER:-default}
+          CLICKHOUSE_PASSWORD: ${CH_PASSWORD}
+          SECRET_KEY: ${SECRET_KEY}
+          DISABLE_SECURE_SSL_REDIRECT: "False"
+          SECURE_COOKIES: "True"
+        ports:
+          - "8000:8000"
+        volumes:
+          - posthog_data:/data
+
+      worker:
+        image: posthog/posthog:latest
+        container_name: posthog_worker
+        restart: unless-stopped
+        depends_on:
+          - postgres
+          - redis
+          - clickhouse
+        command: celery -A posthog worker -l info
+        environment:
+          DATABASE_URL: postgresql://${DB_USER:-posthog}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-posthog}
+          REDIS_URL: redis://redis:6379/
+          CLICKHOUSE_HOST: clickhouse
+          CLICKHOUSE_DATABASE: ${CH_DB:-posthog}
+          CLICKHOUSE_USER: ${CH_USER:-default}
+          CLICKHOUSE_PASSWORD: ${CH_PASSWORD}
+          SECRET_KEY: ${SECRET_KEY}
+
+      postgres:
+        image: postgres:16-alpine
+        container_name: posthog_postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${DB_NAME:-posthog}
+          POSTGRES_USER: ${DB_USER:-posthog}
+          POSTGRES_PASSWORD: ${DB_PASSWORD}
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+
+      redis:
+        image: redis:7-alpine
+        container_name: posthog_redis
+        restart: unless-stopped
+        volumes:
+          - redis_data:/data
+
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        container_name: posthog_clickhouse
+        restart: unless-stopped
+        ulimits:
+          nofile: 262144
+        environment:
+          CLICKHOUSE_DB: ${CH_DB:-posthog}
+          CLICKHOUSE_USER: ${CH_USER:-default}
+          CLICKHOUSE_PASSWORD: ${CH_PASSWORD}
+        volumes:
+          - clickhouse_data:/var/lib/clickhouse
+
+    volumes:
+      posthog_data:
+      postgres_data:
+      redis_data:
+      clickhouse_data:
+
+  required_vars:
+    - name: DB_USER
+      description: PostgreSQL username for PostHog
+      default: "posthog"
+    - name: DB_PASSWORD
+      description: PostgreSQL password
+      default: ""
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "posthog"
+    - name: SECRET_KEY
+      description: Django secret key for session encryption (min 32 chars)
+      default: ""
+    - name: CH_USER
+      description: ClickHouse username
+      default: "default"
+    - name: CH_PASSWORD
+      description: ClickHouse password
+      default: ""
+    - name: CH_DB
+      description: ClickHouse database name
+      default: "posthog"
+
+  known_mounts:
+    - container_path: /data
+      purpose: PostHog session and cache data
+      recommended_permissions: "755"
+      owner: "0:0"
+    - container_path: /var/lib/postgresql/data
+      purpose: PostgreSQL event metadata and configuration
+      recommended_permissions: "700"
+      owner: "999:999"
+    - container_path: /var/lib/clickhouse
+      purpose: ClickHouse high-performance event storage
+      recommended_permissions: "755"
+      owner: "0:0"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  PostHog is a complex, multi-container analytics platform consisting of:
+
+  1. **Web service** (posthog): Main application server, handles UI, API, event ingestion
+  2. **Worker** (Celery): Processes events asynchronously (feature flags, session replay, etc.)
+  3. **PostgreSQL**: Relational database for configuration, user data, feature flags
+  4. **Redis**: Cache and task queue (Celery broker)
+  5. **ClickHouse**: Column-oriented database for high-performance event analytics
+
+  All five services must be running and reachable for full functionality. This is
+  significantly more complex than single-container analytics platforms.
+
+  **Initialization order and timing:**
+  PostgreSQL initializes first (10–15 seconds). PostHog web service then runs migrations
+  (30–60 seconds). ClickHouse takes longest (60+ seconds). Recommend setting
+  depends_on: [postgres, redis, clickhouse] but add health checks if possible.
+
+  **Worker process:**
+  The worker container runs `celery -A posthog worker` to process event pipeline
+  tasks. Without it, events are recorded but not processed. Always run at least
+  one worker replica for production. Scale horizontally by running multiple worker
+  containers with unique names.
+
+  **Secret key generation:**
+  SECRET_KEY must be a random string for Django session security. Generate with:
+  `openssl rand -hex 16`
+
+  **ClickHouse CPU and memory:**
+  ClickHouse can be memory-hungry on startup. For resource-constrained environments,
+  monitor initial boot. Default config allocates freely; consider setting
+  ulimits.memlock to cap memory if needed.
+
+  **Data retention:**
+  PostHog's event retention is configurable in the UI. By default, events are kept
+  for 7 days. Older events are automatically purged by a cleanup task running in
+  the worker.
+
+  **Feature flags:**
+  Feature flags and experiments are powered by PostgreSQL + Redis. Real-time
+  flag updates require both services to be responsive.
+
+  **Session replay:**
+  Session replay videos are stored in ClickHouse and indexed in PostgreSQL.
+  Both must be healthy for replay features to function.
+
+  **Scaling considerations:**
+  - Multiple workers: run multiple worker containers pointing to the same REDIS_URL
+  - Multiple ClickHouse replicas: requires cluster configuration (not covered here)
+  - Multiple web instances: use a load balancer; all must share DATABASE_URL, REDIS_URL, CLICKHOUSE_HOST
+  - PostgreSQL replication: use managed service or separate replication setup

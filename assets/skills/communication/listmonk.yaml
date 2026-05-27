@@ -1,0 +1,299 @@
+id: listmonk
+name: Listmonk Email Newsletter Platform
+version: "1.0"
+container_match:
+  image_patterns:
+    - "listmonk/listmonk"
+  port_hints: [9000]
+category: communication
+description: Self-hosted email newsletter platform with list management and campaign delivery
+docs_url: https://hub.docker.com/r/listmonk/listmonk
+
+common_issues:
+  - id: database-migration-required
+    name: Application requires database initialization or migration
+    symptoms:
+      - "migration required"
+      - "database version mismatch"
+      - "tables not found"
+      - "invalid schema"
+    trigger_conditions:
+      - log_pattern: "migration"
+      - log_pattern: "schema"
+      - log_pattern: "database.*version"
+    steps:
+      - id: step-1
+        description: Check current database migration status
+        type: check
+        command: "docker logs {container_name} | grep -i 'migration\\|install' | tail -5"
+        expected_output: ""
+      - id: step-2
+        description: Verify PostgreSQL connection is accessible
+        type: check
+        command: "docker exec {container_name} pg_isready -h {db_host} -p {db_port} -U {db_user}"
+        expected_output: "accepting"
+        on_fail: step-3
+      - id: step-3
+        description: Display database connection status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Run database migrations with --install flag
+        type: fix
+        command: "docker exec {container_name} ./listmonk --install"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify installation completed successfully
+        type: check
+        command: "docker logs {container_name} | grep -i 'install.*complete\\|ready' | tail -3"
+    resolution: |
+      Database migrations have been completed. Listmonk has initialized the PostgreSQL schema with all required tables. The application should now be ready to start. Access the web UI at http://localhost:9000 to set up your admin user and begin creating campaigns.
+
+  - id: postgresql-connection-failed
+    name: Cannot connect to PostgreSQL database
+    symptoms:
+      - "database connection refused"
+      - "postgres connection error"
+      - "failed to connect to db"
+      - "invalid DSN"
+    trigger_conditions:
+      - log_pattern: "postgres"
+      - log_pattern: "connection.*refuse"
+      - log_pattern: "DSN"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running
+        type: check
+        command: "docker ps | grep postgres"
+        expected_output: "postgres"
+        on_fail: step-2
+      - id: step-2
+        description: Check PostgreSQL container status
+        type: check
+        command: "docker inspect {db_container_name} --format='{{.State.Status}}' 2>/dev/null || echo 'Container not found'"
+        expected_output: "running"
+      - id: step-3
+        description: Display PostgreSQL connection details
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test connection from listmonk to PostgreSQL
+        type: check
+        command: "docker exec {container_name} psql -h {db_host} -p {db_port} -U {db_user} -d {db_name} -c 'SELECT 1' 2>&1"
+        expected_output: "1"
+        on_fail: step-5
+      - id: step-5
+        description: Verify environment variables are correctly set
+        type: check
+        command: "docker exec {container_name} env | grep -i 'db_\\|database'"
+        expected_output: ""
+    resolution: |
+      Database connection has been verified. Ensure that PostgreSQL is running before starting listmonk. The database connection string is built from environment variables: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME. Double-check these values match your PostgreSQL configuration.
+
+  - id: smtp-delivery-failed
+    name: Email delivery not working or SMTP errors
+    symptoms:
+      - "failed to send email"
+      - "SMTP error"
+      - "connection refused on SMTP"
+      - "campaigns not being delivered"
+    trigger_conditions:
+      - log_pattern: "SMTP"
+      - log_pattern: "delivery.*fail"
+      - log_pattern: "email.*error"
+    steps:
+      - id: step-1
+        description: Check SMTP configuration in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'SMTP\\|mail' | tail -5"
+        expected_output: ""
+      - id: step-2
+        description: Verify SMTP credentials and host are configured
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:9000/api/health"
+        expected_output: "ok"
+      - id: step-3
+        description: Display SMTP configuration status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Test SMTP connectivity from container
+        type: check
+        command: "docker exec {container_name} timeout 5 bash -c 'echo test | nc -zv {smtp_host} {smtp_port}' 2>&1 || true"
+        expected_output: ""
+      - id: step-5
+        description: Inform user about SMTP configuration in web UI
+        type: inform
+        command: ""
+    resolution: |
+      SMTP configuration has been verified. To send emails, configure SMTP settings in the Listmonk web UI (Settings → SMTP). Common issues: incorrect host/port, authentication failures, firewall blocking SMTP, or SMTP service not running. Test with a real SMTP provider (SendGrid, Mailgun, Gmail) if local SMTP is unavailable.
+
+  - id: web-ui-not-loading
+    name: Web UI fails to load or respond
+    symptoms:
+      - "connection refused"
+      - "cannot access http://localhost:9000"
+      - "blank page"
+      - "504 Gateway Timeout"
+    trigger_conditions:
+      - log_pattern: "listen"
+      - log_pattern: "error.*9000"
+    steps:
+      - id: step-1
+        description: Verify listmonk is listening on port 9000
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 9000"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check container startup logs
+        type: check
+        command: "docker logs {container_name} | head -20"
+        expected_output: ""
+      - id: step-3
+        description: Display container status and recent errors
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart listmonk container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify web server is responding
+        type: check
+        command: "sleep 3 && docker exec {container_name} curl -s http://localhost:9000 | head -5"
+    resolution: |
+      Listmonk has been restarted and the web UI should now be accessible at http://localhost:9000. If you see a login page, the application is working correctly. Use your configured admin credentials to log in.
+
+  - id: high-memory-usage-campaigns
+    name: High memory usage during campaign delivery
+    symptoms:
+      - "memory usage over 80%"
+      - "container killed due to memory limit"
+      - "OOMKilled"
+      - "slow delivery performance"
+    trigger_conditions:
+      - log_pattern: "memory"
+    steps:
+      - id: step-1
+        description: Check current memory usage
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Check campaign queue size
+        type: check
+        command: "docker logs {container_name} | grep -i 'queue\\|pending' | tail -5"
+        expected_output: ""
+      - id: step-3
+        description: Display memory usage and campaign status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Reduce batch size for campaign delivery
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart container to clear memory
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Monitor memory usage after restart
+        type: check
+        command: "sleep 10 && docker stats {container_name} --no-stream"
+    resolution: |
+      Listmonk has been restarted and memory usage should reset. Large campaigns consume significant memory during delivery. Configure batch sizes in Settings to limit simultaneous message sending. For large subscriber lists (>50k), consider using a dedicated message queue (e.g., RabbitMQ) to decouple campaign processing.
+
+default_config:
+  compose_template: |
+    services:
+      listmonk:
+        image: listmonk/listmonk:latest
+        container_name: listmonk
+        restart: unless-stopped
+        environment:
+          LISTMONK_db__host: ${DB_HOST:-postgres}
+          LISTMONK_db__port: ${DB_PORT:-5432}
+          LISTMONK_db__user: ${DB_USER:-listmonk}
+          LISTMONK_db__password: ${DB_PASSWORD:-listmonk}
+          LISTMONK_db__database: ${DB_NAME:-listmonk}
+          LISTMONK_app__address: 0.0.0.0:9000
+          LISTMONK_app__admin_username: ${ADMIN_USERNAME:-admin}
+          LISTMONK_app__admin_password: ${ADMIN_PASSWORD:-admin}
+        depends_on:
+          - postgres
+        volumes:
+          - ${DATA_PATH:-./data}:/app/listmonk/data
+        ports:
+          - "9000:9000/tcp"
+
+      postgres:
+        image: postgres:15-alpine
+        container_name: listmonk-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${DB_USER:-listmonk}
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-listmonk}
+          POSTGRES_DB: ${DB_NAME:-listmonk}
+        volumes:
+          - ${POSTGRES_DATA_PATH:-./postgres}:/var/lib/postgresql/data
+
+  required_vars:
+    - name: DB_HOST
+      description: PostgreSQL hostname
+      default: "postgres"
+    - name: DB_PORT
+      description: PostgreSQL port
+      default: "5432"
+    - name: DB_USER
+      description: PostgreSQL username
+      default: "listmonk"
+    - name: DB_PASSWORD
+      description: PostgreSQL password
+      default: "listmonk"
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "listmonk"
+    - name: ADMIN_USERNAME
+      description: Listmonk admin username (set on first run)
+      default: "admin"
+    - name: ADMIN_PASSWORD
+      description: Listmonk admin password (change after first login)
+      default: "admin"
+    - name: DATA_PATH
+      description: Host path for /app/listmonk/data
+      default: "./data"
+    - name: POSTGRES_DATA_PATH
+      description: Host path for PostgreSQL data
+      default: "./postgres"
+
+  known_mounts:
+    - container_path: /app/listmonk/data
+      purpose: Listmonk configuration and media uploads
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Listmonk is a self-hosted newsletter and mailing list platform. It requires PostgreSQL for data storage.
+
+  Database setup: On first startup, listmonk requires database initialization via the --install flag. This creates all necessary tables and schema.
+
+  Admin credentials: Default admin username and password are set via environment variables. Change them immediately after first login.
+
+  SMTP configuration: Email delivery requires SMTP settings. Configure in the web UI under Settings → SMTP. Common providers: SendGrid, Mailgun, Gmail, or local postfix.
+
+  Subscribers and lists: Create subscriber lists and import subscribers via CSV. Design campaigns with a built-in editor or use external templates.
+
+  Performance: For large subscriber lists (>100k), consider tuning batch sizes and using message queuing. Database indexes are created automatically.
+
+  Backup: The PostgreSQL database contains all subscriber data and campaign history. Regular backups are recommended.
+
+  Web UI login: Access at http://localhost:9000. First login with admin credentials; create regular user accounts for other team members.

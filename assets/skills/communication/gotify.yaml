@@ -1,0 +1,215 @@
+id: gotify
+name: Gotify Push Notification Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "gotify/server"
+  port_hints: [80]
+category: communication
+description: Self-hosted push notification server with REST API and mobile apps
+docs_url: https://hub.docker.com/r/gotify/server
+
+common_issues:
+  - id: initial-default-user-not-created
+    name: Default user not created on first startup
+    symptoms:
+      - "admin login fails"
+      - "no users configured"
+      - "cannot access web UI"
+      - "admin:admin credentials not working"
+    trigger_conditions:
+      - log_pattern: "default user"
+      - log_pattern: "no users found"
+    steps:
+      - id: step-1
+        description: Check if Gotify has been initialized with default user
+        type: check
+        command: "docker exec {container_name} ls -la /app/data/ | grep gotify.db"
+        expected_output: "gotify.db"
+        on_fail: step-2
+      - id: step-2
+        description: Display data directory contents
+        type: inform
+        command: ""
+      - id: step-3
+        description: Remove existing database to trigger default user creation on restart
+        type: fix
+        command: "docker exec {container_name} rm -f /app/data/gotify.db"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Restart Gotify to recreate database and default user
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify default user was created
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'default user\\|created' | tail -3"
+    resolution: |
+      Gotify database has been reset and default admin user (admin:admin) has been recreated. Log in with these credentials immediately and change the password. Keep the database file secure and back it up regularly.
+
+  - id: app-data-directory-permission
+    name: Permission denied on /app/data directory
+    symptoms:
+      - "permission denied"
+      - "cannot read database"
+      - "failed to initialize database"
+      - "EACCES error"
+    trigger_conditions:
+      - log_pattern: "permission denied.*data"
+      - log_pattern: "cannot open.*database"
+    steps:
+      - id: step-1
+        description: Check data directory ownership and permissions
+        type: check
+        command: "stat {data_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display data directory status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Ensure data directory has correct permissions
+        type: fix
+        command: "mkdir -p {data_path} && chmod 755 {data_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Restart Gotify to verify database access
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify container started successfully
+        type: check
+        command: "docker logs {container_name} | grep -i 'listening\\|started' | tail -2"
+    resolution: |
+      Data directory permissions have been corrected. Gotify stores the SQLite database and uploaded files in /app/data. The fix ensured the directory is accessible to the container process.
+
+  - id: web-ui-not-loading
+    name: Web UI fails to load or display
+    symptoms:
+      - "blank white page"
+      - "404 Not Found"
+      - "cannot access http://localhost/ui/"
+      - "static assets not loading"
+    trigger_conditions:
+      - log_pattern: "404"
+      - log_pattern: "UI"
+    steps:
+      - id: step-1
+        description: Verify Gotify is listening on port 80
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost/api/version"
+        expected_output: "version"
+        on_fail: step-2
+      - id: step-2
+        description: Check container logs for startup errors
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Display startup status
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Gotify to reinitialize the web server
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify API endpoint is responding
+        type: check
+        command: "sleep 3 && docker exec {container_name} curl -s http://localhost/api/health"
+    resolution: |
+      Gotify has been restarted and the web UI should now be accessible at http://localhost/ui/. If the issue persists, check your browser cache or try accessing in an incognito window.
+
+  - id: notification-not-delivered
+    name: Notifications not being received by clients
+    symptoms:
+      - "messages sent but not received"
+      - "WebSocket connection drops"
+      - "push notifications not arriving"
+      - "client shows as offline"
+    trigger_conditions:
+      - log_pattern: "websocket"
+      - log_pattern: "delivery.*fail"
+    steps:
+      - id: step-1
+        description: Verify API token is valid and has correct permissions
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost/api/apps -H 'Authorization: Bearer {token}'"
+        expected_output: ""
+      - id: step-2
+        description: Test sending a test notification
+        type: fix
+        command: "docker exec {container_name} curl -X POST http://localhost/message -H 'Content-Type: application/json' -d '{\"title\":\"Test\",\"message\":\"Connection test\",\"priority\":5}'"
+        requires_approval: true
+        on_success: step-3
+      - id: step-3
+        description: Check application logs for delivery attempts
+        type: check
+        command: "docker logs {container_name} | grep -i 'deliver\\|message' | tail -10"
+    resolution: |
+      Test notification has been sent. Verify that your client application is connected with the correct authentication token and that network connectivity between the client and Gotify server is stable. Check firewall rules if clients are connecting remotely.
+
+default_config:
+  compose_template: |
+    services:
+      gotify:
+        image: gotify/server:latest
+        container_name: gotify
+        restart: unless-stopped
+        environment:
+          GOTIFY_DEFAULTUSER_NAME: ${GOTIFY_DEFAULTUSER_NAME:-admin}
+          GOTIFY_DEFAULTUSER_PASS: ${GOTIFY_DEFAULTUSER_PASS:-admin}
+          GOTIFY_SERVER_PORT: 80
+        volumes:
+          - ${DATA_PATH:-./data}:/app/data
+        ports:
+          - "80:80/tcp"
+  required_vars:
+    - name: GOTIFY_DEFAULTUSER_NAME
+      description: Default admin username
+      default: "admin"
+    - name: GOTIFY_DEFAULTUSER_PASS
+      description: Default admin password (change after first login)
+      default: "admin"
+    - name: DATA_PATH
+      description: Host path for /app/data (database and files)
+      default: "./data"
+  known_mounts:
+    - container_path: /app/data
+      purpose: SQLite database and uploaded message files
+      recommended_permissions: "755"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Gotify is a simple push notification server with REST API and mobile app support. Ideal for self-hosted alert systems.
+
+  Initial setup:
+  - Default credentials are admin:admin (set via GOTIFY_DEFAULTUSER_NAME and GOTIFY_DEFAULTUSER_PASS).
+  - Change the password immediately after first login.
+  - Create application tokens in the web UI for notification delivery.
+
+  Web UI: Accessible at http://localhost/ui/ after startup. Creates and manages users, applications, and displays message history.
+
+  API: RESTful API available at http://localhost/api/. Supports password auth or token-based auth via Authorization header.
+
+  Notifications: Send via curl or any HTTP client:
+    curl -X POST http://localhost/message \
+      -H 'Content-Type: application/json' \
+      -H 'Authorization: Bearer YOUR_TOKEN' \
+      -d '{"title":"Alert","message":"Something happened","priority":5}'
+
+  Mobile clients: Official mobile apps available for iOS and Android. Clients connect via WebSocket for push notifications.
+
+  Performance: Lightweight, single SQLite database. Scales well on low-power hardware. Message retention is in-memory; restart clears old messages.

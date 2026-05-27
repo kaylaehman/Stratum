@@ -1,0 +1,305 @@
+id: mailu
+name: Mailu
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/mailu/admin"
+    - "mailu/admin"
+  port_hints: [25, 143, 465, 587, 993, 80, 443]
+category: email
+description: Simple yet full-featured mail server with web administration and webmail UI
+docs_url: https://mailu.io/
+
+common_issues:
+  - id: admin-panel-not-accessible
+    name: Admin panel returns 502 or is unreachable
+    symptoms:
+      - "502 Bad Gateway"
+      - "Connection refused"
+      - "Admin panel not responding"
+    trigger_conditions:
+      - log_pattern: "502"
+    steps:
+      - id: step-1
+        description: Check if admin container is running
+        type: check
+        command: "docker ps | grep mailu_admin"
+        expected_output: "mailu_admin"
+        on_fail: step-2
+      - id: step-2
+        description: Check admin container logs
+        type: check
+        command: "docker logs mailu_admin | tail -20"
+        expected_output: "Running"
+        on_fail: step-3
+      - id: step-3
+        description: Restart the admin container
+        type: fix
+        command: "docker restart mailu_admin"
+        requires_approval: true
+    resolution: |
+      The admin panel is served by the mailu_admin container. If it is
+      crashing, check the container logs for database connection errors or
+      missing environment variables. Restarting the container often resolves
+      transient issues.
+
+  - id: mail-not-being-received
+    name: Incoming mail fails or is rejected
+    symptoms:
+      - "550 5.1.1 user unknown"
+      - "Connection refused on port 25"
+      - "No mail arriving"
+    trigger_conditions:
+      - log_pattern: "user unknown"
+    steps:
+      - id: step-1
+        description: Inform about SMTP port 25 internet accessibility requirement
+        type: inform
+        command: ""
+      - id: step-2
+        description: Verify port 25 is open and exposed
+        type: check
+        command: "docker ps | grep -i mailu | grep '25'"
+        expected_output: "25"
+        on_fail: step-3
+      - id: step-3
+        description: Test SMTP connectivity from external host
+        type: check
+        command: "echo 'QUIT' | nc -q 1 {mail_host} 25"
+        expected_output: "220"
+        on_fail: step-4
+      - id: step-4
+        description: Inform about firewall/ISP blocking
+        type: inform
+        command: ""
+    resolution: |
+      For inbound mail, port 25 must be reachable from the public internet.
+      Your MX record must point to your mail server's hostname. Many residential
+      ISPs and cloud providers block port 25 outbound — if you cannot open port 25,
+      consider using a mail relay for outbound delivery and a separate inbound
+      service. Test MX records at https://mxtoolbox.com/.
+
+  - id: tls-certificate-missing
+    name: TLS certificate error — Let's Encrypt renewal failed
+    symptoms:
+      - "SSL: CERTIFICATE_VERIFY_FAILED"
+      - "certificate has expired"
+      - "ACME challenge failed"
+    trigger_conditions:
+      - log_pattern: "certificate"
+    steps:
+      - id: step-1
+        description: Check certificate directory
+        type: check
+        command: "ls -la {mail_path}/certs/ | grep -i cert"
+        expected_output: "cert.pem"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about Let's Encrypt renewal via Mailu
+        type: inform
+        command: ""
+      - id: step-3
+        description: Trigger certificate renewal
+        type: fix
+        command: "docker exec mailu_admin flask mailu update-all"
+        requires_approval: true
+    resolution: |
+      Mailu uses Let's Encrypt with automatic renewal. If renewal fails, ensure
+      your domain resolves correctly and ports 80/443 are accessible for the
+      ACME challenge. The Flask command above attempts to refresh all certificates.
+      Check the admin container logs for specific ACME errors.
+
+  - id: database-not-ready
+    name: Services fail to start — database not initialized
+    symptoms:
+      - "Cannot connect to database"
+      - "database error" in logs
+      - "admin container exits immediately"
+    trigger_conditions:
+      - log_pattern: "database"
+    steps:
+      - id: step-1
+        description: Check if Redis is running
+        type: check
+        command: "docker ps | grep mailu_redis"
+        expected_output: "mailu_redis"
+        on_fail: step-2
+      - id: step-2
+        description: Check if PostgreSQL is running
+        type: check
+        command: "docker ps | grep mailu_postgres"
+        expected_output: "mailu_postgres"
+        on_fail: step-3
+      - id: step-3
+        description: Wait and restart all services
+        type: fix
+        command: "docker restart mailu_redis mailu_postgres mailu_admin"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Wait 10 seconds and verify admin is accessible
+        type: check
+        command: "sleep 10 && curl -s http://localhost/admin/ | head -5"
+        expected_output: "html"
+    resolution: |
+      Mailu requires both Redis and PostgreSQL to be running. If restarting
+      services doesn't help, check container logs for database initialization
+      errors. The PostgreSQL container may need a few seconds to initialize
+      on first run.
+
+  - id: permission-denied-mail-data
+    name: Permission denied on mail data directories
+    symptoms:
+      - "permission denied"
+      - "Cannot create/write mailbox files"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of mail data directory
+        type: check
+        command: "stat {mail_path}/data"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Fix ownership of mail directories to Mailu user
+        type: fix
+        command: "chown -R 100:101 {mail_path}/data && chmod -R 750 {mail_path}/data"
+        requires_approval: true
+    resolution: |
+      The Mailu containers (Postfix, Dovecot) run as users in the 100-101 UID
+      range. The {mail_path}/data directory must be writable by those users.
+      The fix recursively changes ownership to UID 100:101.
+
+default_config:
+  compose_template: |
+    version: '3.8'
+    services:
+      redis:
+        image: redis:7-alpine
+        restart: unless-stopped
+        volumes:
+          - ${MAIL_PATH:-./data}/redis:/data
+      postgres:
+        image: postgres:15
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: mailu
+          POSTGRES_USER: mailu
+          POSTGRES_PASSWORD: ${DB_PASSWORD}
+        volumes:
+          - ${MAIL_PATH:-./data}/postgres:/var/lib/postgresql/data
+      admin:
+        image: ghcr.io/mailu/admin:latest
+        restart: unless-stopped
+        depends_on:
+          - redis
+          - postgres
+        environment:
+          DOMAIN: ${DOMAIN}
+          HOSTNAME: ${HOSTNAME}
+          SECRET_KEY: ${SECRET_KEY}
+          POSTMASTER_ADDRESS: ${POSTMASTER_ADDRESS}
+          DB_USER: mailu
+          DB_PASSWORD: ${DB_PASSWORD}
+        volumes:
+          - ${MAIL_PATH:-./data}/admin:/data
+        ports:
+          - "80:80"
+          - "443:443"
+      imap:
+        image: ghcr.io/mailu/dovecot:latest
+        restart: unless-stopped
+        depends_on:
+          - admin
+        environment:
+          DOMAIN: ${DOMAIN}
+          HOSTNAME: ${HOSTNAME}
+        volumes:
+          - ${MAIL_PATH:-./data}/mail:/var/mail
+        ports:
+          - "143:143"
+          - "993:993"
+      smtp:
+        image: ghcr.io/mailu/postfix:latest
+        restart: unless-stopped
+        depends_on:
+          - admin
+        environment:
+          DOMAIN: ${DOMAIN}
+          HOSTNAME: ${HOSTNAME}
+        volumes:
+          - ${MAIL_PATH:-./data}/mail:/var/mail
+        ports:
+          - "25:25"
+          - "465:465"
+          - "587:587"
+  required_vars:
+    - name: DOMAIN
+      description: Mail domain (e.g. example.com)
+      default: "example.com"
+    - name: HOSTNAME
+      description: Mail server hostname (e.g. mail.example.com)
+      default: "mail.example.com"
+    - name: SECRET_KEY
+      description: Secret key for admin session encryption
+      default: ""
+    - name: DB_PASSWORD
+      description: PostgreSQL password
+      default: ""
+    - name: POSTMASTER_ADDRESS
+      description: Email address for postmaster notifications
+      default: "postmaster@example.com"
+    - name: MAIL_PATH
+      description: Host path for persistent mail data
+      default: "./data"
+  known_mounts:
+    - container_path: /var/mail
+      purpose: User mailboxes and mail spool
+      recommended_permissions: "750"
+      owner: "100:101"
+    - container_path: /data
+      purpose: Redis data, PostgreSQL data, admin config
+      recommended_permissions: "750"
+      owner: "100:101"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Mailu is a modular mail server composed of multiple containers (admin panel,
+  Postfix SMTP, Dovecot IMAP, Redis cache, PostgreSQL database). The official
+  setup wizard at https://setup.mailu.io/ generates a docker-compose.yml and
+  env file for your configuration.
+
+  Installation steps (official):
+  1. Visit https://setup.mailu.io/ and answer the questionnaire
+  2. Download the generated docker-compose.yml and mailu.env
+  3. Place them in a directory (e.g., ~/mailu/)
+  4. Run: docker-compose up -d
+
+  Ports:
+  - 25: SMTP (incoming, unencrypted)
+  - 465: SMTPS (implicit TLS)
+  - 587: SMTP Submission (STARTTLS with auth)
+  - 143: IMAP (plaintext)
+  - 993: IMAPS (TLS)
+  - 80: HTTP (redirects to 443)
+  - 443: HTTPS (admin panel, webmail)
+
+  Features:
+  - Full SMTP/IMAP mail server
+  - Web-based admin panel
+  - Webmail UI (Roundcube or Rainloop, depending on version)
+  - TLS support with automatic Let's Encrypt
+  - Anti-spam and anti-virus scanning (optional, via Rspamd/ClamAV)
+  - User quota management
+  - Forwarding and aliasing
+  - DKIM/SPF/DMARC signing
+
+  For inbound mail: your MX record must point to your mail server, and port 25
+  must be open to the internet. Use https://mxtoolbox.com/ to verify.
+
+  Mailu uses PostgreSQL for user/domain storage and Redis for caching. Both
+  must be healthy for the system to function. Check container logs if any
+  service fails to start.

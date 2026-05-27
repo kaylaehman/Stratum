@@ -1,0 +1,227 @@
+id: umami
+name: Umami Analytics
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/umami-software/umami"
+  port_hints: [3000]
+category: analytics
+description: Lightweight web analytics platform — no cookies, simple single-container deployment
+docs_url: https://umami.is/docs/install
+
+common_issues:
+  - id: database-url-missing
+    name: Database connection error — DATABASE_URL not set or invalid
+    symptoms:
+      - "Cannot connect to database"
+      - "DATABASE_URL is not set"
+      - "Connection refused"
+    trigger_conditions:
+      - log_pattern: "DATABASE_URL|database.*error|connection.*refused"
+    steps:
+      - id: step-1
+        description: Check if DATABASE_URL environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep DATABASE_URL"
+        expected_output: "DATABASE_URL="
+        on_fail: step-2
+      - id: step-2
+        description: Verify DATABASE_URL format
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep DATABASE_URL | head -1"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Inform about DATABASE_URL requirements
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Umami with corrected DATABASE_URL
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Umami requires the DATABASE_URL environment variable to be set.
+      Supported formats:
+      - PostgreSQL: `postgresql://user:password@host:5432/umami`
+      - MySQL: `mysql://user:password@host:3306/umami`
+      Without this variable, Umami cannot store or retrieve analytics data.
+
+  - id: db-container-unreachable
+    name: Database container unreachable — wrong host or port
+    symptoms:
+      - "Connection timeout"
+      - "Cannot reach database host"
+      - "ECONNREFUSED"
+    trigger_conditions:
+      - log_pattern: "timeout|ECONNREFUSED|Cannot reach"
+    steps:
+      - id: step-1
+        description: Verify the database container is running
+        type: check
+        command: "docker ps --filter name={db_container} --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test connectivity from Umami to database
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {db_host} {db_port}' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Verify both containers are on the same network
+        type: check
+        command: "docker network inspect bridge --format='{{range .Containers}}{{.Name}},{{end}}' | grep -q {container_name} && echo 'OK' || echo 'NOT_FOUND'"
+        expected_output: "OK"
+      - id: step-4
+        description: Confirm DATABASE_URL uses correct host and port
+        type: inform
+        command: ""
+    resolution: |
+      Both Umami and the database must be on the same Docker network and
+      DATABASE_URL must reference the correct database hostname and port.
+      For containers in docker-compose, use the service name from the compose
+      file (e.g., `postgres`, `mysql`), not `localhost`.
+
+  - id: migration-failed
+    name: Database migration failed on startup
+    symptoms:
+      - "Migration error"
+      - "Table already exists"
+      - "Schema mismatch"
+    trigger_conditions:
+      - log_pattern: "migration|schema|table.*exists"
+    steps:
+      - id: step-1
+        description: Check database for existing Umami schema
+        type: check
+        command: "docker exec {db_container} psql -U {db_user} -d {db_name} -c '\\dt' 2>&1 | grep -q umami"
+        expected_output: ""
+      - id: step-2
+        description: Review Umami logs for detailed error
+        type: check
+        command: "docker logs {container_name} --tail 50 2>&1 | grep -i migration"
+        expected_output: ""
+      - id: step-3
+        description: Inform about manual migration if needed
+        type: inform
+        command: ""
+    resolution: |
+      Umami runs database migrations automatically on startup. If a migration
+      fails, it is usually due to an existing partial schema or wrong database.
+      Verify the database is empty on first deployment, or check if a previous
+      version of Umami left incomplete tables. If necessary, drop and recreate
+      the database and restart the container.
+
+  - id: admin-login-fails
+    name: Cannot log in to admin panel
+    symptoms:
+      - "Invalid username or password"
+      - "Login redirect loop"
+      - "403 Forbidden"
+    trigger_conditions:
+      - log_pattern: "login.*fail|auth.*error|403"
+    steps:
+      - id: step-1
+        description: Verify admin user exists in database
+        type: check
+        command: "docker exec {db_container} psql -U {db_user} -d {db_name} -c \"SELECT * FROM users LIMIT 1;\" 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Check if database migration is complete
+        type: check
+        command: "docker logs {container_name} --tail 20 2>&1 | grep -i 'migration.*complete\\|ready'"
+        expected_output: ""
+      - id: step-3
+        description: Inform about clearing credentials
+        type: inform
+        command: ""
+      - id: step-4
+        description: Drop and recreate user table to reset admin
+        type: fix
+        command: "docker exec {db_container} psql -U {db_user} -d {db_name} -c \"DELETE FROM users;\" 2>&1"
+        requires_approval: true
+    resolution: |
+      If migrations completed but admin login fails, the admin user may not exist
+      or the credentials may be incorrect. Umami creates a default admin on first
+      run (username: `admin`, password: `umami`). If those fail, reset by clearing
+      the users table — Umami will recreate the admin on next restart.
+
+default_config:
+  compose_template: |
+    services:
+      umami:
+        image: ghcr.io/umami-software/umami:latest
+        container_name: umami
+        restart: unless-stopped
+        depends_on:
+          - postgres
+        environment:
+          DATABASE_URL: postgresql://${DB_USER:-umami}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-umami}
+          HASH_SALT: ${HASH_SALT}
+        ports:
+          - "3000:3000"
+        volumes:
+          - umami_data:/app/public/data
+
+      postgres:
+        image: postgres:16-alpine
+        container_name: umami_postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${DB_NAME:-umami}
+          POSTGRES_USER: ${DB_USER:-umami}
+          POSTGRES_PASSWORD: ${DB_PASSWORD}
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+
+    volumes:
+      umami_data:
+      postgres_data:
+
+  required_vars:
+    - name: DB_USER
+      description: PostgreSQL username for Umami
+      default: "umami"
+    - name: DB_PASSWORD
+      description: PostgreSQL password
+      default: ""
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "umami"
+    - name: HASH_SALT
+      description: Random salt for password hashing (min 16 chars)
+      default: ""
+
+  known_mounts:
+    - container_path: /app/public/data
+      purpose: Cache and temporary data
+      recommended_permissions: "755"
+      owner: "0:0"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Umami is a lightweight alternative to Plausible. It supports both PostgreSQL
+  and MySQL. The compose template above uses PostgreSQL.
+
+  For MySQL, replace the postgres service with:
+  ```yaml
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-umami}
+      MYSQL_USER: ${DB_USER:-umami}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+  ```
+
+  And set DATABASE_URL to:
+  `mysql://user:password@mysql:3306/umami`
+
+  HASH_SALT should be a random string for secure password hashing. Generate with:
+  `openssl rand -hex 8`
+
+  Default admin credentials on first run: username `admin`, password `umami`.
+  Change them immediately after login.

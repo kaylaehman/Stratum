@@ -1,0 +1,308 @@
+id: wazuh
+name: Wazuh SIEM & Endpoint Monitoring
+version: "1.0"
+container_match:
+  image_patterns:
+    - "wazuh/wazuh-manager"
+  port_hints: [1514, 1515, 55000]
+category: security
+description: Open-source SIEM platform for centralized endpoint monitoring, log aggregation, and threat detection
+docs_url: https://hub.docker.com/r/wazuh/wazuh-manager
+
+common_issues:
+  - id: manager-service-not-starting
+    name: Wazuh manager service fails to start or remains unhealthy
+    symptoms:
+      - "Wazuh manager container exits immediately"
+      - "Health check failing"
+      - "Manager process not running"
+      - "Cannot connect to port 1514 or 1515"
+      - "Log shows init error or configuration parsing failure"
+    trigger_conditions:
+      - log_pattern: "error.*manager"
+      - log_pattern: "failed.*start"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if Wazuh manager container is running
+        type: check
+        command: "docker ps --filter name={container_name} --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Display container startup logs to identify error
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: ""
+      - id: step-3
+        description: Verify manager configuration file exists and is valid
+        type: check
+        command: "docker exec {container_name} test -f /var/ossec/etc/ossec.conf && echo 'Config found' || echo 'Config missing'"
+        expected_output: "Config found"
+        on_fail: step-4
+      - id: step-4
+        description: Inform user that manager configuration is missing or invalid
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Wazuh manager container to attempt recovery
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify manager is listening on expected ports after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -tlnp 2>/dev/null | grep -E '1514|1515'"
+        expected_output: "LISTEN"
+    resolution: |
+      The Wazuh manager service has been restarted. It should now be accepting agent registrations on port 1514 and manager communications on port 1515. If the issue persists, check that the ossec.conf configuration file is valid YAML and that the indexer connection parameters (if configured) are correct.
+
+  - id: agent-registration-failures
+    name: Agents cannot register with Wazuh manager
+    symptoms:
+      - "Agent registration fails with connection refused"
+      - "Error connecting to manager on port 1514"
+      - "Agent reports authentication failed"
+      - "Agent stuck in pending state"
+      - "Firewall or port binding issue on 1514"
+    trigger_conditions:
+      - log_pattern: "registration.*failed"
+      - log_pattern: "port.*1514.*refused"
+      - log_pattern: "agent.*connection.*timeout"
+    steps:
+      - id: step-1
+        description: Verify manager is listening on agent registration port 1514
+        type: check
+        command: "docker exec {container_name} ss -tlnp 2>/dev/null | grep 1514"
+        expected_output: "1514.*LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 1514 is published to host
+        type: check
+        command: "docker inspect {container_name} --format='{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}{{end}}' | grep 1514"
+        expected_output: "1514"
+        on_fail: step-3
+      - id: step-3
+        description: Display current port mappings for manager
+        type: inform
+        command: ""
+      - id: step-4
+        description: Check manager logs for registration error details
+        type: check
+        command: "docker logs {container_name} | grep -i 'registration\\|agent' | tail -10"
+        expected_output: ""
+      - id: step-5
+        description: Verify manager internal network connectivity
+        type: check
+        command: "docker exec {container_name} curl -s -I http://localhost:55000/api/overview 2>&1 | head -1"
+        expected_output: ""
+      - id: step-6
+        description: Restart manager to reset agent registration service
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Wait and verify manager is accepting agent connections
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -tlnp 2>/dev/null | grep 1514"
+        expected_output: "LISTEN"
+    resolution: |
+      The Wazuh manager has been restarted and should now be accepting agent registrations. Verify that agents can reach the manager's IP:port (1514) from their network location. If agents are on different networks or behind NAT, ensure port 1514 is properly forwarded to the manager container.
+
+  - id: dashboard-unreachable
+    name: Wazuh dashboard (web UI) not accessible
+    symptoms:
+      - "Cannot access dashboard web interface"
+      - "Connection refused on dashboard port"
+      - "Timeout accessing dashboard"
+      - "502 Bad Gateway or 503 Service Unavailable"
+      - "Dashboard pod/container not responding"
+    trigger_conditions:
+      - log_pattern: "dashboard.*error"
+      - log_pattern: "connection.*refused.*dashboard"
+    steps:
+      - id: step-1
+        description: Verify dashboard container or pod is running
+        type: check
+        command: "docker ps --filter name=dashboard --format='{{.Status}}' 2>/dev/null | head -1"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Check dashboard container logs for errors
+        type: check
+        command: "docker logs $(docker ps -qf name=dashboard) 2>/dev/null | tail -15"
+        expected_output: ""
+      - id: step-3
+        description: Verify dashboard is listening on port 443 or 5601
+        type: check
+        command: "docker exec $(docker ps -qf name=dashboard) ss -tlnp 2>/dev/null | grep -E '443|5601'"
+        expected_output: "LISTEN"
+        on_fail: step-4
+      - id: step-4
+        description: Display current port mappings for dashboard
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check if dashboard can reach the Wazuh API backend
+        type: check
+        command: "docker exec $(docker ps -qf name=dashboard) curl -s -I https://manager:55000/api/overview 2>&1 | head -1"
+        expected_output: ""
+      - id: step-6
+        description: Restart dashboard container to reinitialize connection to manager API
+        type: fix
+        command: "docker restart $(docker ps -qf name=dashboard)"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Verify dashboard is responding after restart
+        type: check
+        command: "sleep 5 && docker logs $(docker ps -qf name=dashboard) 2>/dev/null | grep -i 'listening\\|ready\\|connected' | tail -3"
+    resolution: |
+      The Wazuh dashboard has been restarted. It should now be accessible at https://<manager-ip>:443 (or the configured dashboard port). The dashboard communicates with the Wazuh manager API on port 55000 — ensure both containers can reach each other on the internal network.
+
+default_config:
+  compose_template: |
+    services:
+      manager:
+        image: wazuh/wazuh-manager:latest
+        container_name: wazuh-manager
+        restart: unless-stopped
+        environment:
+          INDEXER_URL: https://indexer:9200
+          INDEXER_USERNAME: ${INDEXER_USERNAME:-admin}
+          INDEXER_PASSWORD: ${INDEXER_PASSWORD:-SecurePassword1234}
+          FILEBEAT_SSL_VERIFICATION_MODE: full
+          SSL_CERTIFICATE_AUTHORITIES: /etc/ssl/certs/ca-bundle.crt
+          SSL_CERTIFICATE: /etc/ssl/certs/wazuh.cert
+          SSL_KEY: /etc/ssl/private/wazuh.key
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./data}/wazuh-api-ssl:/var/ossec/api/configuration/ssl
+          - ${DATA_PATH:-./data}/wazuh-etc:/var/ossec/etc
+          - ${DATA_PATH:-./data}/wazuh-logs:/var/ossec/logs
+          - ${DATA_PATH:-./data}/wazuh-ruleset:/var/ossec/ruleset
+        ports:
+          - "1514:1514/udp"
+          - "1514:1514/tcp"
+          - "1515:1515"
+          - "55000:55000"
+
+      indexer:
+        image: wazuh/wazuh-indexer:latest
+        container_name: wazuh-indexer
+        restart: unless-stopped
+        environment:
+          INDEXER_JAVA_OPTS: ${INDEXER_JAVA_OPTS:--Xms2g -Xmx2g}
+          OPENSEARCH_JAVA_OPTS: ${INDEXER_JAVA_OPTS:--Xms2g -Xmx2g}
+          CLUSTER_NAME: wazuh-cluster
+          NODE_NAME: indexer-1
+          BOOTSTRAP_MEMORY_LOCK: "true"
+        volumes:
+          - ${DATA_PATH:-./data}/wazuh-indexer-data:/var/lib/opensearch
+        ports:
+          - "9200:9200"
+
+      dashboard:
+        image: wazuh/wazuh-dashboard:latest
+        container_name: wazuh-dashboard
+        restart: unless-stopped
+        environment:
+          INDEXER_USERNAME: ${INDEXER_USERNAME:-admin}
+          INDEXER_PASSWORD: ${INDEXER_PASSWORD:-SecurePassword1234}
+          WAZUH_API_URL: https://manager:55000
+          WAZUH_API_USERNAME: ${WAZUH_API_USERNAME:-wazuh}
+          WAZUH_API_PASSWORD: ${WAZUH_API_PASSWORD:-SecurePassword1234}
+          TZ: ${TZ:-UTC}
+        ports:
+          - "443:5601"
+        depends_on:
+          - manager
+          - indexer
+
+  required_vars:
+    - name: INDEXER_USERNAME
+      description: OpenSearch/Elasticsearch indexer admin username
+      default: "admin"
+    - name: INDEXER_PASSWORD
+      description: OpenSearch/Elasticsearch indexer admin password (minimum 12 chars, mixed case + numbers)
+      default: "SecurePassword1234"
+    - name: WAZUH_API_USERNAME
+      description: Wazuh manager API username (default admin user)
+      default: "wazuh"
+    - name: WAZUH_API_PASSWORD
+      description: Wazuh manager API password (minimum 12 chars, mixed case + numbers)
+      default: "SecurePassword1234"
+    - name: INDEXER_JAVA_OPTS
+      description: JVM options for indexer/OpenSearch (adjust for host RAM)
+      default: "-Xms2g -Xmx2g"
+    - name: TZ
+      description: Timezone for log timestamps
+      default: "UTC"
+    - name: DATA_PATH
+      description: Host path for persistent Wazuh data (certificates, configurations, indices)
+      default: "./data"
+
+  known_mounts:
+    - container_path: /var/ossec/etc
+      purpose: Manager configuration files and rules
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/ossec/logs
+      purpose: Manager and alert logs
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/ossec/ruleset
+      purpose: Detection rules and decoders
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /var/lib/opensearch
+      purpose: OpenSearch/Elasticsearch indices and data
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Wazuh is an open-source, enterprise-grade SIEM platform designed for threat detection, log analysis, and compliance monitoring at scale. The official Wazuh deployment consists of three primary components: the Manager (receives agent data, detects threats), the Indexer (OpenSearch/Elasticsearch for log storage), and the Dashboard (web UI for analysis and reporting).
+
+  Architecture:
+  - Manager (wazuh-manager): Receives agent data on port 1514, communicates with other managers on 1515, provides API on 55000. Requires indexer connectivity for long-term storage.
+  - Indexer (wazuh-indexer): OpenSearch instance on port 9200 for log and alert storage. Single-node deployment fine for small deployments; cluster mode required for HA.
+  - Dashboard (wazuh-dashboard): Web UI on port 443 (5601 internal). Communicates with manager API and indexer.
+
+  Agent Registration:
+  - Agents connect to manager on port 1514 (UDP for registration, TCP for communication).
+  - Default agent enrollment is manual (provide pre-shared key). Auto-enrollment can be enabled in manager configuration.
+  - Agents must be able to reach manager's IP:port from their network (may require firewall rules or reverse proxy).
+
+  Security Considerations:
+  - INDEXER_PASSWORD and WAZUH_API_PASSWORD must be strong and changed from defaults immediately.
+  - Dashboard is exposed on port 443 by default — use a reverse proxy with TLS if deployed on public network.
+  - Manager API (port 55000) is internal-only; do not expose to untrusted networks.
+  - All inter-container communication uses TLS with self-signed certificates by default. In production, use proper CA-signed certificates.
+  - Wazuh stores credentials for indexer in manager configuration files — encrypt at rest if data_path is on shared storage.
+
+  Performance:
+  - Indexer (OpenSearch) is memory-intensive; default 2GB JVM heap is suitable for small deployments (10-50 agents). Adjust INDEXER_JAVA_OPTS for larger deployments.
+  - Agent log ingestion is CPU-bound on the manager; monitor CPU usage with many agents (100+).
+  - Index retention: Configure in dashboard or via manager API to manage storage growth.
+
+  First-Run Setup:
+  1. Start the stack: `docker-compose up -d`
+  2. Wait 30-60 seconds for indexer and manager to initialize.
+  3. Access dashboard at https://localhost (browser will warn about self-signed cert — accept).
+  4. Login with WAZUH_API_USERNAME and WAZUH_API_PASSWORD.
+  5. Add agents: Agents → Add New Agent. Follow enrollment instructions on each agent host.
+  6. Configure detection rules and alert responses in Administration → Configuration.
+
+  Integration with Other Services:
+  - Syslog forwarding: Agents can send logs to Wazuh via syslog on port 514 (configure in agent config).
+  - Alert webhooks: Dashboard can send alerts to Slack, PagerDuty, custom webhooks via Integration module.
+  - Compliance scanning: Integrate with AWS Config, Azure, or on-premise assets via agent modules.
+
+  Persistence:
+  - All configuration, indices, and agent metadata stored in {DATA_PATH}. Backup regularly.
+  - Restoring from backup: Stop stack, replace {DATA_PATH} contents, restart — indices will reindex if version mismatch occurs.

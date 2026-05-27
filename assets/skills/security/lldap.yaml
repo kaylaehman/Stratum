@@ -1,0 +1,269 @@
+id: lldap
+name: Light LDAP Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "lldap/lldap"
+  port_hints: [3890, 17170]
+category: security
+description: Lightweight LDAP server for centralized user and group authentication in homelab environments
+docs_url: https://hub.docker.com/r/lldap/lldap
+
+common_issues:
+  - id: ldap-bind-failed
+    name: LDAP bind authentication failing
+    symptoms:
+      - "Invalid credentials"
+      - "Error 49"
+      - "Authentication failed"
+      - "Unable to authenticate user"
+      - "LDAP_INVALID_CREDENTIALS"
+    trigger_conditions:
+      - log_pattern: "bind.*failed"
+      - log_pattern: "invalid.*credential"
+      - log_pattern: "Error 49"
+    steps:
+      - id: step-1
+        description: Verify LDAP server is responding on port 3890
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 3890"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check LLDAP service startup logs for errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|failed' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Verify JWT_SECRET and LDAP_USER_PASS environment variables are set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'JWT_SECRET|LDAP_USER_PASS'"
+        expected_output: "JWT_SECRET"
+        on_fail: step-4
+      - id: step-4
+        description: Inform user that environment variables are missing
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart LLDAP with environment variables set correctly
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify LLDAP is accessible after restart
+        type: check
+        command: "sleep 5 && docker logs {container_name} | grep -i 'listen\\|ready' | tail -3"
+
+  - id: web-ui-unreachable
+    name: Web UI port 17170 unreachable
+    symptoms:
+      - "Cannot access LLDAP web interface"
+      - "Connection refused on port 17170"
+      - "Timeout accessing web UI"
+      - "404 Not Found"
+      - "Port 17170 shows connection refused"
+    trigger_conditions:
+      - log_pattern: "port.*17170"
+    steps:
+      - id: step-1
+        description: Verify LLDAP web UI is listening on port 17170
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 17170"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Check if port 17170 is published to host
+        type: check
+        command: "docker inspect {container_name} --format='{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}{{end}}' | grep 17170"
+        expected_output: "17170"
+        on_fail: step-3
+      - id: step-3
+        description: Display current port mappings
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart LLDAP container to reinitialize network bindings
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify web UI is responding
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:17170/ | head -c 100"
+        expected_output: "html"
+
+  - id: user-creation-failed
+    name: Cannot create or manage users in web UI
+    symptoms:
+      - "User creation fails silently"
+      - "Error creating user"
+      - "Backend error response"
+      - "Cannot save user changes"
+      - "Groups not syncing to LDAP"
+    trigger_conditions:
+      - log_pattern: "user.*creation.*failed"
+      - log_pattern: "error.*saving user"
+    steps:
+      - id: step-1
+        description: Check LLDAP container is healthy
+        type: check
+        command: "docker ps --filter name={container_name} --format='{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Display LLDAP recent error logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'error' | tail -10"
+        expected_output: ""
+      - id: step-3
+        description: Check database permissions and disk space
+        type: check
+        command: "docker exec {container_name} df -h /data | tail -1"
+        expected_output: ""
+      - id: step-4
+        description: Verify LLDAP_USER_PASS is configured for default user
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep LDAP_USER_PASS"
+        expected_output: "LDAP_USER_PASS"
+        on_fail: step-5
+      - id: step-5
+        description: Inform about missing LDAP_USER_PASS configuration
+        type: inform
+        command: ""
+      - id: step-6
+        description: Restart LLDAP to reset user database
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Test user creation via logs
+        type: check
+        command: "sleep 3 && docker logs {container_name} | tail -5"
+
+  - id: ldap-password-reset
+    name: Default admin password not working
+    symptoms:
+      - "Cannot login to web UI with default credentials"
+      - "Invalid username or password"
+      - "Authentication rejected for default user"
+      - "lldap user cannot authenticate"
+    trigger_conditions:
+      - log_pattern: "invalid.*credential"
+      - log_pattern: "authentication.*denied"
+    steps:
+      - id: step-1
+        description: Verify LDAP_USER_PASS environment variable is set
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep LDAP_USER_PASS"
+        expected_output: "LDAP_USER_PASS"
+        on_fail: step-2
+      - id: step-2
+        description: Inform user that LDAP_USER_PASS is not set
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check container logs for password initialization
+        type: check
+        command: "docker logs {container_name} | grep -i 'password\\|admin' | tail -5"
+        expected_output: ""
+      - id: step-4
+        description: Confirm intention to reset admin password
+        type: confirm
+        command: "This will restart LLDAP. Make sure no LDAP clients are actively authenticating."
+      - id: step-5
+        description: Restart LLDAP to reinitialize with environment password
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify admin password is functional
+        type: check
+        command: "docker logs {container_name} | grep -i 'initialized\\|ready' | tail -1"
+
+default_config:
+  compose_template: |
+    services:
+      lldap:
+        image: lldap/lldap:latest
+        container_name: lldap
+        restart: unless-stopped
+        environment:
+          JWT_SECRET: ${JWT_SECRET:-change-me-to-random-string-64-chars-minimum}
+          LDAP_USER_PASS: ${LDAP_USER_PASS:-password}
+          UID: ${PUID:-1000}
+          GID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+        ports:
+          - "3890:3890"
+          - "17170:17170"
+
+  required_vars:
+    - name: JWT_SECRET
+      description: Secret key for JWT tokens (minimum 64 chars, use random alphanumeric)
+      default: "change-me-to-random-string-64-chars-minimum"
+    - name: LDAP_USER_PASS
+      description: Password for default 'lldap' user
+      default: "password"
+    - name: PUID
+      description: User ID to run LLDAP as
+      default: "1000"
+    - name: PGID
+      description: Group ID for LLDAP
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: DATA_PATH
+      description: Host path for persistent LDAP database
+      default: "./data"
+
+  known_mounts:
+    - container_path: /data
+      purpose: LDAP database and configuration files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Light LDAP (LLDAP) is a lightweight LDAP server designed for small-scale deployments and homelab use. It provides LDAP authentication without the complexity of OpenLDAP or FreeIPA.
+
+  Configuration:
+  - JWT_SECRET: Used for web UI session tokens. Generate a strong random string (64+ chars). Change from default immediately.
+  - LDAP_USER_PASS: Password for the default 'lldap' user (LDAP DN: cn=admin,dc=example,dc=com). Set during first run.
+
+  Default LDAP configuration:
+  - Base DN: dc=example,dc=com (configurable in UI)
+  - Admin user: lldap
+  - LDAP port: 3890 (standard LDAP, non-TLS)
+  - Web UI port: 17170
+
+  Integration with other containers:
+  - Use LDAP_URL: ldap://lldap:3890 for other containers on the same network
+  - Bind DN: cn=admin,dc=example,dc=com (after configuring base DN in web UI)
+  - Search Base: dc=example,dc=com
+
+  Security considerations:
+  - LDAP runs in plain text on port 3890 (no TLS). Use a reverse proxy with TLS for remote access.
+  - JWT_SECRET is critical for web UI security; store securely and rotate periodically.
+  - Default admin user should change password immediately via web UI.
+  - The /data mount should be persistent and backed up; it contains all user and group data.
+
+  Persistence:
+  - All user, group, and configuration data is stored in /data directory.
+  - Backup /data regularly to prevent loss of authentication database.
+  - Container-less data recovery: LLDAP database is in standard LDAP format and can be inspected with ldapsearch tools.
+
+  First-run setup:
+  1. Start container with JWT_SECRET and LDAP_USER_PASS set.
+  2. Access web UI at http://localhost:17170.
+  3. Login with username: 'lldap' and the password from LDAP_USER_PASS.
+  4. Configure base DN, create user groups, add additional users.
+  5. Configure other containers to authenticate against LLDAP LDAP endpoint.

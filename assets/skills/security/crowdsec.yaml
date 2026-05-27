@@ -1,0 +1,179 @@
+id: crowdsec
+name: CrowdSec
+version: "1.0"
+container_match:
+  image_patterns:
+    - "crowdsecurity/crowdsec"
+  port_hints: [8080, 6379]
+category: security
+description: Collaborative threat intelligence and DDoS detection — real-time IP reputation and behavior analysis
+docs_url: https://docs.crowdsec.net/
+
+common_issues:
+  - id: lapi-connection-refused
+    name: Bouncers cannot connect to LAPI (port 8080)
+    symptoms:
+      - "connection refused"
+      - "failed to reach LAPI"
+      - "cannot connect to localhost:8080"
+      - "ECONNREFUSED"
+    trigger_conditions:
+      - log_pattern: "connection.*refused"
+      - log_pattern: "LAPI"
+    steps:
+      - id: step-1
+        description: Check if CrowdSec LAPI service is running
+        type: check
+        command: "docker logs {container_name} | tail -20"
+        expected_output: "CrowdSec is running"
+        on_fail: step-2
+      - id: step-2
+        description: Verify LAPI port (8080) is exposed
+        type: check
+        command: "docker inspect {container_name} --format='{{json .NetworkSettings.Ports}}' | grep 8080"
+        expected_output: "8080"
+        on_fail: step-3
+      - id: step-3
+        description: Confirm bouncers are on the same Docker network as CrowdSec
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart CrowdSec container to restore LAPI connectivity
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Bouncers (nginx-bouncer, firewall rules, etc.) communicate with CrowdSec
+      via the LAPI (Local API) on port 8080. If bouncers cannot reach LAPI,
+      verify: (1) CrowdSec is running, (2) port 8080 is exposed in docker-compose,
+      (3) both containers share a user-defined network, (4) bouncer config points
+      to the correct CrowdSec hostname (container name in Docker network).
+
+  - id: collections-not-loaded
+    name: Collections not loading or empty alerts
+    symptoms:
+      - "No collections loaded"
+      - "No alerts generated"
+      - "collections field is empty"
+      - "crowdsec is not monitoring anything"
+    trigger_conditions:
+      - log_pattern: "collections.*empty"
+      - log_pattern: "no.*collections"
+    steps:
+      - id: step-1
+        description: Check installed collections
+        type: check
+        command: "docker exec {container_name} cscli collections list"
+        expected_output: "linux"
+        on_fail: step-2
+      - id: step-2
+        description: Verify config.yaml has collections enabled
+        type: check
+        command: "docker exec {container_name} grep -A 5 'enabled:' /etc/crowdsec/config.yaml | head -10"
+        expected_output: "true"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about common collections
+        type: inform
+        command: ""
+      - id: step-4
+        description: Install and enable default linux collection
+        type: fix
+        command: "docker exec {container_name} cscli collections install crowdsecurity/linux"
+        requires_approval: true
+      - id: step-5
+        description: Reload CrowdSec to apply collections
+        type: fix
+        command: "docker exec {container_name} systemctl reload crowdsec"
+        requires_approval: true
+    resolution: |
+      CrowdSec relies on collections (rulesets) to detect threats. Common
+      collections include `crowdsecurity/linux` (SSH, kernel logs),
+      `crowdsecurity/nginx` (web server logs), and
+      `crowdsecurity/sshd` (SSH attacks). Install and enable collections
+      matching your observed log sources, then reload CrowdSec. Verify data
+      sources (log file paths) are mounted into the container at setup.
+
+  - id: acquisition-datasources-missing
+    name: No log data being acquired (acquisitions not reading logs)
+    symptoms:
+      - "no logs being processed"
+      - "acquisition phase failed"
+      - "datasources not found"
+      - "filename not found"
+    trigger_conditions:
+      - log_pattern: "acquisition.*failed"
+      - log_pattern: "datasource.*not.*found"
+    steps:
+      - id: step-1
+        description: Check current acquisitions configuration
+        type: check
+        command: "docker exec {container_name} cat /etc/crowdsec/acquis.yaml"
+        expected_output: "/var/log"
+        on_fail: step-2
+      - id: step-2
+        description: List mounted log directories in container
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Mounts}}' | grep -i log"
+        expected_output: "log"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about required volume mounts
+        type: inform
+        command: ""
+      - id: step-4
+        description: Update docker-compose to mount log sources (e.g., /var/log from host)
+        type: fix
+        command: "echo 'Verify volumes are mapped in docker-compose: /var/log:/var/log, /var/log/auth.log:/var/log/auth.log'"
+        requires_approval: true
+      - id: step-5
+        description: Restart CrowdSec to apply volume changes
+        type: fix
+        command: "docker-compose restart crowdsec"
+        requires_approval: true
+    resolution: |
+      CrowdSec acquires logs from mounted volumes defined in acquis.yaml. If no
+      logs are being processed, verify: (1) datasource paths in acquis.yaml match
+      the mounted paths, (2) log files are mounted from the host into the container,
+      (3) file permissions allow CrowdSec to read the logs. Common paths:
+      /var/log/syslog, /var/log/auth.log, /var/log/nginx/access.log.
+      Mount them as read-only volumes in docker-compose.
+
+  - id: ip-reputation-not-updated
+    name: IP reputation and geolocation not updating (Hub sync issues)
+    symptoms:
+      - "Hub sync failed"
+      - "IP reputation data stale"
+      - "cannot reach hub.crowdsec.net"
+      - "geolocation is outdated"
+    trigger_conditions:
+      - log_pattern: "Hub.*sync.*failed"
+      - log_pattern: "hub.crowdsec.net"
+    steps:
+      - id: step-1
+        description: Check Hub sync status
+        type: check
+        command: "docker exec {container_name} cscli hub status"
+        expected_output: "up to date"
+        on_fail: step-2
+      - id: step-2
+        description: Test network connectivity to Hub
+        type: check
+        command: "docker exec {container_name} curl -I https://hub.crowdsec.net 2>&1"
+        expected_output: "200"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about Hub API and firewall rules
+        type: inform
+        command: ""
+      - id: step-4
+        description: Force a Hub sync
+        type: fix
+        command: "docker exec {container_name} cscli hub update"
+        requires_approval: true
+    resolution: |
+      CrowdSec syncs threat intelligence from hub.crowdsec.net, including
+      IP reputation and geolocation data. If sync fails, verify: (1) the
+      container has outbound HTTPS access to hub.crowdsec.net, (2) no
+      firewall or corporate proxy is blocking it, (3) CrowdSec has an
+      active agent registration. Run `cscli hub update` to force a sync.

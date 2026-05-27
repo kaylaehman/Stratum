@@ -1,0 +1,224 @@
+id: teable
+name: Teable
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/teableio/teable"
+  port_hints: [3000]
+category: data
+description: No-code database platform with spreadsheet-like UI, requires PostgreSQL backend
+docs_url: https://github.com/teableio/teable
+
+common_issues:
+  - id: postgres-connection-failed
+    name: PostgreSQL connection failed on startup
+    symptoms:
+      - "Connection failed: PostgreSQL service unreachable"
+      - "Cannot connect to database host"
+      - "Database authentication failed"
+      - "Connection pool error on startup"
+    trigger_conditions:
+      - log_pattern: "postgres.*connection"
+      - log_pattern: "database.*error"
+    steps:
+      - id: step-1
+        description: Check PostgreSQL connection environment variables
+        type: check
+        command: "docker inspect {container_name} --format='{{range .Config.Env}}{{println .}}{{end}}' | grep DATABASE_URL"
+        expected_output: "DATABASE_URL"
+        on_fail: step-2
+      - id: step-2
+        description: Display current database configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Test PostgreSQL connectivity from container
+        type: check
+        command: "docker exec {container_name} timeout 5 bash -c \"echo > /dev/tcp/{pg_host}/5432\" && echo 'PostgreSQL reachable' || echo 'PostgreSQL unreachable'"
+        expected_output: "reachable"
+        on_fail: step-4
+      - id: step-4
+        description: Display PostgreSQL host and port from config
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify PostgreSQL database exists and credentials are correct
+        type: check
+        command: "docker exec {container_name} PGPASSWORD={pg_password} psql -h {pg_host} -U {pg_user} -d {pg_db} -c 'SELECT version();' 2>&1 | head -1"
+        expected_output: ""
+      - id: step-6
+        description: Restart Teable to reconnect to PostgreSQL
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-7
+      - id: step-7
+        description: Monitor connection logs
+        type: check
+        command: "sleep 10 && docker logs {container_name} | grep -i 'postgres\\|connected\\|listening' | tail -5"
+    resolution: |
+      Teable requires PostgreSQL as its primary database backend. Ensure the DATABASE_URL environment variable is set with valid credentials and the PostgreSQL service is running and reachable from the container's network. The container has been restarted to attempt reconnection.
+
+  - id: permission-denied-data
+    name: Permission denied on /app/db volume
+    symptoms:
+      - "Permission denied: /app/db"
+      - "Cannot write to database files"
+      - "EACCES error on startup"
+      - "Failed to create or access data files"
+    trigger_conditions:
+      - log_pattern: "permission denied.*data"
+      - log_pattern: "EACCES"
+    steps:
+      - id: step-1
+        description: Check /app/db directory ownership
+        type: check
+        command: "stat {data_path} | grep Uid"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current /app/db ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown /app/db to UID 1000
+        type: fix
+        command: "chown -R 1000:1000 {data_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Set /app/db directory permissions to 755
+        type: fix
+        command: "chmod -R 755 {data_path}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Restart Teable to verify data access
+        type: check
+        command: "docker restart {container_name} && sleep 5 && docker logs {container_name} | tail -10"
+    resolution: |
+      Teable requires write access to /app/db for local caching and temporary storage. The directory ownership has been corrected to UID 1000:GID 1000 and permissions set appropriately. The container has been restarted and should now be able to access the data directory.
+
+  - id: unable-to-connect-ui
+    name: Cannot connect to Teable web interface
+    symptoms:
+      - "Connection refused on port 3000"
+      - "Cannot reach Teable UI"
+      - "Service appears to be crashing on startup"
+      - "404 error when accessing web interface"
+    trigger_conditions:
+      - log_pattern: "listening.*3000"
+      - log_pattern: "error.*startup"
+    steps:
+      - id: step-1
+        description: Check if Teable is listening on port 3000
+        type: check
+        command: "docker exec {container_name} ss -tlnp | grep 3000"
+        expected_output: "3000"
+        on_fail: step-2
+      - id: step-2
+        description: Display port binding status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check Teable startup logs for initialization errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|fatal\\|crash' | head -10"
+        expected_output: ""
+      - id: step-4
+        description: Verify PostgreSQL connection in logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'postgres\\|database' | tail -5"
+        expected_output: ""
+      - id: step-5
+        description: Restart Teable service
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Wait for service startup and verify accessibility
+        type: check
+        command: "sleep 10 && docker exec {container_name} curl -s http://localhost:3000/ | head -5"
+    resolution: |
+      Teable should be listening on port 3000 for incoming web connections. Common startup issues include PostgreSQL connection failures or permission problems with the /app/db directory. The service has been restarted. Ensure the port mapping is correct (3000:3000), PostgreSQL is running and reachable, and DATABASE_URL is properly configured. Try accessing the web interface again.
+
+default_config:
+  compose_template: |
+    services:
+      postgres:
+        image: postgres:15-alpine
+        container_name: teable-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_USER: ${DB_USER:-teable}
+          POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+          POSTGRES_DB: ${DB_NAME:-teable}
+        volumes:
+          - ${DB_DATA_PATH:-./postgres}:/var/lib/postgresql/data
+        ports:
+          - "5432:5432"
+
+      teable:
+        image: ghcr.io/teableio/teable:latest
+        container_name: teable
+        restart: unless-stopped
+        depends_on:
+          - postgres
+        environment:
+          DATABASE_URL: postgresql://${DB_USER:-teable}:${DB_PASSWORD:-changeme}@postgres:5432/${DB_NAME:-teable}
+          NODE_ENV: ${NODE_ENV:-production}
+          NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme}
+        volumes:
+          - ${DATA_PATH:-./data}:/app/db
+        ports:
+          - "3000:3000"
+  required_vars:
+    - name: DATABASE_URL
+      description: PostgreSQL connection string (required for Teable)
+      default: "postgresql://teable:changeme@postgres:5432/teable"
+    - name: DB_USER
+      description: PostgreSQL database user
+      default: "teable"
+    - name: DB_PASSWORD
+      description: PostgreSQL database password
+      default: "changeme"
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "teable"
+    - name: NEXTAUTH_SECRET
+      description: NextAuth secret for session authentication
+      default: "changeme"
+    - name: NODE_ENV
+      description: Node.js environment
+      default: "production"
+  known_mounts:
+    - container_path: /app/db
+      purpose: Local cache and temporary storage for Teable
+      recommended_permissions: "755"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Teable is a no-code database platform that provides a spreadsheet-like interface for database management.
+
+  PostgreSQL requirement: Unlike some no-code platforms, Teable requires a dedicated PostgreSQL backend — SQLite is not supported. You must run a PostgreSQL instance (included in the compose template) or connect to an existing PostgreSQL server.
+
+  DATABASE_URL: This must be a valid PostgreSQL connection string in the format postgresql://user:password@host:port/dbname. Update {pg_host}, {pg_user}, {pg_password}, {pg_db} to match your PostgreSQL configuration.
+
+  NextAuth secret: NEXTAUTH_SECRET should be a secure random string. Generate with: openssl rand -base64 32
+
+  Local data: The /app/db directory stores local caching and temporary files. This is separate from the PostgreSQL backend and should be on fast local storage.
+
+  Permissions and ownership: Teable runs as UID 1000. Ensure /app/db volume is owned by 1000:1000 and is writable.
+
+  PostgreSQL initialization: The first startup will create the necessary database schema automatically. This may take 30-60 seconds; monitor logs for "database initialized" message.
+
+  Common gotchas:
+  - PostgreSQL not running: Teable cannot start without a working PostgreSQL backend. Ensure the postgres service is running and reachable.
+  - Invalid DATABASE_URL: Double-check credentials, host, port, and database name match your PostgreSQL configuration.
+  - NextAuth secret missing: Session authentication will fail. Set NEXTAUTH_SECRET to a secure random value.
+  - /app/db permissions: If UID/GID do not match, Teable may fail to write local cache files.
+  - Port 3000 already in use: Change the host port mapping (e.g., "3001:3000") if port 3000 is in use on your host.

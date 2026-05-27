@@ -1,0 +1,225 @@
+id: plausible
+name: Plausible Analytics
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/plausible/analytics"
+  port_hints: [8000]
+category: analytics
+description: Privacy-focused web analytics platform — GDPR-compliant alternative to Google Analytics
+docs_url: https://plausible.io/self-hosted
+
+common_issues:
+  - id: db-connection-refused
+    name: Database connection refused on startup
+    symptoms:
+      - "Connection refused"
+      - "Cannot connect to PostgreSQL"
+      - "Database connection error"
+    trigger_conditions:
+      - log_pattern: "connection.*refused|database.*error"
+    steps:
+      - id: step-1
+        description: Verify the PostgreSQL container is running
+        type: check
+        command: "docker inspect {db_container} --format='{{.State.Status}}'"
+        expected_output: "running"
+        on_fail: step-2
+      - id: step-2
+        description: Test reachability from Plausible to PostgreSQL
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {db_host} 5432' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Verify DATABASE_URL is correctly set
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep DATABASE_URL"
+        expected_output: "postgres://"
+        on_fail: step-4
+      - id: step-4
+        description: Inform about network and environment setup
+        type: inform
+        command: ""
+    resolution: |
+      Plausible requires PostgreSQL to be reachable via the DATABASE_URL
+      environment variable. Both containers must be on the same Docker network.
+      Verify the service name in compose matches the DATABASE_URL host (typically
+      `postgres` or `db`). DATABASE_URL format: `postgresql://user:password@host:5432/plausible`
+
+  - id: clickhouse-unavailable
+    name: ClickHouse connection unavailable — analytics not collecting
+    symptoms:
+      - "ClickHouse error"
+      - "Cannot connect to ClickHouse"
+      - "Analytics data not recording"
+    trigger_conditions:
+      - log_pattern: "clickhouse|CH|analytics.*fail"
+    steps:
+      - id: step-1
+        description: Verify ClickHouse container is running
+        type: check
+        command: "docker ps --filter name=clickhouse --format '{{.Status}}'"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test ClickHouse HTTP API from Plausible
+        type: check
+        command: "docker exec {container_name} sh -c 'curl -s http://clickhouse:8123/ping' 2>&1"
+        expected_output: "Ok"
+        on_fail: step-3
+      - id: step-3
+        description: Check CLICKHOUSE_DATABASE_URL environment variable
+        type: check
+        command: "docker inspect {container_name} --format='{{index .Config.Env}}' | grep CLICKHOUSE"
+        expected_output: "http://"
+      - id: step-4
+        description: Inform about ClickHouse initialization delay
+        type: inform
+        command: ""
+    resolution: |
+      ClickHouse may take 30–60 seconds to become ready after startup. Ensure
+      the ClickHouse container is running and reachable at the address specified
+      in CLICKHOUSE_DATABASE_URL (typically `http://clickhouse:8123`). If ClickHouse
+      just started, wait a few minutes for initialization before retrying.
+
+  - id: script-not-recording
+    name: Analytics script loaded but data not appearing in dashboard
+    symptoms:
+      - "Script loads (requests to /js/)"
+      - "Dashboard shows zero visitors"
+      - "Log events not recorded"
+    trigger_conditions:
+      - log_pattern: "script.*200|/js/.*200"
+    steps:
+      - id: step-1
+        description: Verify correct domain is configured in Plausible
+        type: check
+        command: "docker exec {container_name} sh -c 'echo \"Check dashboard for registered domain\"' 2>&1"
+        expected_output: ""
+      - id: step-2
+        description: Confirm the tracking script domain matches
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check browser console for CORS or network errors
+        type: inform
+        command: ""
+      - id: step-4
+        description: Restart Plausible container to reload configuration
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Ensure the domain in your JavaScript tracking snippet matches a domain
+      registered in the Plausible dashboard. CORS or misconfigured tracking
+      script domains are the most common cause of events not appearing. Verify
+      the script hostname points to your Plausible server (FQDN or IP).
+
+default_config:
+  compose_template: |
+    services:
+      plausible:
+        image: ghcr.io/plausible/analytics:latest
+        container_name: plausible
+        restart: unless-stopped
+        depends_on:
+          - postgres
+          - clickhouse
+        environment:
+          BASE_URL: ${BASE_URL:-http://localhost:8000}
+          LOG_LEVEL: warning
+          DATABASE_URL: postgresql://${DB_USER:-plausible}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-plausible}
+          CLICKHOUSE_DATABASE_URL: http://clickhouse:8123
+          SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+          ADMIN_USER_EMAIL: ${ADMIN_EMAIL}
+          ADMIN_USER_PWD: ${ADMIN_PASSWORD}
+          DISABLE_REGISTRATION: "true"
+        ports:
+          - "8000:8000"
+        volumes:
+          - plausible_data:/data
+
+      postgres:
+        image: postgres:16-alpine
+        container_name: plausible_postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: ${DB_NAME:-plausible}
+          POSTGRES_USER: ${DB_USER:-plausible}
+          POSTGRES_PASSWORD: ${DB_PASSWORD}
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        container_name: plausible_clickhouse
+        restart: unless-stopped
+        ulimits:
+          nofile: 262144
+        environment:
+          CLICKHOUSE_DB: ${CH_DB:-plausible}
+          CLICKHOUSE_USER: ${CH_USER:-plausible}
+          CLICKHOUSE_PASSWORD: ${CH_PASSWORD}
+        volumes:
+          - clickhouse_data:/var/lib/clickhouse
+
+    volumes:
+      plausible_data:
+      postgres_data:
+      clickhouse_data:
+
+  required_vars:
+    - name: BASE_URL
+      description: Public URL where Plausible will be accessible
+      default: "http://localhost:8000"
+    - name: SECRET_KEY_BASE
+      description: Random secret for session encryption (min 64 chars)
+      default: ""
+    - name: ADMIN_EMAIL
+      description: Email address for initial admin account
+      default: ""
+    - name: ADMIN_PASSWORD
+      description: Password for initial admin account
+      default: ""
+    - name: DB_USER
+      description: PostgreSQL username
+      default: "plausible"
+    - name: DB_PASSWORD
+      description: PostgreSQL password
+      default: ""
+    - name: DB_NAME
+      description: PostgreSQL database name
+      default: "plausible"
+    - name: CH_USER
+      description: ClickHouse username
+      default: "plausible"
+    - name: CH_PASSWORD
+      description: ClickHouse password
+      default: ""
+    - name: CH_DB
+      description: ClickHouse database name
+      default: "plausible"
+
+  known_mounts:
+    - container_path: /data
+      purpose: Event data cache and logs
+      recommended_permissions: "750"
+      owner: "100:101"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Plausible is a multi-service stack: web (plausible), PostgreSQL (event metadata),
+  and ClickHouse (high-performance event storage). ClickHouse may take 30–60 seconds
+  to initialize on first startup. All three must be on the same Docker network.
+
+  SECRET_KEY_BASE must be a random 64+ character string — generate with:
+  `openssl rand -hex 32`
+
+  DISABLE_REGISTRATION is set to true to prevent public sign-ups. Remove or set
+  to false if you want to allow self-registration.
+
+  For TLS/HTTPS in production, use a reverse proxy (Traefik, nginx) and set
+  BASE_URL to the public HTTPS domain.

@@ -1,0 +1,215 @@
+id: nzbget
+name: NZBGet
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/nzbget"
+  port_hints: [6789]
+category: torrent
+description: Lightweight usenet downloader and post-processor, alternative to SABnzbd
+docs_url: https://hub.docker.com/r/linuxserver/nzbget
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot create directory in /config"
+      - "Failed to write configuration"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership for diagnosis
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was corrected
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      /config ownership was mismatched with the container's UID/GID. NZBGet could not write its configuration or state. Ownership has been corrected to {puid}:{pgid}.
+
+  - id: import-failed-permissions
+    name: Import failed - permission denied on downloads
+    symptoms:
+      - "Import failed"
+      - "Could not move file to final destination"
+      - "Access denied"
+      - "Cannot write to download folder"
+    trigger_conditions:
+      - log_pattern: "import.*failed"
+      - log_pattern: "access.*denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the downloads directory
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Check ownership of the intermediate folder
+        type: check
+        command: "stat {intermediate_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-3
+      - id: step-3
+        description: Display both paths' ownership for comparison
+        type: inform
+        command: ""
+      - id: step-4
+        description: Recursively chown both directories to match NZBGet's UID/GID
+        type: fix
+        command: "chown -R {puid}:{pgid} {downloads_path} {intermediate_path}"
+        requires_approval: true
+    resolution: |
+      NZBGet could not move downloads because the target directories
+      were owned by a different user than the container. UID/GID parity is critical
+      for LinuxServer.io containers. Ownership has been corrected to {puid}:{pgid}.
+
+  - id: connection-refused
+    name: Cannot reach NZBGet on port 6789
+    symptoms:
+      - "Connection refused"
+      - "Cannot reach NZBGet at localhost:6789"
+      - "Bad gateway"
+      - "Web UI not responding"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Check NZBGet is listening on port 6789
+        type: check
+        command: "docker exec {container_name} ss -tlnp 2>/dev/null | grep 6789"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Verify the port is published
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 6789"
+        expected_output: "6789"
+        on_fail: step-3
+      - id: step-3
+        description: Restart NZBGet to recover
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      NZBGet was restarted. Confirm it is reachable at http://host:6789. If
+      not, verify the port is exposed in the compose file and not blocked by
+      a host firewall.
+
+  - id: usenet-server-unreachable
+    name: Usenet server unreachable or authentication failed
+    symptoms:
+      - "Cannot connect to news server"
+      - "Connection failed to usenet server"
+      - "Authentication failed"
+      - "No articles downloaded"
+    trigger_conditions:
+      - log_pattern: "usenet.*failed"
+      - log_pattern: "news.*server"
+    steps:
+      - id: step-1
+        description: Inform about Usenet server configuration
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check NZBGet can resolve the configured Usenet server hostname
+        type: check
+        command: "docker exec {container_name} nslookup {usenet_host} 2>&1 | grep -E 'Address|Name'"
+        expected_output: "Address"
+      - id: step-3
+        description: Verify Usenet server credentials are correct in NZBGet Settings
+        type: inform
+        command: ""
+    resolution: |
+      NZBGet could not connect to the configured Usenet server. Verify:
+      1. Server hostname and port are correct in Settings → Servers
+      2. Username and password are correct
+      3. The server supports SSL/TLS if that option is enabled
+      4. Firewall rules allow outbound connections on the Usenet port
+      Contact your Usenet provider for server details.
+
+default_config:
+  compose_template: |
+    services:
+      nzbget:
+        image: linuxserver/nzbget:latest
+        container_name: nzbget
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+          - ${INTERMEDIATE_PATH:-./intermediate}:/intermediate
+        ports:
+          - "6789:6789/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run NZBGet as
+      default: "1000"
+    - name: PGID
+      description: Group ID for NZBGet
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (settings, database)
+      default: "./config"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads (completed and post-processed downloads)
+      default: "./downloads"
+    - name: INTERMEDIATE_PATH
+      description: Host path for /intermediate (temporary staging during post-processing)
+      default: "./intermediate"
+  known_mounts:
+    - container_path: /config
+      purpose: NZBGet settings, queue, and history
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /downloads
+      purpose: Completed downloads and post-processed files
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /intermediate
+      purpose: Temporary staging for post-processing operations
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Port note: NZBGet uses port 6789 by default (different from SABnzbd's 8080).
+  Ensure no port conflicts with other services.
+
+  UID/GID parity: NZBGet, any post-processing scripts, and target download
+  directories must share the same PUID/PGID, or permission errors will occur.
+
+  Post-processing scripts in /config/scripts/ run with the container's UID/GID.
+  Scripts must be executable and reference any external binaries with full paths.
+
+  Intermediate folder: used during par2 repair and rar extraction. Ensure
+  it has sufficient free space for large downloads.

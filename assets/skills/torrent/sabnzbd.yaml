@@ -1,0 +1,214 @@
+id: sabnzbd
+name: SABnzbd
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/sabnzbd"
+  port_hints: [8080]
+category: torrent
+description: Usenet downloader and post-processor with automatic unpacking and repair
+docs_url: https://hub.docker.com/r/linuxserver/sabnzbd
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "EACCES"
+      - "Cannot create directory in /config"
+      - "Failed to write settings"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership for diagnosis
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was corrected
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      /config ownership was mismatched with the container's UID/GID. SABnzbd could not write its settings or database. Ownership has been corrected to {puid}:{pgid}.
+
+  - id: import-failed-permissions
+    name: Import failed - permission denied on downloads
+    symptoms:
+      - "Import failed"
+      - "Could not move file to final destination"
+      - "Access to the path is denied"
+      - "Permission denied moving to category folder"
+    trigger_conditions:
+      - log_pattern: "import.*failed"
+      - log_pattern: "access.*denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the downloads directory
+        type: check
+        command: "stat {downloads_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Check ownership of the incomplete-downloads directory
+        type: check
+        command: "stat {incomplete_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-3
+      - id: step-3
+        description: Display both paths' ownership for comparison
+        type: inform
+        command: ""
+      - id: step-4
+        description: Recursively chown both directories to match SABnzbd's UID/GID
+        type: fix
+        command: "chown -R {puid}:{pgid} {downloads_path} {incomplete_path}"
+        requires_approval: true
+    resolution: |
+      SABnzbd could not move downloads because the target directories
+      were owned by a different user than the container. UID/GID parity is essential
+      for LinuxServer.io containers. Ownership has been corrected to {puid}:{pgid}.
+
+  - id: connection-refused
+    name: Cannot reach SABnzbd on port 8080
+    symptoms:
+      - "Connection refused"
+      - "Cannot reach SABnzbd at localhost:8080"
+      - "Bad gateway"
+      - "Web UI not responding"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Check SABnzbd is listening on port 8080
+        type: check
+        command: "docker exec {container_name} ss -tlnp 2>/dev/null | grep 8080"
+        expected_output: "LISTEN"
+        on_fail: step-2
+      - id: step-2
+        description: Verify the port is published
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 8080"
+        expected_output: "8080"
+        on_fail: step-3
+      - id: step-3
+        description: Restart SABnzbd to recover
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      SABnzbd was restarted. Confirm it is reachable at http://host:8080. If
+      not, verify the port is exposed in the compose file and not blocked by
+      a host firewall.
+
+  - id: authentication-required
+    name: SABnzbd requires authentication but credentials not configured
+    symptoms:
+      - "401 Unauthorized"
+      - "Authentication required"
+      - "Please log in"
+    trigger_conditions:
+      - log_pattern: "401.*unauthorized"
+    steps:
+      - id: step-1
+        description: Inform about authentication configuration
+        type: inform
+        command: ""
+      - id: step-2
+        description: Check if SABNZBD_AUTH_USERNAME and SABNZBD_AUTH_PASSWORD are set
+        type: check
+        command: "docker inspect {container_name} | grep -E 'SABNZBD_AUTH'"
+        expected_output: "SABNZBD_AUTH"
+      - id: step-3
+        description: Restart SABnzbd with authentication credentials configured in compose
+        type: inform
+        command: ""
+    resolution: |
+      SABnzbd is protecting the web UI with authentication. Ensure SABNZBD_AUTH_USERNAME and SABNZBD_AUTH_PASSWORD environment variables are set in your compose file. If credentials are set but still failing, restart the container and clear browser cookies for http://host:8080.
+
+default_config:
+  compose_template: |
+    services:
+      sabnzbd:
+        image: linuxserver/sabnzbd:latest
+        container_name: sabnzbd
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          SABNZBD_AUTH_USERNAME: ${SABNZBD_AUTH_USERNAME:-}
+          SABNZBD_AUTH_PASSWORD: ${SABNZBD_AUTH_PASSWORD:-}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - ${DOWNLOADS_PATH:-./downloads}:/downloads
+          - ${INCOMPLETE_PATH:-./incomplete-downloads}:/incomplete-downloads
+        ports:
+          - "8080:8080/tcp"
+  required_vars:
+    - name: PUID
+      description: User ID to run SABnzbd as
+      default: "1000"
+    - name: PGID
+      description: Group ID for SABnzbd
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (settings, database)
+      default: "./config"
+    - name: DOWNLOADS_PATH
+      description: Host path for /downloads (completed downloads)
+      default: "./downloads"
+    - name: INCOMPLETE_PATH
+      description: Host path for /incomplete-downloads (in-progress downloads)
+      default: "./incomplete-downloads"
+    - name: SABNZBD_AUTH_USERNAME
+      description: Optional username for web UI authentication
+      default: ""
+    - name: SABNZBD_AUTH_PASSWORD
+      description: Optional password for web UI authentication
+      default: ""
+  known_mounts:
+    - container_path: /config
+      purpose: SABnzbd settings, database, and scripts
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /downloads
+      purpose: Completed downloads (post-processed files)
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+    - container_path: /incomplete-downloads
+      purpose: In-progress downloads and staging area
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  Path separation: /downloads and /incomplete-downloads should be separate directories
+  to allow the host system to monitor post-processing while downloads are still in progress.
+  Both must be writable by the container (UID/GID parity required).
+
+  Authentication: SABNZBD_AUTH_USERNAME and SABNZBD_AUTH_PASSWORD protect the web UI.
+  If not set, the UI is unprotected on your network. Recommended for exposed instances.
+
+  Post-processing scripts in /config/Scripts/ run with the container's UID/GID,
+  so ensure any external binaries referenced are accessible to that user.

@@ -1,0 +1,256 @@
+id: openvpn
+name: OpenVPN Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "kylemanna/openvpn"
+  port_hints: [1194]
+category: security
+description: Open-source VPN server for secure remote access
+docs_url: https://hub.docker.com/r/kylemanna/openvpn
+
+common_issues:
+  - id: not-initialized-first-run
+    name: Container exits immediately, OpenVPN configuration not initialized
+    symptoms:
+      - "Container starts then immediately stops"
+      - "No OpenVPN process running"
+      - "Error: key.pem not found"
+      - "Cannot connect VPN clients"
+    trigger_conditions:
+      - log_pattern: "No such file or directory.*key.pem"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check if /etc/openvpn/data directory is empty
+        type: check
+        command: "ls -la {config_path} 2>&1 | head -10"
+        expected_output: "total"
+        on_fail: step-2
+      - id: step-2
+        description: Display configuration directory status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Inform about OpenVPN one-shot initialization pattern
+        type: inform
+        command: ""
+      - id: step-4
+        description: Initialize OpenVPN PKI and configuration with genconfig
+        type: fix
+        command: "docker run --rm -v {config_path}:/etc/openvpn kylemanna/openvpn ovpn_genconfig -u udp://{vpn_host}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Initialize PKI infrastructure (generates CA, server cert, key)
+        type: fix
+        command: "docker run --rm -v {config_path}:/etc/openvpn kylemanna/openvpn ovpn_initpki"
+        requires_approval: true
+        on_success: step-6
+      - id: step-6
+        description: Verify configuration files were created
+        type: check
+        command: "ls -la {config_path} | grep -E '(ca.crt|server.crt|server.key|openvpn.conf)'"
+        expected_output: "ca.crt"
+      - id: step-7
+        description: Start OpenVPN container with initialized configuration
+        type: fix
+        command: "docker start {container_name}"
+        requires_approval: true
+        on_success: step-8
+      - id: step-8
+        description: Verify OpenVPN is running and listening on port 1194
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -ulnp | grep 1194"
+        expected_output: "LISTEN.*1194"
+    resolution: |
+      OpenVPN requires one-time PKI initialization using ovpn_genconfig and ovpn_initpki. The configuration has been generated and the PKI infrastructure created with self-signed certificates. The container should now start successfully. To add VPN clients, use ovpn_getclient (see documentation).
+
+  - id: clients-cannot-connect
+    name: VPN clients cannot connect to server
+    symptoms:
+      - "Connection timeout when connecting from client"
+      - "No response from VPN server address"
+      - "Client stuck at "Connecting" state"
+      - "Port 1194/udp unreachable from external network"
+    trigger_conditions:
+      - log_pattern: "connection refused"
+      - log_pattern: "no client.*connected"
+    steps:
+      - id: step-1
+        description: Check if OpenVPN is listening on port 1194
+        type: check
+        command: "docker exec {container_name} ss -ulnp | grep 1194"
+        expected_output: "LISTEN.*1194"
+        on_fail: step-2
+      - id: step-2
+        description: Display OpenVPN server status
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check port mapping in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 2 '1194'"
+        expected_output: "1194"
+        on_fail: step-4
+      - id: step-4
+        description: Verify port 1194/udp is exposed in container config
+        type: inform
+        command: ""
+      - id: step-5
+        description: Verify VPN_HOST/OVPN_N matches client .ovpn profile
+        type: check
+        command: "docker exec {container_name} grep -i 'remote ' /etc/openvpn/openvpn.conf | head -3"
+        expected_output: "remote"
+      - id: step-6
+        description: Check OpenVPN logs for authentication or routing errors
+        type: check
+        command: "docker logs {container_name} | grep -i 'error\\|reject\\|deny' | tail -10"
+      - id: step-7
+        description: Verify openvpn.conf is properly generated
+        type: check
+        command: "docker exec {container_name} ls -la /etc/openvpn/*.crt /etc/openvpn/*.key 2>&1 | grep -v 'cannot access'"
+        expected_output: "ca.crt"
+    resolution: |
+      VPN clients connect to the OpenVPN server on port 1194/udp. Ensure: (1) the port is exposed and forwarded through your firewall, (2) the client .ovpn profile contains the correct server address/hostname, (3) OpenVPN process is running without errors. Check server logs for TLS negotiation or authentication failures.
+
+  - id: persistent-data-loss-on-restart
+    name: VPN configuration and client keys lost after container restart
+    symptoms:
+      - "Client certificates are gone after reboot"
+      - "Cannot re-use old client .ovpn profiles"
+      - "ovpn_genconfig and ovpn_initpki must be re-run each restart"
+      - "Data directory mounted as tmpfs or unnamed volume"
+    trigger_conditions:
+      - log_pattern: "No such file or directory.*ca.crt"
+    steps:
+      - id: step-1
+        description: Check how /etc/openvpn/data is mounted
+        type: check
+        command: "docker inspect {container_name} | grep -A 5 'Mounts'  | grep -A 3 '/etc/openvpn'"
+        expected_output: "Type.*bind"
+        on_fail: step-2
+      - id: step-2
+        description: Display current mount configuration
+        type: inform
+        command: ""
+      - id: step-3
+        description: Stop container without removing it
+        type: fix
+        command: "docker stop {container_name}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Backup existing /etc/openvpn/data if it exists on host
+        type: fix
+        command: "cp -r {config_path} {config_path}.backup 2>/dev/null || echo 'No existing config to backup'"
+        requires_approval: true
+      - id: step-5
+        description: Inform about volume mount requirements
+        type: inform
+        command: ""
+      - id: step-6
+        description: Update docker-compose to use named volume or host bind mount for /etc/openvpn/data
+        type: confirm
+        command: ""
+    resolution: |
+      OpenVPN configuration, certificates, and client keys must persist across container restarts. Use a named Docker volume (e.g., openvpn-data:/etc/openvpn) or host bind mount (e.g., ./openvpn-data:/etc/openvpn) in your docker-compose.yml. Without persistent storage, all configuration is lost on restart and must be re-initialized.
+
+  - id: high-memory-usage
+    name: OpenVPN consuming excessive memory
+    symptoms:
+      - "Memory usage above 500MB"
+      - "Container OOMKilled or killed by system"
+      - "Swap space being used heavily"
+      - "Performance degradation with multiple connected clients"
+    trigger_conditions:
+      - log_pattern: "out of memory"
+      - log_pattern: "OOMKilled"
+    steps:
+      - id: step-1
+        description: Check current memory usage of OpenVPN container
+        type: check
+        command: "docker stats {container_name} --no-stream | grep {container_name}"
+        expected_output: ""
+      - id: step-2
+        description: Display memory limits and swappiness
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check for memory leaks in OpenVPN logs
+        type: check
+        command: "docker logs {container_name} | grep -i 'memory\\|leak\\|alloc' | tail -10"
+      - id: step-4
+        description: Set memory limit on container (default: 256MB, adjust as needed)
+        type: fix
+        command: "docker update --memory=512m --memory-swap=512m {container_name}"
+        requires_approval: true
+        on_success: step-5
+      - id: step-5
+        description: Verify memory limit is applied
+        type: check
+        command: "docker inspect {container_name} | grep -E 'Memory|MemorySwap'"
+    resolution: |
+      High memory usage can occur with many simultaneous VPN connections. Set an explicit memory limit in docker-compose (e.g., mem_limit: 512m) to prevent the container from consuming all system RAM. If many clients are connected, increase the limit or consider running additional OpenVPN instances with load balancing.
+
+default_config:
+  compose_template: |
+    services:
+      openvpn:
+        image: kylemanna/openvpn:latest
+        container_name: openvpn
+        restart: unless-stopped
+        cap_add:
+          - NET_ADMIN
+        environment:
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./openvpn-data}:/etc/openvpn
+        ports:
+          - "1194:1194/udp"
+        security_opt:
+          - label=disable
+        devices:
+          - /dev/net/tun
+  required_vars:
+    - name: CONFIG_PATH
+      description: Host path for /etc/openvpn (persists PKI, config, and client certs)
+      default: "./openvpn-data"
+    - name: VPN_HOST
+      description: External hostname or IP for VPN server (used in client .ovpn files)
+      default: "vpn.example.com"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+  known_mounts:
+    - container_path: /etc/openvpn
+      purpose: OpenVPN configuration, PKI (CA, server cert/key), and client certificates
+      recommended_permissions: "755"
+      owner: "root:root"
+
+notes: |
+  OpenVPN is a robust, open-source VPN server supporting client-to-site and site-to-site configurations.
+
+  One-shot initialization pattern:
+  1. Run ovpn_genconfig once with your external hostname to generate openvpn.conf.
+  2. Run ovpn_initpki once to create CA, server certificates, and Diffie-Hellman parameters.
+  3. Start the container normally. It will not re-initialize on subsequent restarts.
+
+  Adding clients:
+  - Use `docker exec openvpn ovpn_getclient <clientname> > client.ovpn` to generate client profiles.
+  - Distribute the .ovpn file to clients securely.
+
+  Capabilities:
+  - NET_ADMIN: Required to create/manage TUN/TAP interfaces.
+  - Requires access to /dev/net/tun (host Linux kernel TUN device).
+
+  Firewall:
+  - Port 1194/udp must be open from external networks to your host.
+  - Consider fail2ban or rate limiting to prevent brute-force attacks.
+
+  MTU/Fragment issues:
+  - If clients report packet fragmentation or slow throughput, adjust mssfix or fragment directives in openvpn.conf.
+
+  Data persistence:
+  - The ./openvpn-data directory is critical. Back it up regularly.
+  - Never delete or lose this volume — client certificates cannot be recovered.

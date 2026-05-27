@@ -1,0 +1,200 @@
+id: wireguard
+name: WireGuard VPN Server
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/wireguard"
+  port_hints: [51820]
+category: security
+description: Modern, fast VPN server using WireGuard protocol
+docs_url: https://hub.docker.com/r/linuxserver/wireguard
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "Permission denied"
+      - "EACCES"
+      - "Cannot write configuration to /config"
+      - "WireGuard cannot load wg0.conf"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+      - log_pattern: "cannot access.*wg0.conf"
+    steps:
+      - id: step-1
+        description: Check current ownership of the host config path
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership and permissions
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown the config path to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Verify ownership was changed successfully
+        type: check
+        command: "stat {config_path} | grep Uid"
+        expected_output: "Uid: {puid}"
+    resolution: |
+      The /config directory ownership was mismatched with the container's running UID/GID. This prevents WireGuard from writing configuration files. The fix changed ownership to match the container process. WireGuard should now be able to read and write to /config.
+
+  - id: vpn-not-connecting
+    name: VPN clients cannot connect to WireGuard server
+    symptoms:
+      - "Connection timeout when connecting from client"
+      - "HandshakeResponse failed"
+      - "Client stuck at connecting state"
+      - "Port 51820/udp unreachable from external network"
+    trigger_conditions:
+      - log_pattern: "handshake.*failed"
+      - log_pattern: "connection refused"
+    steps:
+      - id: step-1
+        description: Check if WireGuard is listening on port 51820
+        type: check
+        command: "docker exec {container_name} ss -ulnp | grep 51820"
+        expected_output: "LISTEN.*51820"
+        on_fail: step-2
+      - id: step-2
+        description: Display WireGuard status and interface info
+        type: inform
+        command: ""
+      - id: step-3
+        description: Check if port 51820/udp is exposed in docker inspect
+        type: check
+        command: "docker inspect {container_name} | grep -A 3 '51820'"
+        expected_output: "51820"
+        on_fail: step-4
+      - id: step-4
+        description: Verify port 51820/udp is published in container config
+        type: inform
+        command: ""
+      - id: step-5
+        description: Check WireGuard kernel module is loaded
+        type: check
+        command: "docker exec {container_name} lsmod | grep wireguard"
+        expected_output: "wireguard"
+        on_fail: step-6
+      - id: step-6
+        description: Display kernel module loading status
+        type: inform
+        command: ""
+      - id: step-7
+        description: Inform about CAP_SYS_MODULE requirement
+        type: inform
+        command: ""
+      - id: step-8
+        description: Restart WireGuard container to reinitialize interface
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+        on_success: step-9
+      - id: step-9
+        description: Verify WireGuard is listening after restart
+        type: check
+        command: "sleep 5 && docker exec {container_name} ss -ulnp | grep 51820"
+        expected_output: "LISTEN.*51820"
+    resolution: |
+      WireGuard requires port 51820/udp to be exposed and the WireGuard kernel module to be loaded (requires CAP_SYS_MODULE capability). Ensure your firewall allows UDP port 51820 from external networks. Verify that client configuration files (.conf) have been generated in /config/wg_confs/ and distributed securely to clients.
+
+default_config:
+  compose_template: |
+    services:
+      wireguard:
+        image: linuxserver/wireguard:latest
+        container_name: wireguard
+        restart: unless-stopped
+        cap_add:
+          - NET_ADMIN
+          - SYS_MODULE
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+          SERVERURL: ${SERVERURL:-auto}
+          SERVERPORT: ${SERVERPORT:-51820}
+          PEERS: ${PEERS:-1}
+          INTERNAL_SUBNET: ${INTERNAL_SUBNET:-10.0.0.0}
+          ALLOWEDIPS: ${ALLOWEDIPS:-0.0.0.0/0}
+          LOG_CONFS: ${LOG_CONFS:-true}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+          - /lib/modules:/lib/modules:ro
+        ports:
+          - "51820:51820/udp"
+        sysctls:
+          - net.ipv4.conf.all.src_valid_mark=1
+  required_vars:
+    - name: PUID
+      description: User ID to run WireGuard as
+      default: "1000"
+    - name: PGID
+      description: Group ID for WireGuard
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: SERVERURL
+      description: External URL or IP for VPN endpoint (auto-detect or specify)
+      default: "auto"
+    - name: SERVERPORT
+      description: Port WireGuard listens on
+      default: "51820"
+    - name: PEERS
+      description: Number of peer configurations to generate
+      default: "1"
+    - name: CONFIG_PATH
+      description: Host path for /config (WireGuard configuration and peer keys)
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: WireGuard configuration, private/public keys, and peer configurations
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  WireGuard is a modern, high-performance VPN protocol with simpler cryptography and faster handshakes than OpenVPN.
+
+  Key configuration:
+  - SERVERURL: Set to your external hostname or IP that clients will connect to (or leave as "auto" for auto-detection).
+  - SERVERPORT: Port for VPN endpoint (default 51820/udp).
+  - PEERS: Number of peer configuration files to generate on first run.
+  - INTERNAL_SUBNET: Private subnet for VPN traffic (default 10.0.0.0).
+
+  Capabilities required:
+  - NET_ADMIN: Required to create and manage the wg0 interface.
+  - SYS_MODULE: Required to load the WireGuard kernel module (if not already loaded on host).
+
+  First-run initialization:
+  1. Container generates private/public keypairs and peer configurations on startup.
+  2. Peer .conf files appear in /config/wg_confs/ after initialization.
+  3. Download peer configurations from the host and distribute securely to clients (not via email).
+
+  Adding additional peers:
+  - Use `docker exec wireguard wg-gen-keypair` to add new peers.
+  - Edit /config/wg0.conf to add the new peer's public key.
+
+  Data persistence:
+  - /config must be on persistent storage. Private keys are stored here and cannot be regenerated.
+  - Never delete or lose the /config directory.
+
+  Linux kernel module:
+  - WireGuard kernel module is loaded at container startup via SYS_MODULE capability.
+  - If module fails to load, check that your host kernel version >= 5.6 or that wireguard-dkms is installed.
+
+  Firewall:
+  - Port 51820/udp must be open from external networks to your host.
+  - Consider fail2ban or rate limiting to prevent brute-force attacks.

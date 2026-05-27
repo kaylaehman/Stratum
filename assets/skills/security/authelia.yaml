@@ -1,0 +1,266 @@
+id: authelia
+name: Authelia
+version: "1.0"
+container_match:
+  image_patterns:
+    - "authelia/authelia"
+  port_hints: [9091]
+category: security
+description: Single sign-on and 2FA authentication server — lightweight SSO/OIDC provider for reverse proxies
+docs_url: https://www.authelia.com/overview/
+
+common_issues:
+  - id: configuration-missing
+    name: Configuration file missing or not mounted
+    symptoms:
+      - "configuration file not found"
+      - "cannot read config"
+      - "No configuration.yml"
+      - "stat: no such file"
+    trigger_conditions:
+      - log_pattern: "configuration.*not found"
+      - log_pattern: "config.*missing"
+    steps:
+      - id: step-1
+        description: Check if configuration.yml exists inside the container
+        type: check
+        command: "docker exec {container_name} ls -la /config/"
+        expected_output: "configuration.yml"
+        on_fail: step-2
+      - id: step-2
+        description: Verify volume mount in docker-compose
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Mounts}}' | grep config"
+        expected_output: "config"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about required configuration mount
+        type: inform
+        command: ""
+      - id: step-4
+        description: Add or fix configuration.yml volume mount in docker-compose
+        type: fix
+        command: "echo 'Ensure docker-compose has: volumes: - ./config/configuration.yml:/config/configuration.yml'"
+        requires_approval: true
+      - id: step-5
+        description: Restart Authelia container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Authelia requires a configuration.yml file mounted at /config/configuration.yml.
+      The container will not start without it. Create the config file on the host,
+      then add a volume mount: `./config/configuration.yml:/config/configuration.yml`.
+      See https://www.authelia.com/configuration/methods/files/ for config structure.
+
+  - id: jwt-secret-missing
+    name: JWT secret not configured or empty
+    symptoms:
+      - "jwt_secret not set"
+      - "jwt_secret is empty"
+      - "session token invalid"
+      - "authentication failed"
+    trigger_conditions:
+      - log_pattern: "jwt_secret"
+      - log_pattern: "secret.*empty"
+    steps:
+      - id: step-1
+        description: Check if jwt_secret is set in configuration.yml
+        type: check
+        command: "docker exec {container_name} grep -A 2 'jwt_secret' /config/configuration.yml"
+        expected_output: "jwt_secret:"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about JWT secret generation
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a random JWT secret (32+ characters)
+        type: check
+        command: "openssl rand -base64 32"
+        expected_output: ""
+      - id: step-4
+        description: Update configuration.yml with jwt_secret
+        type: fix
+        command: "echo 'Add jwt_secret: <generated-value> to the session section of configuration.yml'"
+        requires_approval: true
+      - id: step-5
+        description: Restart Authelia
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      The `jwt_secret` is used to sign session tokens. Without it, Authelia
+      cannot authenticate users. Generate a 32-character random string and add
+      it to the `session` section of configuration.yml. Do not change this value
+      after users have logged in, or all sessions become invalid.
+
+  - id: session-secret-missing
+    name: Session secret not configured or empty
+    symptoms:
+      - "session_secret not set"
+      - "session secret empty"
+      - "cannot encrypt session"
+      - "session encryption error"
+    trigger_conditions:
+      - log_pattern: "session_secret"
+      - log_pattern: "session.*secret"
+    steps:
+      - id: step-1
+        description: Check if session_secret is set in configuration.yml
+        type: check
+        command: "docker exec {container_name} grep -A 2 'session_secret' /config/configuration.yml"
+        expected_output: "session_secret:"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about session secret generation
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a random session secret (32+ characters)
+        type: check
+        command: "openssl rand -base64 32"
+        expected_output: ""
+      - id: step-4
+        description: Update configuration.yml with session_secret
+        type: fix
+        command: "echo 'Add session_secret: <generated-value> to the session section of configuration.yml'"
+        requires_approval: true
+      - id: step-5
+        description: Restart Authelia
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      The `session_secret` encrypts session cookies. Without it, Authelia cannot
+      store encrypted session data. Generate a 32-character random string and add
+      it to the `session` section of configuration.yml alongside `jwt_secret`.
+
+  - id: storage-secret-missing
+    name: Storage secret not configured (database encryption)
+    symptoms:
+      - "storage_secret not set"
+      - "storage encryption error"
+      - "database encryption failed"
+      - "cannot encrypt storage"
+    trigger_conditions:
+      - log_pattern: "storage_secret"
+      - log_pattern: "storage.*encryption"
+    steps:
+      - id: step-1
+        description: Check if storage_secret is set in configuration.yml
+        type: check
+        command: "docker exec {container_name} grep -A 2 'storage_secret' /config/configuration.yml"
+        expected_output: "storage_secret:"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about storage secret
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a random storage secret (32+ characters)
+        type: check
+        command: "openssl rand -base64 32"
+        expected_output: ""
+      - id: step-4
+        description: Update configuration.yml with storage_secret
+        type: fix
+        command: "echo 'Add encryption_key: <generated-value> to the storage section of configuration.yml'"
+        requires_approval: true
+      - id: step-5
+        description: Restart Authelia
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      The `encryption_key` (in the `storage` section) encrypts sensitive data
+      stored in the database (e.g., TOTP secrets, OAuth tokens). Generate a
+      32-character random string and add it to the `storage` section.
+
+  - id: notifier-not-configured
+    name: Email notifications not working (notifier misconfigured)
+    symptoms:
+      - "notifier disabled"
+      - "cannot send email"
+      - "SMTP connection refused"
+      - "notifier error"
+    trigger_conditions:
+      - log_pattern: "notifier.*disabled"
+      - log_pattern: "email.*failed"
+    steps:
+      - id: step-1
+        description: Check if notifier is configured
+        type: check
+        command: "docker exec {container_name} grep -A 5 'notifier:' /config/configuration.yml"
+        expected_output: "notifier:"
+        on_fail: step-2
+      - id: step-2
+        description: Verify notifier type is set (smtp or filesystem)
+        type: check
+        command: "docker exec {container_name} grep -E 'smtp|filesystem' /config/configuration.yml"
+        expected_output: "smtp"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about notifier options
+        type: inform
+        command: ""
+      - id: step-4
+        description: Configure SMTP notifier or filesystem notifier in configuration.yml
+        type: fix
+        command: "echo 'For SMTP: set notifier.smtp.host, port, username, password. For filesystem: set notifier.file_system.filename: /config/notifications.txt'"
+        requires_approval: true
+      - id: step-5
+        description: Restart Authelia
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Authelia can send notifications via SMTP (email) or filesystem (text file).
+      For SMTP: configure notifier.smtp.host, .port, .username, .password, .from_address.
+      For testing without a mail server: use notifier.file_system.filename to write
+      notifications to a text file. The notifier is required for password resets and
+      2FA enrollment links.
+
+default_config:
+  compose_template: |
+    services:
+      authelia:
+        image: authelia/authelia:latest
+        container_name: authelia
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+        ports:
+          - "9091:9091"
+        volumes:
+          - ./config/configuration.yml:/config/configuration.yml:ro
+          - ./config/users_database.yml:/config/users_database.yml:ro
+  required_vars:
+    - name: TZ
+      description: Timezone for logs and timestamps
+      default: "UTC"
+  known_mounts:
+    - container_path: /config
+      purpose: configuration.yml, users_database.yml, and session storage
+      recommended_permissions: "700"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Authelia is a lightweight authentication server commonly deployed behind a
+  reverse proxy (Traefik, nginx) to provide 2FA and SSO for multiple applications.
+
+  Configuration is entirely file-based (configuration.yml). Three cryptographic
+  secrets must be generated on setup: jwt_secret, session_secret, and
+  encryption_key (in storage section). Do not change these after deployment.
+
+  For a minimal setup: use filesystem user database (users_database.yml),
+  filesystem notifier (notifications written to a file), and memory session
+  store (no persistence across restarts). For production: use LDAP/OIDC for
+  users, SMTP for email notifications, and a persistent backend (Redis,
+  PostgreSQL) for sessions.
+
+  Authelia does not provide a database itself — it relies on external
+  authentication sources (local file, LDAP, OIDC) and optional session backends.

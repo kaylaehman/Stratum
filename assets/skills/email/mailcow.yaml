@@ -1,0 +1,259 @@
+id: mailcow
+name: Mailcow Dockerized
+version: "1.0"
+container_match:
+  image_patterns:
+    - "mailcow/mailcow-dockerized"
+  port_hints: [25, 143, 465, 587, 993, 80, 443]
+category: email
+description: Full-featured open-source mail server suite with web UI, spam/virus scanning, and RBAC
+docs_url: https://docs.mailcow.email/
+
+common_issues:
+  - id: missing-mailcow-conf
+    name: Mailcow fails to start — mailcow.conf not generated
+    symptoms:
+      - "Cannot access mailcow.conf"
+      - "docker-compose up fails immediately"
+      - "error reading mailcow.conf"
+    trigger_conditions:
+      - log_pattern: "mailcow.conf"
+    steps:
+      - id: step-1
+        description: Check if mailcow.conf exists in the mailcow directory
+        type: check
+        command: "ls -la {install_path}/mailcow.conf"
+        expected_output: "mailcow.conf"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about mailcow installation procedure
+        type: inform
+        command: ""
+      - id: step-3
+        description: Run the mailcow generate script
+        type: fix
+        command: "cd {install_path} && bash generate_config.sh"
+        requires_approval: true
+        on_success: step-4
+      - id: step-4
+        description: Start all mailcow services
+        type: fix
+        command: "cd {install_path} && docker-compose up -d"
+        requires_approval: true
+    resolution: |
+      Mailcow is a multi-container stack and requires the generate_config.sh
+      script to scaffold mailcow.conf with site-specific settings (domain,
+      timezone, etc). After running generate_config.sh, the compose file
+      (supplied by mailcow itself) will be ready. Start all services with
+      `docker-compose up -d`.
+
+  - id: certificate-validation-error
+    name: SSL/TLS certificate error — Let's Encrypt renewal failed
+    symptoms:
+      - "certificate verify failed"
+      - "SSL: CERTIFICATE_VERIFY_FAILED"
+      - "acme error" in logs
+    trigger_conditions:
+      - log_pattern: "certificate"
+    steps:
+      - id: step-1
+        description: Check if acme certificate directory exists
+        type: check
+        command: "ls -la {install_path}/data/assets/ssl/"
+        expected_output: "cert.pem"
+        on_fail: step-2
+      - id: step-2
+        description: Inform about certificate renewal process
+        type: inform
+        command: ""
+      - id: step-3
+        description: Trigger certificate renewal manually
+        type: fix
+        command: "cd {install_path} && docker-compose exec -T certbot certbot renew"
+        requires_approval: true
+    resolution: |
+      Mailcow uses Let's Encrypt for automatic TLS. If renewal fails, check
+      that DNS resolves correctly and that ports 80/443 are accessible from
+      the internet for the ACME challenge. You can manually trigger renewal
+      via the certbot container.
+
+  - id: database-corruption
+    name: Mailcow MySQL database is unhealthy or unreachable
+    symptoms:
+      - "MySQL connection error"
+      - "database error" in logs
+      - "Cannot access mailcow admin panel"
+    trigger_conditions:
+      - log_pattern: "MySQL"
+    steps:
+      - id: step-1
+        description: Check if mysql container is running
+        type: check
+        command: "cd {install_path} && docker-compose ps mysql"
+        expected_output: "Up"
+        on_fail: step-2
+      - id: step-2
+        description: Test database connectivity
+        type: check
+        command: "cd {install_path} && docker-compose exec -T mysql mysqladmin -u{db_user} -p{db_pass} ping"
+        expected_output: "mysqld is alive"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about database recovery
+        type: inform
+        command: ""
+    resolution: |
+      If the MySQL container is not running, start it: `cd mailcow && docker-compose up -d mysql`.
+      If connectivity fails, check the MySQL container logs and ensure the
+      password in mailcow.conf matches. Database corruption is rare but would
+      require a backup restore.
+
+  - id: permission-denied-data
+    name: Permission denied on mailcow data directories
+    symptoms:
+      - "permission denied"
+      - "Cannot create/write file in data directory"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of mailcow data directory
+        type: check
+        command: "stat {install_path}/data"
+        expected_output: "Uid:"
+        on_fail: step-2
+      - id: step-2
+        description: Fix ownership of all mailcow data directories
+        type: fix
+        command: "chown -R 82:82 {install_path}/data && chmod -R 750 {install_path}/data"
+        requires_approval: true
+    resolution: |
+      The mailcow containers run as www-data user (UID 82). All data
+      directories must be writable by that user. The fix recursively changes
+      ownership and permissions.
+
+default_config:
+  compose_template: |
+    version: '3.8'
+    services:
+      mysql:
+        image: mysql:8
+        restart: unless-stopped
+        environment:
+          MYSQL_DATABASE: ${DB_NAME}
+          MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
+          MYSQL_USER: ${DB_USER}
+          MYSQL_PASSWORD: ${DB_PASS}
+        volumes:
+          - ${DATA_PATH:-./data}/mysql:/var/lib/mysql
+      redis:
+        image: redis:7-alpine
+        restart: unless-stopped
+        volumes:
+          - ${DATA_PATH:-./data}/redis:/data
+      postfix:
+        image: mailcow/postfix:latest
+        restart: unless-stopped
+        depends_on:
+          - mysql
+        environment:
+          MAILCOW_HOSTNAME: ${MAILCOW_HOSTNAME}
+        volumes:
+          - ${DATA_PATH:-./data}/mail:/var/mail
+        ports:
+          - "25:25"
+          - "587:587"
+          - "465:465"
+      dovecot:
+        image: mailcow/dovecot:latest
+        restart: unless-stopped
+        depends_on:
+          - mysql
+        ports:
+          - "143:143"
+          - "993:993"
+          - "4190:4190"
+        volumes:
+          - ${DATA_PATH:-./data}/mail:/var/mail
+      nginx:
+        image: mailcow/nginx:latest
+        restart: unless-stopped
+        depends_on:
+          - postfix
+        ports:
+          - "80:80"
+          - "443:443"
+        volumes:
+          - ${DATA_PATH:-./data}/ssl:/etc/ssl
+  required_vars:
+    - name: MAILCOW_HOSTNAME
+      description: Hostname mailcow answers for (e.g. mail.example.com)
+      default: "mail.example.com"
+    - name: DB_NAME
+      description: MySQL database name for mailcow
+      default: "mailcow"
+    - name: DB_USER
+      description: MySQL user for mailcow
+      default: "mailcow"
+    - name: DB_PASS
+      description: MySQL password for mailcow user
+      default: ""
+    - name: DB_ROOT_PASS
+      description: MySQL root password
+      default: ""
+    - name: DATA_PATH
+      description: Host path for persistent mailcow data
+      default: "./data"
+  known_mounts:
+    - container_path: /var/mail
+      purpose: Mail spool, user mailboxes
+      recommended_permissions: "750"
+      owner: "82:82"
+    - container_path: /var/lib/mysql
+      purpose: MySQL database storage
+      recommended_permissions: "700"
+      owner: "999:999"
+    - container_path: /etc/ssl
+      purpose: SSL/TLS certificates
+      recommended_permissions: "750"
+      owner: "82:82"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Mailcow is a comprehensive mail server suite, NOT a single container. It
+  consists of multiple containers (MySQL, Redis, Postfix, Dovecot, Nginx,
+  SOGo, ClamAV, SpamAssassin, and more) orchestrated by docker-compose.
+
+  Installation steps (from official docs):
+  1. Clone the mailcow repository:
+     git clone https://github.com/mailcow/mailcow-dockerized.git mailcow
+  2. Generate configuration:
+     cd mailcow && bash generate_config.sh
+  3. During generate_config.sh, specify your domain, hostname, and timezone.
+  4. Start all services:
+     docker-compose up -d
+
+  Ports:
+  - 25: SMTP (incoming)
+  - 587: SMTP Submission (TLS with auth)
+  - 465: SMTPS (implicit TLS)
+  - 143: IMAP (plaintext)
+  - 993: IMAPS (TLS)
+  - 4190: ManageSieve (for user filters)
+  - 80: HTTP (redirects to 443)
+  - 443: HTTPS (admin panel, SOGo webmail)
+
+  Features:
+  - Full SMTP/IMAP/POP3 mail server
+  - Web-based admin panel
+  - SOGo webmail interface
+  - Integrated spam/virus scanning (SpamAssassin, ClamAV)
+  - Multi-domain and multi-user support
+  - SSL/TLS with automatic Let's Encrypt renewal
+  - Backup and restore functionality
+
+  The official docker-compose.yml and all service definitions are supplied
+  by the mailcow project in the cloned repository. Do NOT manually create
+  compose files — always use generate_config.sh to ensure compatibility.

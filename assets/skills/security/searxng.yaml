@@ -1,0 +1,213 @@
+id: searxng
+name: SearXNG
+version: "1.0"
+container_match:
+  image_patterns:
+    - "searxng/searxng"
+  port_hints: [8080]
+category: security
+description: Privacy-respecting meta-search engine — aggregates results from multiple search engines without tracking
+docs_url: https://docs.searxng.org/
+
+common_issues:
+  - id: settings-not-mounted
+    name: settings.yml not mounted or missing
+    symptoms:
+      - "settings.yml not found"
+      - "config file missing"
+      - "cannot read settings"
+      - "search engines not configured"
+    trigger_conditions:
+      - log_pattern: "settings.*not found"
+      - log_pattern: "config.*missing"
+    steps:
+      - id: step-1
+        description: Check if settings.yml exists inside the container
+        type: check
+        command: "docker exec {container_name} test -f /etc/searxng/settings.yml && echo 'exists' || echo 'missing'"
+        expected_output: "exists"
+        on_fail: step-2
+      - id: step-2
+        description: Verify volume mount in docker-compose or inspect
+        type: check
+        command: "docker inspect {container_name} --format='{{json .Mounts}}' | grep -i settings"
+        expected_output: "settings"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about required settings.yml mount
+        type: inform
+        command: ""
+      - id: step-4
+        description: Add or fix settings.yml volume mount in docker-compose
+        type: fix
+        command: "echo 'Ensure docker-compose has: volumes: - ./settings.yml:/etc/searxng/settings.yml:ro'"
+        requires_approval: true
+      - id: step-5
+        description: Restart SearXNG container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      SearXNG requires a settings.yml file mounted at /etc/searxng/settings.yml.
+      The container will not start without it. Create settings.yml on the host
+      (copy from upstream example or generate via container init), then mount it:
+      `./settings.yml:/etc/searxng/settings.yml:ro`. See https://docs.searxng.org/admin/settings/index.html
+      for configuration options.
+
+  - id: redis-connection-failed
+    name: Redis connection failed (cache backend unavailable)
+    symptoms:
+      - "redis connection refused"
+      - "cache unavailable"
+      - "Cannot connect to Redis"
+      - "redis host not found"
+    trigger_conditions:
+      - log_pattern: "redis.*connection"
+      - log_pattern: "cache.*failed"
+    steps:
+      - id: step-1
+        description: Check if Redis container or service is running
+        type: check
+        command: "docker ps | grep redis || echo 'Redis not found in running containers'"
+        expected_output: "redis"
+        on_fail: step-2
+      - id: step-2
+        description: Test Redis connectivity from SearXNG
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {redis_host} 6379 2>&1'"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Verify REDIS_HOST environment variable or settings.yml redis section
+        type: check
+        command: "docker exec {container_name} grep -A 3 'redis:' /etc/searxng/settings.yml 2>&1 || echo 'No redis config found'"
+        expected_output: "redis"
+        on_fail: step-4
+      - id: step-4
+        description: Inform about Redis dependency and configuration
+        type: inform
+        command: ""
+      - id: step-5
+        description: Ensure Redis is running and configure in settings.yml or via environment
+        type: fix
+        command: "echo 'Start Redis container or add redis section to settings.yml with: host: redis, port: 6379, db: 0'"
+        requires_approval: true
+      - id: step-6
+        description: Restart SearXNG
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      SearXNG uses Redis for caching search results and reducing latency. If Redis
+      is unavailable, SearXNG can run without it (caching disabled) but performance
+      will degrade. Verify: (1) Redis container is running, (2) settings.yml has
+      a redis section configured with correct host/port, (3) both containers share
+      a Docker network or SearXNG can reach Redis by hostname. Default:
+      host: redis, port: 6379, db: 0.
+
+  - id: search-engines-disabled
+    name: All search engines disabled or not configured
+    symptoms:
+      - "no search engines available"
+      - "select an engine"
+      - "no engines to query"
+      - "search engines list is empty"
+    trigger_conditions:
+      - log_pattern: "engines.*disabled"
+      - log_pattern: "no.*engines"
+    steps:
+      - id: step-1
+        description: Check if any search engines are enabled in settings.yml
+        type: check
+        command: "docker exec {container_name} grep -E '^ +engine:|enabled:' /etc/searxng/settings.yml | head -20"
+        expected_output: "engine"
+        on_fail: step-2
+      - id: step-2
+        description: Count enabled engines
+        type: check
+        command: "docker exec {container_name} grep -c 'enabled: true' /etc/searxng/settings.yml || echo '0'"
+        expected_output: "[1-9]"
+        on_fail: step-3
+      - id: step-3
+        description: Inform about engine configuration
+        type: inform
+        command: ""
+      - id: step-4
+        description: Update settings.yml to enable default search engines
+        type: fix
+        command: "echo 'Enable search engines in settings.yml: common engines are google, bing, duckduckgo, qwant, startpage. Set enabled: true for each.'"
+        requires_approval: true
+      - id: step-5
+        description: Reload or restart SearXNG
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      SearXNG is a meta-search engine that aggregates results from multiple
+      sources. Each source (Google, Bing, DuckDuckGo, etc.) must be explicitly
+      enabled in settings.yml. If none are enabled, users will see no results.
+      Enable at least one search engine by setting enabled: true in the engines
+      section of settings.yml. Test with a simple search after restart.
+
+default_config:
+  compose_template: |
+    services:
+      searxng:
+        image: searxng/searxng:latest
+        container_name: searxng
+        restart: unless-stopped
+        environment:
+          TZ: ${TZ:-UTC}
+          SEARXNG_BASE_URL: https://${DOMAIN:-localhost}/
+        ports:
+          - "8080:8080"
+        volumes:
+          - ./settings.yml:/etc/searxng/settings.yml:ro
+        depends_on:
+          - redis
+      redis:
+        image: redis:7-alpine
+        container_name: searxng-redis
+        restart: unless-stopped
+        volumes:
+          - searxng_redis:/data
+    volumes:
+      searxng_redis:
+  required_vars:
+    - name: DOMAIN
+      description: Public domain or hostname for SearXNG (used in base URL)
+      default: "localhost"
+    - name: TZ
+      description: Timezone for logs
+      default: "UTC"
+  known_mounts:
+    - container_path: /etc/searxng
+      purpose: settings.yml configuration file (read-only)
+      recommended_permissions: "644"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  SearXNG is a lightweight meta-search engine that queries multiple search
+  engines simultaneously and returns aggregated results. It respects user
+  privacy by not logging searches or using tracking cookies.
+
+  Configuration: settings.yml defines which search engines to query, timeout
+  thresholds, result filters, and caching behavior. The file must be mounted
+  read-only into the container. A commented example is included in the Docker
+  image at /etc/searxng/settings.yml.template.
+
+  Redis: Optional but strongly recommended for caching. Without Redis, every
+  search hits all configured engines, increasing latency. With Redis, frequent
+  queries return cached results within the TTL (default 1800s).
+
+  Search engines: Common public engines (Google, Bing, DuckDuckGo, Qwant,
+  Startpage) are included in the default settings but disabled by default.
+  Each must be explicitly enabled in settings.yml. Some proprietary engines
+  may require API keys (set in the engine section of settings.yml).
+
+  Rate limiting: If you expose SearXNG to the public internet, configure rate
+  limiting in settings.yml to prevent abuse. Proxy via Traefik or nginx with
+  per-IP rate limits.

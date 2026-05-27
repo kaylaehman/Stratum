@@ -1,0 +1,326 @@
+id: authentik
+name: Authentik
+version: "1.0"
+container_match:
+  image_patterns:
+    - "ghcr.io/goauthentik/server"
+    - "goauthentik/server"
+  port_hints: [9000, 9443]
+category: identity
+description: Enterprise-grade authentication, SSO, and SAML/OIDC provider for self-hosted environments
+docs_url: https://goauthentik.io/docs/
+
+common_issues:
+  - id: database-connection-failed
+    name: Database connection failed on server startup
+    symptoms:
+      - "connection refused"
+      - "database connection error"
+      - "Cannot connect to PostgreSQL"
+      - "DATABASES"
+    trigger_conditions:
+      - log_pattern: "database.*connection"
+      - log_pattern: "postgres.*refused"
+    steps:
+      - id: step-1
+        description: Verify PostgreSQL container is running
+        type: check
+        command: "docker inspect {db_container} --format='{{.State.Status}}'"
+        expected_output: "running"
+        on_fail: step-2
+      - id: step-2
+        description: Test PostgreSQL connectivity from Authentik server
+        type: check
+        command: "docker exec {container_name} sh -c 'nc -zv {db_container} 5432' 2>&1"
+        expected_output: "succeeded"
+        on_fail: step-3
+      - id: step-3
+        description: Verify DATABASES environment variable matches DB host
+        type: check
+        command: "docker inspect {container_name} -f '{{range .Config.Env}}{{println .}}{{end}}' | grep -i database"
+        expected_output: "postgres://"
+        on_fail: step-4
+      - id: step-4
+        description: Inform about Docker networking requirement
+        type: inform
+        command: ""
+      - id: step-5
+        description: Restart Authentik server container
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      Authentik requires a PostgreSQL database (e.g., postgres container).
+      Verify: (1) the postgres container is running, (2) both containers share
+      a user-defined Docker network, (3) the DATABASES env var points to the
+      correct postgres hostname and uses the correct credentials (default:
+      postgres://authentik:password@postgres:5432/authentik).
+
+  - id: redis-connection-failed
+    name: Redis connection failed (cache backend unavailable)
+    symptoms:
+      - "redis connection refused"
+      - "cache unavailable"
+      - "Connection refused to Redis"
+      - "REDIS_HOST"
+    trigger_conditions:
+      - log_pattern: "redis.*connection"
+      - log_pattern: "cache.*unavailable"
+    steps:
+      - id: step-1
+        description: Check if Redis container is running
+        type: check
+        command: "docker inspect {redis_container} --format='{{.State.Status}}'"
+        expected_output: "running"
+        on_fail: step-2
+      - id: step-2
+        description: Test Redis connectivity from Authentik
+        type: check
+        command: "docker exec {container_name} redis-cli -h {redis_container} ping 2>&1"
+        expected_output: "PONG"
+        on_fail: step-3
+      - id: step-3
+        description: Verify REDIS_HOST environment variable
+        type: check
+        command: "docker inspect {container_name} -f '{{range .Config.Env}}{{println .}}{{end}}' | grep -i redis_host"
+        expected_output: "redis"
+        on_fail: step-4
+      - id: step-4
+        description: Restart both Redis and Authentik server
+        type: fix
+        command: "docker restart {redis_container} {container_name}"
+        requires_approval: true
+    resolution: |
+      Authentik uses Redis for session caching and background tasks. If Redis
+      is unavailable, Authentik degrades gracefully but performance suffers.
+      Verify: (1) Redis container is running, (2) REDIS_HOST env var matches
+      the Redis container name, (3) both containers are on the same network.
+      Default: REDIS_HOST=redis, REDIS_PORT=6379.
+
+  - id: secret-key-missing
+    name: AUTHENTIK_SECRET_KEY is missing or empty
+    symptoms:
+      - "SECRET_KEY is empty"
+      - "no secret key configured"
+      - "secret key missing"
+      - "cryptographic failure"
+    trigger_conditions:
+      - log_pattern: "SECRET.*empty"
+      - log_pattern: "secret.*key"
+    steps:
+      - id: step-1
+        description: Check if AUTHENTIK_SECRET_KEY is set in environment
+        type: check
+        command: "docker inspect {container_name} -f '{{range .Config.Env}}{{println .}}{{end}}' | grep -i authentik_secret_key | grep -v '^$'"
+        expected_output: "AUTHENTIK_SECRET_KEY="
+        on_fail: step-2
+      - id: step-2
+        description: Inform about secret key generation
+        type: inform
+        command: ""
+      - id: step-3
+        description: Generate a new random AUTHENTIK_SECRET_KEY
+        type: check
+        command: "openssl rand -base64 32"
+        expected_output: ""
+      - id: step-4
+        description: Update docker-compose to include AUTHENTIK_SECRET_KEY
+        type: fix
+        command: "echo 'Add AUTHENTIK_SECRET_KEY env var with 32+ random characters to docker-compose'"
+        requires_approval: true
+      - id: step-5
+        description: Recreate Authentik container with updated environment
+        type: fix
+        command: "docker-compose up -d authentik"
+        requires_approval: true
+    resolution: |
+      AUTHENTIK_SECRET_KEY is a cryptographic key used for session encryption
+      and token signing. Without it, Authentik cannot function. Generate a
+      32-character random string (e.g., `openssl rand -base64 32`) and add it
+      to docker-compose as an environment variable, then restart the container.
+      This key must never change after initial setup, or all sessions become invalid.
+
+  - id: worker-crashes
+    name: Worker container crashes or fails to start
+    symptoms:
+      - "worker exited"
+      - "worker container crashed"
+      - "permission denied"
+      - "Traceback"
+    trigger_conditions:
+      - log_pattern: "worker.*crash"
+      - exit_code: 1
+    steps:
+      - id: step-1
+        description: Check worker container logs
+        type: check
+        command: "docker logs {worker_container} --tail 50"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Verify worker and server containers share database credentials
+        type: check
+        command: "diff <(docker inspect {container_name} -f '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'DATABASE|REDIS|SECRET') <(docker inspect {worker_container} -f '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'DATABASE|REDIS|SECRET')"
+        expected_output: ""
+        on_fail: step-3
+      - id: step-3
+        description: Inform about worker environment sync
+        type: inform
+        command: ""
+      - id: step-4
+        description: Ensure worker environment matches server exactly
+        type: fix
+        command: "echo 'Verify docker-compose: server and worker services have identical DATABASES, REDIS_HOST, AUTHENTIK_SECRET_KEY'"
+        requires_approval: true
+      - id: step-5
+        description: Restart worker container
+        type: fix
+        command: "docker restart {worker_container}"
+        requires_approval: true
+    resolution: |
+      The Authentik worker container processes background tasks (e.g., user
+      provisioning, policy evaluation). If it crashes, verify: (1) environment
+      variables match the server container exactly (DATABASES, REDIS_HOST,
+      AUTHENTIK_SECRET_KEY), (2) PostgreSQL and Redis are reachable,
+      (3) volume mounts (for custom apps/blueprints) have correct permissions.
+
+  - id: https-certificate-error
+    name: Certificate error or self-signed warning on port 9443
+    symptoms:
+      - "certificate verification failed"
+      - "self-signed certificate"
+      - "NET::ERR_CERT_AUTHORITY_INVALID"
+      - "TLS error"
+    trigger_conditions:
+      - log_pattern: "certificate"
+      - log_pattern: "TLS"
+    steps:
+      - id: step-1
+        description: Check if Authentik generated a self-signed certificate
+        type: check
+        command: "docker exec {container_name} ls -la /certs/ 2>&1 | head -10"
+        expected_output: ".key"
+        on_fail: step-2
+      - id: step-2
+        description: Verify certificate is bound to correct hostname
+        type: check
+        command: "docker exec {container_name} openssl x509 -in /certs/cert.pem -text -noout 2>&1 | grep -i subject"
+        expected_output: ""
+      - id: step-3
+        description: Inform about certificate replacement
+        type: inform
+        command: ""
+      - id: step-4
+        description: Replace self-signed cert with valid certificate (via reverse proxy or Let's Encrypt)
+        type: fix
+        command: "echo 'Mount valid certificate at /certs/cert.pem and key at /certs/key.pem, or use a reverse proxy (Traefik, nginx) to terminate TLS'"
+        requires_approval: true
+    resolution: |
+      By default, Authentik generates a self-signed certificate on first run,
+      which triggers browser warnings. For production: (1) use a reverse proxy
+      (Traefik, nginx) to terminate TLS with a valid certificate, (2) disable
+      Authentik's HTTPS by setting `AUTHENTIK_INSECURE: true` and let the proxy
+      handle HTTPS, or (3) mount a valid certificate (from Let's Encrypt or your
+      CA) at `/certs/cert.pem` and `/certs/key.pem`.
+
+default_config:
+  compose_template: |
+    services:
+      authentik-server:
+        image: ghcr.io/goauthentik/server:latest
+        container_name: authentik-server
+        restart: unless-stopped
+        environment:
+          AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+          DATABASES__default__ENGINE: django.db.backends.postgresql
+          DATABASES__default__HOST: postgres
+          DATABASES__default__NAME: authentik
+          DATABASES__default__USER: authentik
+          DATABASES__default__PASSWORD: ${PG_PASS}
+          REDIS_HOST: redis
+          REDIS_PORT: 6379
+        ports:
+          - "9000:9000"
+          - "9443:9443"
+        volumes:
+          - authentik_media:/media
+          - authentik_certs:/certs
+        depends_on:
+          - postgres
+          - redis
+      authentik-worker:
+        image: ghcr.io/goauthentik/server:latest
+        container_name: authentik-worker
+        restart: unless-stopped
+        environment:
+          AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+          DATABASES__default__ENGINE: django.db.backends.postgresql
+          DATABASES__default__HOST: postgres
+          DATABASES__default__NAME: authentik
+          DATABASES__default__USER: authentik
+          DATABASES__default__PASSWORD: ${PG_PASS}
+          REDIS_HOST: redis
+          REDIS_PORT: 6379
+        command: worker
+        volumes:
+          - authentik_media:/media
+          - authentik_certs:/certs
+        depends_on:
+          - postgres
+          - redis
+      postgres:
+        image: postgres:15-alpine
+        container_name: authentik-postgres
+        restart: unless-stopped
+        environment:
+          POSTGRES_DB: authentik
+          POSTGRES_USER: authentik
+          POSTGRES_PASSWORD: ${PG_PASS}
+        volumes:
+          - authentik_db:/var/lib/postgresql/data
+      redis:
+        image: redis:7-alpine
+        container_name: authentik-redis
+        restart: unless-stopped
+        volumes:
+          - authentik_redis:/data
+    volumes:
+      authentik_media:
+      authentik_db:
+      authentik_certs:
+      authentik_redis:
+
+  required_vars:
+    - name: AUTHENTIK_SECRET_KEY
+      description: Secret key for encryption and signing (32+ random characters)
+      default: ""
+    - name: PG_PASS
+      description: PostgreSQL password for authentik user
+      default: ""
+  known_mounts:
+    - container_path: /media
+      purpose: Uploaded files, avatars, custom backgrounds
+      recommended_permissions: "755"
+      owner: "root:root"
+    - container_path: /certs
+      purpose: TLS certificate and key files (auto-generated self-signed if not provided)
+      recommended_permissions: "600"
+      owner: "root:root"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  Authentik is a multi-container stack: server + worker + PostgreSQL + Redis.
+  All containers must share the same network and have identical AUTHENTIK_SECRET_KEY,
+  DATABASES, and REDIS_HOST environment variables.
+
+  The server listens on port 9000 (HTTP admin UI) and 9443 (HTTPS).
+  For external access, use a reverse proxy to terminate TLS with a valid
+  certificate instead of relying on Authentik's self-signed cert.
+
+  Database migration runs automatically on server startup. The worker container
+  must also be able to connect to the same PostgreSQL instance.
+
+  Custom authentication flows, sources (OAuth, SAML), and applications are
+  managed via the admin UI at https://localhost:9443/admin.
