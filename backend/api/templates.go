@@ -66,6 +66,9 @@ func (h *Handlers) GetTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	versions, _ := h.Store.ListTemplateVersions(r.Context(), t.ID)
+	if versions == nil {
+		versions = []db.TemplateVersion{}
+	}
 	v := templateView(t)
 	v["versions"] = versions
 	writeJSON(w, http.StatusOK, v)
@@ -238,9 +241,14 @@ func (h *Handlers) DeployTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"path": composePath, "output": out})
 }
 
+// deployDirAllowlist restricts where a stack may be deployed, so an admin can't
+// clobber a host config file (e.g. /etc/cron.d/docker-compose.yml). Stacks live
+// under conventional service-data roots.
+var deployDirAllowlist = []string{"/opt", "/srv", "/home", "/var", "/mnt"}
+
 // safeDeployDir validates/derives the absolute deploy directory. An empty dir
-// defaults to /opt/stratum-stacks/<sanitized-name>. Rejects relative paths and
-// traversal.
+// defaults to /opt/stratum-stacks/<sanitized-name>. A supplied dir must be
+// absolute, traversal-free, and under an allowlisted root.
 func safeDeployDir(dir, name string) (string, bool) {
 	if dir == "" {
 		safe := strings.Map(func(r rune) rune {
@@ -256,7 +264,13 @@ func safeDeployDir(dir, name string) (string, bool) {
 	if !strings.HasPrefix(dir, "/") || strings.Contains(dir, "..") {
 		return "", false
 	}
-	return path.Clean(dir), true
+	clean := path.Clean(dir)
+	for _, root := range deployDirAllowlist {
+		if clean == root || strings.HasPrefix(clean, root+"/") {
+			return clean, true
+		}
+	}
+	return "", false
 }
 
 func auditTemplate(r *http.Request, action, id, name string) {
