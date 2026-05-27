@@ -74,6 +74,10 @@ const (
 	ActionAIConfig = "ai.config"
 
 	ActionCertRescan = "cert.rescan"
+
+	ActionMemoryCreate = "memory.create"
+	ActionMemoryUpdate = "memory.update"
+	ActionMemoryDelete = "memory.delete"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -170,6 +174,10 @@ var actionCatalog = []ActionInfo{
 	{ActionAIConfig, "AI provider configured", "ai", TargetAI},
 
 	{ActionCertRescan, "Certificates re-scanned", "cert", TargetNode},
+
+	{ActionMemoryCreate, "AI memory added", "memory", TargetAI},
+	{ActionMemoryUpdate, "AI memory updated", "memory", TargetAI},
+	{ActionMemoryDelete, "AI memory deleted", "memory", TargetAI},
 }
 
 var actionByName = func() map[string]ActionInfo {

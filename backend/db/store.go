@@ -251,6 +251,22 @@ type Snapshot struct {
 	CreatedAt     time.Time
 }
 
+// AgentMemory is a persistent per-scope note the AI assistant uses (Feature F9).
+// Scope is "global" | "node" | "container"; ScopeID is "" for global. Source is
+// "user" | "ai" | "observed"; AI-proposed memories stay Confirmed=false until a
+// user accepts them, and only confirmed memories are injected into AI context.
+type AgentMemory struct {
+	ID        string    `json:"id"`
+	Scope     string    `json:"scope"`
+	ScopeID   string    `json:"scope_id"`
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	Source    string    `json:"source"`
+	Confirmed bool      `json:"confirmed"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // CertInfo is a TLS certificate discovered on a node's filesystem (Feature F4).
 // Monitor-only: Stratum surfaces expiry, never issues certs.
 type CertInfo struct {
@@ -512,6 +528,15 @@ type Store interface {
 	// Certificates (Feature F4) — replaced wholesale per node on scan
 	ReplaceCertsByNode(ctx context.Context, nodeID string, certs []CertInfo) error
 	ListCerts(ctx context.Context) ([]CertInfo, error)
+
+	// Agent memory (Feature F9)
+	CreateAgentMemory(ctx context.Context, m AgentMemory) error
+	GetAgentMemory(ctx context.Context, id string) (AgentMemory, error)
+	UpdateAgentMemory(ctx context.Context, m AgentMemory) error
+	DeleteAgentMemory(ctx context.Context, id string) error
+	// ListAgentMemory returns memories for a scope+id; if confirmedOnly, only
+	// accepted ones (used to build AI context).
+	ListAgentMemory(ctx context.Context, scope, scopeID string, confirmedOnly bool) ([]AgentMemory, error)
 
 	// Script runner (Feature 27)
 	CreateScript(ctx context.Context, s Script) error

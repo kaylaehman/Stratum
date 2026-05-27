@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kaylaehman/stratum/backend/activity"
@@ -50,6 +51,33 @@ type aiAskRequest struct {
 	Task    string `json:"task"`
 	Prompt  string `json:"prompt"`
 	Context string `json:"context"`
+	// Scope/ScopeID optionally bind the question to a node or container so the
+	// assistant's relevant agent-memory (Feature F9) is injected as context.
+	Scope   string `json:"scope"`
+	ScopeID string `json:"scope_id"`
+}
+
+// memoryContext builds a short "known facts" block from confirmed agent
+// memories: always the global scope, plus the request's node/container scope.
+func (h *Handlers) memoryContext(r *http.Request, scope, scopeID string) string {
+	var facts []string
+	collect := func(sc, id string) {
+		mems, err := h.Store.ListAgentMemory(r.Context(), sc, id, true)
+		if err != nil {
+			return
+		}
+		for _, m := range mems {
+			facts = append(facts, "- ("+m.Scope+") "+m.Key+": "+m.Value)
+		}
+	}
+	collect("global", "")
+	if validMemoryScope(scope) && scope != "global" && scopeID != "" {
+		collect(scope, scopeID)
+	}
+	if len(facts) == 0 {
+		return ""
+	}
+	return "Known facts the operator has recorded:\n" + strings.Join(facts, "\n")
 }
 
 // aiAskTimeout bounds a single assistant call (a local model can be slow).
@@ -74,9 +102,14 @@ func (h *Handlers) AIAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	contextText := req.Context
+	if mem := h.memoryContext(r, req.Scope, req.ScopeID); mem != "" {
+		contextText = mem + "\n\n" + contextText
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), aiAskTimeout)
 	defer cancel()
-	resp, provider, err := h.AI.Ask(ctx, req.Task, req.Prompt, req.Context)
+	resp, provider, err := h.AI.Ask(ctx, req.Task, req.Prompt, contextText)
 	if errors.Is(err, ai.ErrNotConfigured) {
 		writeError(w, http.StatusBadRequest, "ai_not_configured")
 		return
