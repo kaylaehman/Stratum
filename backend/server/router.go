@@ -95,6 +95,9 @@ func NewRouter(d *Deps) http.Handler {
 			// Dependency graph (read-only; per node).
 			r.Get("/nodes/{id}/depgraph", d.Handlers.NodeDependencyGraph)
 
+			// Global search (read-only).
+			r.Get("/search", d.Handlers.Search)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
