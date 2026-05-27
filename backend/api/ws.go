@@ -2,10 +2,18 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/coder/websocket"
 )
+
+// wsCommand is the client->server control message on the WebSocket. A client
+// subscribes to topics (e.g. "tree:<nodeId>") to receive broadcasts.
+type wsCommand struct {
+	Subscribe   string `json:"subscribe,omitempty"`
+	Unsubscribe string `json:"unsubscribe,omitempty"`
+}
 
 // WebSocket upgrades the connection, registers it with the hub, and runs a
 // trivial ping/pong on the "ping" topic to prove end-to-end fan-out. Feature
@@ -45,10 +53,21 @@ func (h *Handlers) WebSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		// Liveness probe (kept for the SP0 smoke test).
 		if string(data) == "ping" {
 			h.Hub.Broadcast("ping", []byte("pong"))
-		} else {
-			h.Hub.Broadcast("ping", data)
+			continue
 		}
+		// Control: subscribe/unsubscribe to topics (e.g. "tree:<nodeId>").
+		var cmd wsCommand
+		if err := json.Unmarshal(data, &cmd); err != nil {
+			continue
+		}
+		if cmd.Subscribe != "" {
+			h.Hub.Subscribe(id, cmd.Subscribe)
+		}
+		// (Per-topic unsubscribe is a hub enhancement; full Unsubscribe happens
+		// on disconnect. cmd.Unsubscribe is accepted but a no-op for now.)
+		_ = cmd.Unsubscribe
 	}
 }
