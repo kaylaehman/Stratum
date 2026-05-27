@@ -851,6 +851,29 @@ export interface UpdatesResponse {
   updates: ImageUpdate[]
 }
 
+// Container Health Check types
+
+export type HealthStatus = 'healthy' | 'unhealthy' | 'starting' | 'none'
+
+export interface HealthLogEntry {
+  start: string
+  end: string
+  exit_code: number
+  output: string
+}
+
+export interface HealthReport {
+  configured: boolean
+  test: string[]
+  interval_sec: number
+  timeout_sec: number
+  start_period_sec: number
+  retries: number
+  status: HealthStatus
+  failing_streak: number
+  log: HealthLogEntry[]
+}
+
 // Smart Search types (Feature 23)
 
 export interface SearchNodeHit {

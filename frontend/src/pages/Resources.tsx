@@ -8,6 +8,7 @@ import { UidGidVisualizer } from '../components/permissions/UidGidVisualizer'
 import { FileUidPanel } from '../components/permissions/FileUidPanel'
 import { DiagnosticCard } from '../components/permissions/DiagnosticCard'
 import { MountList } from '../components/containers/MountList'
+import { HealthCheck } from '../components/containers/HealthCheck'
 import { SharedMountsView } from '../components/containers/SharedMountsView'
 import { ReverseMountPanel } from '../components/containers/ReverseMountPanel'
 import { useContainerInspect } from '../lib/api/permissions'
@@ -221,6 +222,9 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
       <div style={{ maxWidth: '720px' }}>
         <UidGidVisualizer containerId={containerId} />
       </div>
+
+      {/* Health Check */}
+      <HealthCheck containerId={containerId} />
 
       {/* Bind mounts */}
       <MountList containerId={containerId} nodeId={nodeId} />
