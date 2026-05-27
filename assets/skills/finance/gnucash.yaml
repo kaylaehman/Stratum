@@ -1,0 +1,91 @@
+id: gnucash
+name: GnuCash
+version: "1.0"
+container_match:
+  image_patterns:
+    - "gnucash/gnucash"
+  port_hints: []
+category: finance
+description: Double-entry accounting application, containerized for headless use
+docs_url: https://hub.docker.com/r/gnucash/gnucash
+
+common_issues:
+  - id: permission-denied-data
+    name: Permission denied on the GnuCash data directory
+    symptoms:
+      - "permission denied"
+      - "Cannot open data file"
+    trigger_conditions:
+      - log_pattern: "permission denied"
+    steps:
+      - id: step-1
+        description: Check ownership of the data mount
+        type: check
+        command: "stat {data_path}"
+        expected_output: ""
+        on_fail: step-2
+      - id: step-2
+        description: Inform about typical GnuCash container UID
+        type: inform
+        command: ""
+      - id: step-3
+        description: Chown data directory to the container's runtime user
+        type: fix
+        command: "chown -R 1000:1000 {data_path}"
+        requires_approval: true
+    resolution: |
+      GnuCash stores books and templates on disk; the data directory must
+      be writable by the container's UID. Adjust the chown target if the
+      image is configured to run as a non-default user.
+
+  - id: x11-display-missing
+    name: GnuCash GUI cannot connect to a display
+    symptoms:
+      - "cannot open display"
+      - "No protocol specified"
+    trigger_conditions:
+      - log_pattern: "cannot open display"
+    steps:
+      - id: step-1
+        description: Inform about display passthrough or VNC alternative
+        type: inform
+        command: ""
+    resolution: |
+      The containerized GnuCash is GUI-based and needs either X11 socket
+      passthrough (`-v /tmp/.X11-unix:/tmp/.X11-unix` plus `DISPLAY` env
+      and `xhost +local:docker`) or a VNC/web-VNC wrapper. For most
+      home-server use cases, run GnuCash on a desktop machine and only
+      use the container for batch processing.
+
+default_config:
+  compose_template: |
+    services:
+      gnucash:
+        image: gnucash/gnucash:latest
+        container_name: gnucash
+        restart: unless-stopped
+        environment:
+          DISPLAY: ${DISPLAY:-:0}
+        volumes:
+          - ${DATA_PATH:-./data}:/data
+          - /tmp/.X11-unix:/tmp/.X11-unix
+  required_vars:
+    - name: DATA_PATH
+      description: Host path for GnuCash book files
+      default: "./data"
+    - name: DISPLAY
+      description: X display to forward (e.g. :0 on the host)
+      default: ":0"
+  known_mounts:
+    - container_path: /data
+      purpose: GnuCash books, templates, and SQL backends
+      recommended_permissions: "750"
+      owner: "1000:1000"
+
+linuxserver_conventions:
+  enabled: false
+
+notes: |
+  GnuCash is a desktop application; containerization is convenient for
+  reproducible installs but doesn't change its single-user, GUI-driven
+  nature. For multi-user web accounting, prefer Firefly III or Akaunting.

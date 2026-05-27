@@ -24,7 +24,7 @@ for each entry.
 | `ebooks` | 4 |
 | `email` | 4 |
 | `files` | 8 |
-| `finance` | 3 |
+| `finance` | 5 |
 | `games` | 5 |
 | `identity` | 2 |
 | `media` | 21 |
@@ -41,7 +41,7 @@ for each entry.
 | `voip` | 2 |
 | `weather` | 2 |
 | `web` | 2 |
-| **Total** | **184** |
+| **Total** | **186** |
 
 ## Skills
 
@@ -120,6 +120,8 @@ for each entry.
 | `actual-budget` | finance | `actualbudget/actual-server` | 4 |  | Community-maintained zero-based budgeting tool with local data storage and sync |
 | `akaunting` | finance | `akaunting/akaunting` | 4 |  | Open-source accounting software with invoicing, expense tracking, and financial reporting |
 | `fireflyiii` | finance | `fireflyiii/core` | 4 |  | Open-source personal finance manager for budgeting, expense tracking, and financial planning |
+| `gnucash` | finance | `gnucash/gnucash` | 2 |  | Double-entry accounting application, containerized for headless use |
+| `homebank` | finance | `linuxserver/homebank` | 2 | ✓ | Personal accounting application (LinuxServer KasmVNC desktop variant) |
 | `minecraft` | games | `itzg/minecraft-server` | 4 |  | Self-hosted Minecraft Java Edition multiplayer server with configurable difficulty, gamemode, and memory limits |
 | `pterodactyl-panel` | games | `ghcr.io/pterodactyl/panel` | 4 |  | Web-based control panel for managing game servers, users, and nodes across Pterodactyl infrastructure |
 | `pterodactyl-wings` | games | `ghcr.io/pterodactyl/wings` | 4 |  | Daemon that runs on each node to execute and manage individual game server instances controlled by Pterodactyl Panel |

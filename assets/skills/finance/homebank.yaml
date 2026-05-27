@@ -1,0 +1,111 @@
+id: homebank
+name: HomeBank
+version: "1.0"
+container_match:
+  image_patterns:
+    - "linuxserver/homebank"
+  port_hints: [3000]
+category: finance
+description: Personal accounting application (LinuxServer KasmVNC desktop variant)
+docs_url: https://hub.docker.com/r/linuxserver/homebank
+
+common_issues:
+  - id: permission-denied-config
+    name: Permission denied on /config mount
+    symptoms:
+      - "permission denied"
+      - "Cannot save HomeBank data file"
+    trigger_conditions:
+      - log_pattern: "permission denied.*config"
+    steps:
+      - id: step-1
+        description: Check ownership of /config
+        type: check
+        command: "stat {config_path}"
+        expected_output: "Uid: {puid}"
+        on_fail: step-2
+      - id: step-2
+        description: Display current ownership
+        type: inform
+        command: ""
+      - id: step-3
+        description: Recursively chown to PUID:PGID
+        type: fix
+        command: "chown -R {puid}:{pgid} {config_path}"
+        requires_approval: true
+    resolution: |
+      /config holds HomeBank's XHB book file. The standard LinuxServer
+      UID/GID-mismatch fix applies — ownership corrected to {puid}:{pgid}.
+
+  - id: kasmvnc-not-loading
+    name: KasmVNC web desktop is blank or fails to load
+    symptoms:
+      - "Web UI loads but desktop is blank"
+      - "VNC connection failed"
+    trigger_conditions:
+      - log_pattern: "VNC"
+    steps:
+      - id: step-1
+        description: Surface recent VNC startup errors
+        type: check
+        command: "docker logs {container_name} 2>&1 | grep -iE 'vnc|kasm|x11' | tail -10"
+        expected_output: ""
+      - id: step-2
+        description: Restart the container to reinitialize the desktop session
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true
+    resolution: |
+      LinuxServer's HomeBank ships a KasmVNC web desktop. Initial boot can
+      take 30+ seconds before the desktop is reachable. If the blank
+      screen persists past a restart, mount /dev/shm with enough size
+      (`shm_size: 1gb`) — VNC needs significant shared memory for the
+      framebuffer.
+
+default_config:
+  compose_template: |
+    services:
+      homebank:
+        image: linuxserver/homebank:latest
+        container_name: homebank
+        restart: unless-stopped
+        environment:
+          PUID: ${PUID:-1000}
+          PGID: ${PGID:-1000}
+          TZ: ${TZ:-UTC}
+        volumes:
+          - ${CONFIG_PATH:-./config}:/config
+        ports:
+          - "3000:3000/tcp"
+        shm_size: "1gb"
+  required_vars:
+    - name: PUID
+      description: User ID
+      default: "1000"
+    - name: PGID
+      description: Group ID
+      default: "1000"
+    - name: TZ
+      description: Timezone
+      default: "UTC"
+    - name: CONFIG_PATH
+      description: Host path for /config (HomeBank book files)
+      default: "./config"
+  known_mounts:
+    - container_path: /config
+      purpose: HomeBank XHB book files and KasmVNC profile
+      recommended_permissions: "755"
+      owner: "{PUID}:{PGID}"
+
+linuxserver_conventions:
+  enabled: true
+  puid_env: PUID
+  pgid_env: PGID
+  config_mount: /config
+
+notes: |
+  The LinuxServer variant runs HomeBank inside a browser-accessible
+  KasmVNC desktop on port 3000. Set `shm_size: 1gb` (compose) or pass
+  `--shm-size=1g` (docker run) — the default 64MB shared memory is too
+  small for the VNC framebuffer and causes intermittent blank-screen
+  failures.
