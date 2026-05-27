@@ -1090,3 +1090,19 @@ export interface StartBackupRequest {
 export interface StartBackupResponse {
   backup_id: string
 }
+
+// Two-Factor Auth (TOTP) types (Feature 7 Phase 2)
+
+export interface TwoFAStatus {
+  enabled: boolean
+}
+
+export interface TwoFASetupResponse {
+  secret: string
+  provisioning_uri: string
+  recovery_codes: string[]
+}
+
+export interface TwoFACodeRequest {
+  code: string
+}
