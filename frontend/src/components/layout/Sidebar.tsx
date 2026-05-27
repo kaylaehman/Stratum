@@ -21,6 +21,7 @@ import {
   ArrowUpCircle,
   LayoutTemplate,
   KeyRound,
+  Terminal,
 } from 'lucide-react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
@@ -50,6 +51,7 @@ const navItems: NavItem[] = [
   { icon: <ArrowUpCircle size={14} />, label: 'Updates', to: '/updates' },
   { icon: <LayoutTemplate size={14} />, label: 'Templates', to: '/templates' },
   { icon: <KeyRound size={14} />, label: 'Secrets', to: '/secrets' },
+  { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts' },
   { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
   { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications' },
   { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },

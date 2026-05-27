@@ -1027,3 +1027,36 @@ export interface CVEVuln {
 export interface CVEDetailResponse {
   vulns: CVEVuln[]
 }
+
+// Script Runner types (Feature 27)
+
+export interface Script {
+  id: string
+  name: string
+  description: string
+  content: string
+}
+
+export interface ScriptsResponse {
+  scripts: Script[]
+}
+
+export interface ScriptCreateRequest {
+  name: string
+  description?: string
+  content: string
+}
+
+export interface ScriptRunResult {
+  node_id: string
+  ok: boolean
+  output: string
+}
+
+export interface RunScriptResponse {
+  results: ScriptRunResult[]
+}
+
+export interface RunScriptRequest {
+  node_ids: string[]
+}
