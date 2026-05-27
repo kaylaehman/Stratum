@@ -178,6 +178,17 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
+// WebhookConfig is a Slack/Discord notification target (Feature 26).
+type WebhookConfig struct {
+	ID        string
+	Name      string
+	URL       string
+	Provider  string // slack | discord
+	Triggers  []string
+	Enabled   bool
+	CreatedAt time.Time
+}
+
 // WOLConfig is a node's optional Wake-on-LAN settings (Feature 6).
 type WOLConfig struct {
 	NodeID    string
@@ -301,6 +312,13 @@ type Store interface {
 	// Wake-on-LAN (Feature 6) — per-node config
 	UpsertWOLConfig(ctx context.Context, c WOLConfig) error
 	GetWOLConfig(ctx context.Context, nodeID string) (WOLConfig, error)
+
+	// Notification webhooks (Feature 26)
+	CreateWebhook(ctx context.Context, c WebhookConfig) error
+	ListWebhooks(ctx context.Context) ([]WebhookConfig, error)
+	GetWebhook(ctx context.Context, id string) (WebhookConfig, error)
+	UpdateWebhook(ctx context.Context, c WebhookConfig) error
+	DeleteWebhook(ctx context.Context, id string) error
 
 	// Bookmarks (Feature 24) — per-user; mutations scoped by user_id
 	CreateBookmark(ctx context.Context, b Bookmark) error

@@ -28,11 +28,21 @@ type Scanner struct {
 	mu     sync.Mutex
 	seeded map[string]time.Time
 	sf     singleflight.Group
+
+	// notify, when set, fires a notification for a newly-detected event (e.g. a
+	// new exposed port). Decoupled via a plain callback to avoid importing the
+	// webhooks package here.
+	notify func(ctx context.Context, trigger, title, text string)
 }
 
 // NewScanner builds a Scanner.
 func NewScanner(store db.Store, provider ClientProvider, ctrUsers *permissions.ContainerCache, ttl time.Duration) *Scanner {
 	return &Scanner{store: store, provider: provider, ctrUsers: ctrUsers, ttl: ttl, seeded: map[string]time.Time{}}
+}
+
+// SetNotify wires a notification callback fired on new security events.
+func (sc *Scanner) SetNotify(fn func(ctx context.Context, trigger, title, text string)) {
+	sc.notify = fn
 }
 
 func (sc *Scanner) fresh(nodeID string) bool {
@@ -122,10 +132,19 @@ func (sc *Scanner) persistPorts(ctx context.Context, c db.Container, ports []Por
 		} else {
 			row.ID, row.FirstSeen, row.IsNew = uuid.NewString(), now, true
 		}
+		// Fire a one-time notification for a newly-detected exposure (durably
+		// marked via notified_at so it never re-fires for the same port).
+		if row.IsNew && row.NotifiedAt == nil && sc.notify != nil {
+			sc.notify(ctx, "port.new", "New exposed port",
+				c.Name+" exposed "+p.HostIP+":"+itoaPort(p.HostPort)+"/"+p.Protocol+" ("+p.InterfaceClass+")")
+			row.NotifiedAt = &now
+		}
 		rows = append(rows, row)
 	}
 	return sc.store.SetPortExposures(ctx, c.ID, rows)
 }
+
+func itoaPort(p int) string { return strconv.Itoa(p) }
 
 func portKey(ip string, port int, proto string) string {
 	return ip + "|" + proto + "|" + strconv.Itoa(port)

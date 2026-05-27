@@ -39,6 +39,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/server"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/volumes"
+	"github.com/kaylaehman/stratum/backend/webhooks"
 )
 
 // accessTokenTTL is the lifetime of issued access tokens.
@@ -106,6 +107,10 @@ func run(logger *slog.Logger) error {
 	logsMgr := logtail.NewManager(dockerForNode, h, func(context.Context, string, string) (bool, error) { return true, nil })
 	mountIdx := mountindex.New(store, dockerForNode, 30*time.Second)
 	securityScanner := security.NewScanner(store, security.ClientProvider(dockerForNode), containerUsers, 30*time.Second)
+	webhookDispatcher := webhooks.New(store)
+	securityScanner.SetNotify(func(ctx context.Context, trigger, title, text string) {
+		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+	})
 	volumeSvc := volumes.New(store, volumes.ClientProvider(dockerForNode), mountIdx, volumeAlertBytes())
 	metricsSampler := metrics.NewSampler(store, metrics.ClientProvider(dockerForNode), 15*time.Second, 7*24*time.Hour)
 	topologySvc := topology.New(store, topology.ClientProvider(dockerForNode))
@@ -127,6 +132,7 @@ func run(logger *slog.Logger) error {
 		Volumes:        volumeSvc,
 		Topology:       topologySvc,
 		DepGraph:       depGraphSvc,
+		Webhooks:       webhookDispatcher,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

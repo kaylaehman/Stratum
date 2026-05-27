@@ -34,6 +34,10 @@ const (
 	ActionContainerStop    = "container.stop"
 	ActionContainerRestart = "container.restart"
 	ActionContainerRemove  = "container.remove"
+
+	ActionWebhookCreate = "webhook.create"
+	ActionWebhookUpdate = "webhook.update"
+	ActionWebhookDelete = "webhook.delete"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -45,6 +49,7 @@ const (
 	TargetAcknowledgement = "acknowledgement"
 	TargetUser            = "user"
 	TargetVolume          = "volume"
+	TargetWebhook         = "webhook"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -85,6 +90,10 @@ var actionCatalog = []ActionInfo{
 	{ActionContainerStop, "Container stopped", "container", TargetContainer},
 	{ActionContainerRestart, "Container restarted", "container", TargetContainer},
 	{ActionContainerRemove, "Container removed", "container", TargetContainer},
+
+	{ActionWebhookCreate, "Notification webhook created", "webhook", TargetWebhook},
+	{ActionWebhookUpdate, "Notification webhook updated", "webhook", TargetWebhook},
+	{ActionWebhookDelete, "Notification webhook deleted", "webhook", TargetWebhook},
 }
 
 var actionByName = func() map[string]ActionInfo {

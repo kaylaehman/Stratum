@@ -21,6 +21,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/volumes"
+	"github.com/kaylaehman/stratum/backend/webhooks"
 )
 
 // Handlers carries the dependencies shared by all HTTP handlers.
@@ -40,6 +41,7 @@ type Handlers struct {
 	Volumes        *volumes.Service
 	Topology       *topology.Service
 	DepGraph       *depgraph.Service
+	Webhooks       *webhooks.Dispatcher
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

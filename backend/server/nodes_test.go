@@ -31,6 +31,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/server"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/volumes"
+	"github.com/kaylaehman/stratum/backend/webhooks"
 
 	"context"
 	"errors"
@@ -81,6 +82,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Volumes:        volumes.New(store, volumes.ClientProvider(noDocker), mountIdx, 0),
 		Topology:       topology.New(store, topology.ClientProvider(noDocker)),
 		DepGraph:       depgraph.New(store, depgraph.ClientProvider(noDocker), mountIdx),
+		Webhooks:       webhooks.New(store),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),

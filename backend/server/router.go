@@ -101,6 +101,10 @@ func NewRouter(d *Deps) http.Handler {
 			// Wake-on-LAN config read (set/wake are audited mutations below).
 			r.Get("/nodes/{id}/wol", d.Handlers.GetWOL)
 
+			// Notification webhooks (list + test read-side; CRUD is audited below).
+			r.Get("/webhooks", d.Handlers.ListWebhooks)
+			r.Post("/webhooks/{id}/test", d.Handlers.TestWebhook)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -135,6 +139,9 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/containers/bulk", d.Handlers.BulkContainers)
 			audited.Put("/nodes/{id}/wol", d.Handlers.SetWOL)
 			audited.Post("/nodes/{id}/wake", d.Handlers.WakeNode)
+			audited.Post("/webhooks", d.Handlers.CreateWebhook)
+			audited.Put("/webhooks/{id}", d.Handlers.UpdateWebhook)
+			audited.Delete("/webhooks/{id}", d.Handlers.DeleteWebhook)
 		})
 	})
 
