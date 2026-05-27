@@ -1,7 +1,8 @@
-import { type ReactNode } from 'react'
+import { type ReactNode, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Topbar } from './Topbar'
 import { Sidebar } from './Sidebar'
+import { CommandPalette } from '../search/CommandPalette'
 import { useAuthStore } from '../../store/auth'
 import { apiPost } from '../../lib/api'
 
@@ -14,6 +15,22 @@ interface AppShellProps {
 export function AppShell({ children, treeSlot }: AppShellProps) {
   const navigate = useNavigate()
   const { user, clearAuth } = useAuthStore()
+  const [searchOpen, setSearchOpen] = useState(false)
+
+  // Global Ctrl+K / Cmd+K shortcut
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        setSearchOpen((prev) => !prev)
+      }
+      if (e.key === 'Escape' && searchOpen) {
+        setSearchOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [searchOpen])
 
   async function handleLogout() {
     try {
@@ -27,7 +44,7 @@ export function AppShell({ children, treeSlot }: AppShellProps) {
 
   return (
     <div className="flex flex-col h-screen" style={{ backgroundColor: 'var(--bg-base)' }}>
-      <Topbar user={user} onLogout={handleLogout} />
+      <Topbar user={user} onLogout={handleLogout} onSearchOpen={() => setSearchOpen(true)} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         {treeSlot && (
@@ -49,6 +66,7 @@ export function AppShell({ children, treeSlot }: AppShellProps) {
           {treeSlot ? children : <div className="w-full">{children}</div>}
         </main>
       </div>
+      <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   )
 }

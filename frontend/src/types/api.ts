@@ -731,3 +731,39 @@ export interface CreateBookmarkRequest {
   resource_ref: string
   group_name?: string
 }
+
+// Smart Search types (Feature 23)
+
+export interface SearchNodeHit {
+  id: string
+  name: string
+  type: string
+}
+
+export interface SearchContainerHit {
+  id: string
+  name: string
+  node_id: string
+  image: string
+  status: string
+}
+
+export interface SearchVMHit {
+  id: string
+  name: string
+  node_id: string
+}
+
+export interface SearchBookmarkHit {
+  id: string
+  label: string
+  resource_type: string
+  resource_ref: string
+}
+
+export interface SearchResponse {
+  nodes: SearchNodeHit[]
+  containers: SearchContainerHit[]
+  vms: SearchVMHit[]
+  bookmarks: SearchBookmarkHit[]
+}

@@ -4,9 +4,10 @@ import type { User } from '../../types/api'
 interface TopbarProps {
   user: User | null
   onLogout: () => void
+  onSearchOpen?: () => void
 }
 
-export function Topbar({ user, onLogout }: TopbarProps) {
+export function Topbar({ user, onLogout, onSearchOpen }: TopbarProps) {
   return (
     <header
       className="h-11 flex items-center px-4 gap-4 shrink-0"
@@ -23,20 +24,34 @@ export function Topbar({ user, onLogout }: TopbarProps) {
         </span>
       </div>
 
-      {/* Search stub */}
-      <div
-        className="flex items-center gap-2 flex-1 max-w-sm px-3 py-1.5 rounded"
+      {/* Search trigger button */}
+      <button
+        onClick={onSearchOpen}
+        className="flex items-center gap-2 flex-1 max-w-sm px-3 py-1.5 text-left"
         style={{
           backgroundColor: 'var(--bg-elevated)',
           border: '1px solid var(--border-subtle)',
           borderRadius: '3px',
+          cursor: 'pointer',
         }}
       >
         <Search size={12} style={{ color: 'var(--text-muted)' }} />
-        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          Search... <kbd className="font-mono">Ctrl+K</kbd>
+        <span className="text-xs flex-1" style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          Search…
         </span>
-      </div>
+        <kbd
+          className="text-xs font-mono"
+          style={{
+            color: 'var(--text-muted)',
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '3px',
+            padding: '1px 5px',
+          }}
+        >
+          Ctrl+K
+        </kbd>
+      </button>
 
       <div className="flex-1" />
 
