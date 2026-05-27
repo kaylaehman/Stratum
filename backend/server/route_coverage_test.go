@@ -65,6 +65,9 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"DELETE /api/security/acknowledge/{id}": true,
 		"POST /api/security/rescan":             true,
 		"DELETE /api/nodes/{id}/volumes/{name}": true,
+		"POST /api/containers/{id}/start":       true,
+		"POST /api/containers/{id}/stop":        true,
+		"POST /api/containers/{id}/restart":     true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

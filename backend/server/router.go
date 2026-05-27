@@ -117,6 +117,9 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/security/acknowledge/{id}", d.Handlers.RevokeAcknowledgement)
 			audited.Post("/security/rescan", d.Handlers.Rescan)
 			audited.Delete("/nodes/{id}/volumes/{name}", d.Handlers.RemoveVolume)
+			audited.Post("/containers/{id}/start", d.Handlers.StartContainer)
+			audited.Post("/containers/{id}/stop", d.Handlers.StopContainer)
+			audited.Post("/containers/{id}/restart", d.Handlers.RestartContainer)
 		})
 	})
 

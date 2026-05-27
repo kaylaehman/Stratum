@@ -27,6 +27,10 @@ const (
 	ActionSecurityAckRevoke   = "security.revoke_acknowledge"
 
 	ActionVolumeRemove = "volume.remove"
+
+	ActionContainerStart   = "container.start"
+	ActionContainerStop    = "container.stop"
+	ActionContainerRestart = "container.restart"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -71,6 +75,10 @@ var actionCatalog = []ActionInfo{
 	{ActionSecurityAckRevoke, "Security acknowledgement revoked", "security", TargetAcknowledgement},
 
 	{ActionVolumeRemove, "Volume removed", "volume", TargetVolume},
+
+	{ActionContainerStart, "Container started", "container", TargetContainer},
+	{ActionContainerStop, "Container stopped", "container", TargetContainer},
+	{ActionContainerRestart, "Container restarted", "container", TargetContainer},
 }
 
 var actionByName = func() map[string]ActionInfo {
