@@ -1,4 +1,4 @@
-import { Server, LogOut, Search } from 'lucide-react'
+import { LogOut, Search } from 'lucide-react'
 import type { User } from '../../types/api'
 
 interface TopbarProps {
@@ -18,7 +18,7 @@ export function Topbar({ user, onLogout, onSearchOpen }: TopbarProps) {
     >
       {/* Brand */}
       <div className="flex items-center gap-2 w-52 shrink-0">
-        <Server size={16} style={{ color: 'var(--accent)' }} />
+        <img src="/logo.png" alt="Stratum" width={18} height={18} style={{ display: 'block' }} />
         <span className="font-semibold tracking-tight text-sm" style={{ color: 'var(--text-primary)' }}>
           Stratum
         </span>
