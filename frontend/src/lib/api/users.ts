@@ -52,6 +52,35 @@ export function useDeleteUser() {
   })
 }
 
+// useChangePassword changes the *current* user's own password after
+// re-verifying the current one. Returns 204 on success.
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (req: { current_password: string; new_password: string }) =>
+      apiPost<void>('/api/auth/change-password', req),
+  })
+}
+
+export interface AdminUpdateUser {
+  id: string
+  username?: string
+  email?: string
+  password?: string
+}
+
+// useUpdateUser lets an admin edit another user's username/email and/or reset
+// their password.
+export function useUpdateUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...rest }: AdminUpdateUser) =>
+      apiPut<User>(`/api/users/${encodeURIComponent(id)}`, rest),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: USERS_KEY })
+    },
+  })
+}
+
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
 export function useSessions() {

@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -155,6 +156,152 @@ func (h *Handlers) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 		"username": target.Username, "from": target.Role, "to": req.Role, "by": actor.Username,
 	})
 	target.Role = req.Role
+	writeJSON(w, http.StatusOK, toUserAdminView(target))
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// ChangeOwnPassword lets the authenticated user change their own password after
+// re-verifying the current one. Any user (any role) may change their own
+// password. Audited.
+func (h *Handlers) ChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
+	actor, ok := middleware.UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req changePasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		writeError(w, http.StatusBadRequest, "password_min_8")
+		return
+	}
+	// Fetch the full record: the context user comes from JWT claims and carries
+	// no password hash.
+	full, err := h.Store.GetUserByID(r.Context(), actor.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if auth.CheckPassword(full.PasswordHash, req.CurrentPassword) != nil {
+		writeError(w, http.StatusForbidden, "current_password_incorrect")
+		return
+	}
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "hash_failed")
+		return
+	}
+	if err := h.Store.UpdatePasswordHash(r.Context(), actor.ID, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "update_failed")
+		return
+	}
+	auditUser(r, "auth.password_change", actor.ID, map[string]string{"username": actor.Username})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type adminUpdateUserRequest struct {
+	Username *string `json:"username,omitempty"`
+	Email    *string `json:"email,omitempty"`
+	Password *string `json:"password,omitempty"`
+}
+
+// UpdateUser lets an admin edit another user's username/email and reset their
+// password (admin only + step-up). A username/email change keeps sessions; a
+// password reset revokes the target's sessions so they must re-authenticate.
+// Audited.
+func (h *Handlers) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	actor, ok := h.requireRole(w, r, auth.RoleAdmin)
+	if !ok {
+		return
+	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var req adminUpdateUserRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	// Serialise with role/delete (see userMu) so a concurrent rename can't race
+	// the username-uniqueness check.
+	h.userMu.Lock()
+	defer h.userMu.Unlock()
+
+	target, err := h.Store.GetUserByID(r.Context(), id)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	changes := map[string]string{}
+	newUsername, newEmail := target.Username, target.Email
+
+	if req.Username != nil && strings.TrimSpace(*req.Username) != target.Username {
+		uname := strings.TrimSpace(*req.Username)
+		if uname == "" {
+			writeError(w, http.StatusBadRequest, "username_required")
+			return
+		}
+		if _, err := h.Store.GetUserByUsername(r.Context(), uname); err == nil {
+			writeError(w, http.StatusConflict, "username_taken")
+			return
+		} else if !errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		newUsername = uname
+		changes["username"] = uname
+	}
+	if req.Email != nil && strings.TrimSpace(*req.Email) != target.Email {
+		newEmail = strings.TrimSpace(*req.Email)
+		changes["email"] = "updated"
+	}
+	if newUsername != target.Username || newEmail != target.Email {
+		if err := h.Store.UpdateUserProfile(r.Context(), id, newUsername, newEmail); err != nil {
+			writeError(w, http.StatusInternalServerError, "update_failed")
+			return
+		}
+		target.Username, target.Email = newUsername, newEmail
+	}
+
+	if req.Password != nil {
+		if len(*req.Password) < 8 {
+			writeError(w, http.StatusBadRequest, "password_min_8")
+			return
+		}
+		hash, err := auth.HashPassword(*req.Password)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "hash_failed")
+			return
+		}
+		if err := h.Store.UpdatePasswordHash(r.Context(), id, hash); err != nil {
+			writeError(w, http.StatusInternalServerError, "update_failed")
+			return
+		}
+		// Force re-auth everywhere for the target after a reset.
+		if err := h.Store.RevokeAllUserSessions(r.Context(), id, time.Now()); err != nil && h.Logger != nil {
+			h.Logger.Warn("revoke sessions after password reset failed", "user_id", id, "error", err)
+		}
+		changes["password"] = "reset"
+	}
+
+	if len(changes) == 0 {
+		writeJSON(w, http.StatusOK, toUserAdminView(target)) // no-op
+		return
+	}
+	changes["by"] = actor.Username
+	auditUser(r, "user.update", id, changes)
 	writeJSON(w, http.StatusOK, toUserAdminView(target))
 }
 
