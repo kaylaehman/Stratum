@@ -9,6 +9,7 @@ import { FileWatchPanel } from '../components/security/FileWatchPanel'
 import { AppShell } from '../components/layout/AppShell'
 import { ResourceTree } from '../components/tree/ResourceTree'
 import { FileBrowser } from '../components/filesystem/FileBrowser'
+import { ContainerFileBrowser } from '../components/filesystem/ContainerFileBrowser'
 import { UidGidVisualizer } from '../components/permissions/UidGidVisualizer'
 import { FileUidPanel } from '../components/permissions/FileUidPanel'
 import { DiagnosticCard } from '../components/permissions/DiagnosticCard'
@@ -350,15 +351,20 @@ function DetailPane() {
     )
   }
 
-  // Filesystem browser takes the full pane
+  // Filesystem browser takes the full pane. A container fs-root uses the
+  // read-only container browser (docker exec/archive); a host fs-root uses the
+  // full SFTP-backed browser.
   if (selection.kind === 'fs-root') {
     return (
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        <FileBrowser
-          key={`${selection.nodeId}:${selection.containerId ?? ''}`}
-          nodeId={selection.nodeId}
-          containerId={selection.containerId}
-        />
+        {selection.containerId ? (
+          <ContainerFileBrowser
+            key={`ctr:${selection.containerId}`}
+            containerId={selection.containerId}
+          />
+        ) : (
+          <FileBrowser key={`node:${selection.nodeId}`} nodeId={selection.nodeId} />
+        )}
       </div>
     )
   }

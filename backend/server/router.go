@@ -60,6 +60,8 @@ func NewRouter(d *Deps) http.Handler {
 			// UID/GID visualizer + container inspect (read-only).
 			r.Get("/nodes/{id}/users", d.Handlers.HostUsers)
 			r.Get("/containers/{id}", d.Handlers.InspectContainer)
+			r.Get("/containers/{id}/fs", d.Handlers.ContainerFSList)
+			r.Get("/containers/{id}/fs/file", d.Handlers.ContainerFSFile)
 			r.Get("/containers/{id}/users", d.Handlers.ContainerUsersHandler)
 			r.Get("/containers/{id}/uid-analysis", d.Handlers.UIDAnalysis)
 			r.Get("/containers/{id}/uid-analysis.csv", d.Handlers.UIDAnalysisCSV)
