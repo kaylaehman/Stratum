@@ -286,6 +286,25 @@ func TestBuildHostKeyCallback_PinnedLineVerifies(t *testing.T) {
 	}
 }
 
+// ── detection-command exit handling ───────────────────────────────────────────
+
+func TestIsFatalRunErr(t *testing.T) {
+	// A non-zero command exit is NOT fatal: the detection command's final
+	// `test -d /etc/pve` exits 1 on every non-Proxmox host, and stdout is still
+	// the real signal. Treating it as fatal is the Bug-2 regression.
+	if isFatalRunErr(&ssh.ExitError{}) {
+		t.Error("a non-zero command exit (*ssh.ExitError) must NOT be fatal")
+	}
+	// nil → nothing went wrong.
+	if isFatalRunErr(nil) {
+		t.Error("nil error must not be fatal")
+	}
+	// A genuine session/transport failure IS fatal.
+	if !isFatalRunErr(errors.New("new session: ssh: disconnect")) {
+		t.Error("a non-exit error must be fatal")
+	}
+}
+
 // containsSubstring is a helper so tests don't import strings directly.
 func containsSubstring(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && func() bool {

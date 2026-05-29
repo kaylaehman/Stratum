@@ -52,6 +52,11 @@ func TestSanitizeCategories(t *testing.T) {
 		{"passphrase missing", "ssh: this private key is passphrase protected", discovery.ErrCategorySSHPassphraseRequired},
 		{"passphrase wrong", "x509: decryption password incorrect", discovery.ErrCategorySSHPassphraseWrong},
 
+		// Self-target and post-handshake detection failure must NOT be
+		// swallowed by the generic ssh:/dial cases and mislabeled unreachable.
+		{"target is self", "ssh: probe target resolves to the stratum host itself", discovery.ErrCategorySSHTargetSelf},
+		{"detect failed after handshake", "ssh: detection session failed: session run: Process exited with status 1", discovery.ErrCategorySSHDetectFailed},
+
 		{"host key mismatch", "knownhosts: key mismatch for host 10.0.0.5", discovery.ErrCategorySSHHostKey},
 		{"tls error", "x509: certificate signed by unknown authority", discovery.ErrCategoryTLS},
 		{"proxmox unauthed", "Get https://10.0.0.5:8006/api2/json/version: 401 Unauthorized", discovery.ErrCategoryProxmoxUnauthed},

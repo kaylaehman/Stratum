@@ -17,8 +17,18 @@ const (
 	ErrCategorySSHPassphraseRequired = "ssh_passphrase_required"
 	ErrCategorySSHPassphraseWrong    = "ssh_passphrase_wrong"
 
-	ErrCategorySSHHostKey         = "ssh_host_key_mismatch"
-	ErrCategorySSHUnreachable     = "ssh_unreachable"
+	ErrCategorySSHHostKey     = "ssh_host_key_mismatch"
+	ErrCategorySSHUnreachable = "ssh_unreachable"
+
+	// ssh_target_is_self — the probe target resolves to the machine Stratum
+	// itself runs on. Distinct from ssh_unreachable: we never dialed, so a
+	// "couldn't connect" hint would be misleading.
+	ErrCategorySSHTargetSelf = "ssh_target_is_self"
+	// ssh_detect_failed — the SSH session was established and the host key was
+	// captured, but the capability-detection step didn't complete. Distinct
+	// from ssh_unreachable, which has a specific TCP-layer meaning.
+	ErrCategorySSHDetectFailed = "ssh_detect_failed"
+
 	ErrCategoryDockerUnreachable  = "docker_unreachable"
 	ErrCategoryTLS                = "tls_error"
 	ErrCategoryProxmoxUnauthed    = "proxmox_unauthed"
@@ -44,6 +54,14 @@ func SanitizeProbeError(err error) (category, hint string) {
 	msg := strings.ToLower(err.Error())
 
 	switch {
+	// Self-target and detection-after-handshake are checked first: both can
+	// otherwise be swallowed by the generic "ssh:" / "dial" cases below and
+	// mislabeled as ssh_unreachable, which carries a specific TCP-layer meaning.
+	case strings.Contains(msg, "stratum host itself"):
+		return ErrCategorySSHTargetSelf, hintFor(ErrCategorySSHTargetSelf)
+	case strings.Contains(msg, "detection session failed"):
+		return ErrCategorySSHDetectFailed, hintFor(ErrCategorySSHDetectFailed)
+
 	// SSH key file problems surface before the network handshake — the
 	// x/crypto/ssh package returns "ssh: this private key is passphrase
 	// protected" when ParsePrivateKey is called on an encrypted key without
@@ -114,6 +132,10 @@ func hintFor(cat string) string {
 		return "The host presented a key that doesn't match the one previously pinned for this node. If you intentionally re-keyed the host, re-probe to inspect the new fingerprint before accepting."
 	case ErrCategorySSHUnreachable:
 		return "Couldn't establish a TCP connection to the SSH port. Verify the host, port, and that the SSH daemon is running and reachable from this network."
+	case ErrCategorySSHTargetSelf:
+		return "This host resolves to the machine Stratum itself runs on. Stratum can't register its own host over SSH through this probe path — manage the local host directly, or register it from a different Stratum instance."
+	case ErrCategorySSHDetectFailed:
+		return "Connected and captured the host key, but the capability-detection command didn't complete. The SSH transport works — confirm the login user can run a non-interactive shell command (no forced command or restricted shell) and re-probe."
 	case ErrCategoryDockerUnreachable:
 		return "The Docker endpoint didn't respond. Confirm the daemon is running and the endpoint URL is correct."
 	case ErrCategoryTLS:

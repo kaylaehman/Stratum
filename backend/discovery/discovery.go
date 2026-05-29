@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -103,9 +104,20 @@ func Probe(ctx context.Context, t Target) Result {
 	return classify(sp, dp, pp)
 }
 
+// errTargetIsSelf is produced (and then sanitized) when the probe target
+// resolves to the Stratum host's own address. We never dial in that case:
+// connecting to ourselves can't yield a registerable remote node, and when
+// nothing listens on the local SSH port it only produces a misleading
+// "unreachable". The message text drives SanitizeProbeError's categorization.
+var errTargetIsSelf = errors.New("ssh: probe target resolves to the stratum host itself")
+
 func probeSSH(ctx context.Context, t Target) sshProbe {
 	if t.SSHCreds.User == "" {
 		return sshProbe{}
+	}
+	if isSelfTarget(ctx, t.Host) {
+		cat, hint := SanitizeProbeError(errTargetIsSelf)
+		return sshProbe{errCat: cat, errHint: hint}
 	}
 	cctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -125,6 +137,76 @@ func probeSSH(ctx context.Context, t Target) sshProbe {
 		}
 	}
 	return sshProbe{reachable: true, detection: det, hostKeySHA: hk.SHA256, hostKeyLn: hk.KnownHostsLine}
+}
+
+// isSelfTarget reports whether host refers to the machine Stratum runs on:
+// a localhost literal, or a name/IP that resolves to a loopback address or to
+// one of this host's own interface addresses. Resolution failures return false
+// — we let the real dial surface the actual network error rather than guessing.
+func isSelfTarget(ctx context.Context, host string) bool {
+	h := strings.Trim(strings.TrimSpace(host), "[]") // tolerate IPv6 brackets
+	if h == "" {
+		return false
+	}
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	targetIPs := resolveIPs(ctx, h)
+	if len(targetIPs) == 0 {
+		return false
+	}
+	for _, ip := range targetIPs {
+		if ip.IsLoopback() {
+			return true
+		}
+	}
+	return anyIPMatches(targetIPs, localIPs())
+}
+
+// resolveIPs resolves host (a literal IP returns itself without DNS) to its IPs,
+// bounded by a short timeout. Returns nil on any error.
+func resolveIPs(ctx context.Context, host string) []net.IP {
+	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(rctx, host)
+	if err != nil {
+		return nil
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		ips = append(ips, a.IP)
+	}
+	return ips
+}
+
+// localIPs returns the IP addresses bound to this host's network interfaces.
+func localIPs() []net.IP {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		switch v := a.(type) {
+		case *net.IPNet:
+			ips = append(ips, v.IP)
+		case *net.IPAddr:
+			ips = append(ips, v.IP)
+		}
+	}
+	return ips
+}
+
+// anyIPMatches reports whether any IP in a equals any IP in b.
+func anyIPMatches(a, b []net.IP) bool {
+	for _, x := range a {
+		for _, y := range b {
+			if x.Equal(y) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func probeDocker(ctx context.Context, t Target) dockerProbe {
