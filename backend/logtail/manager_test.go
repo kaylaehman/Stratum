@@ -283,7 +283,10 @@ func TestManager_CancelContainer_RemovesEntry(t *testing.T) {
 
 func TestManager_Publish_BroadcastsToHub(t *testing.T) {
 	h := &fakeHub{}
-	var published []LogLine
+	var (
+		publishedMu sync.Mutex
+		published   []LogLine
+	)
 	m := NewManager(stubProvider, h, allowAll)
 	m.startTailer = func(ctx context.Context, cancel context.CancelFunc, containerID string, client tailClient, publish func(LogLine)) {
 		// Immediately emit one line.
@@ -293,8 +296,13 @@ func TestManager_Publish_BroadcastsToHub(t *testing.T) {
 	_ = m.Subscribe(context.Background(), "u", "n", "c", "docker1", "c1")
 
 	// Add a listener after Subscribe (tailer already started and published).
+	// publishLine invokes listeners from whichever goroutine called it (the
+	// tailer goroutine here), so the slice append races with the main
+	// goroutine's read below — guard with a mutex.
 	m.AddListener("docker1", func(ll LogLine) {
+		publishedMu.Lock()
 		published = append(published, ll)
+		publishedMu.Unlock()
 	})
 
 	// Directly publish through the manager to test the path.
@@ -314,7 +322,10 @@ func TestManager_Publish_BroadcastsToHub(t *testing.T) {
 		t.Error("expected a broadcast on topic logs:docker1")
 	}
 
-	if len(published) != 1 || published[0].Text != "test" {
-		t.Errorf("listener got %v, want [{Text:test}]", published)
+	publishedMu.Lock()
+	got := append([]LogLine(nil), published...)
+	publishedMu.Unlock()
+	if len(got) != 1 || got[0].Text != "test" {
+		t.Errorf("listener got %v, want [{Text:test}]", got)
 	}
 }
