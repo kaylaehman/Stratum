@@ -9,14 +9,21 @@ import (
 	"net/http"
 )
 
-// claudeEndpoint is the Anthropic Messages API.
-const claudeEndpoint = "https://api.anthropic.com/v1/messages"
+// claudeEndpoint is the Anthropic Messages API. A var (not const) so tests can
+// point it at a stub server.
+var claudeEndpoint = "https://api.anthropic.com/v1/messages"
 
 // claudeAPIVersion is the required anthropic-version header value.
 const claudeAPIVersion = "2023-06-01"
 
 // DefaultClaudeModel is used when no model is configured.
 const DefaultClaudeModel = "claude-sonnet-4-6"
+
+// claudeCodeIdentity must be the FIRST system block when authenticating with a
+// Claude subscription OAuth token: Anthropic only accepts OAuth (oauth-2025-04-20)
+// Messages requests whose system prompt identifies as Claude Code. Omitting it
+// makes the API reject the request — so OAuth "connects" but every ask fails.
+const claudeCodeIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
 
 // Claude talks to the Anthropic Messages API. It authenticates with either an
 // API key (x-api-key) or an OAuth bearer token (Authorization: Bearer + the
@@ -57,11 +64,33 @@ type claudeMessage struct {
 	Content string `json:"content"`
 }
 
+type claudeSystemBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 type claudeRequest struct {
 	Model     string          `json:"model"`
 	MaxTokens int             `json:"max_tokens"`
-	System    string          `json:"system,omitempty"`
+	System    any             `json:"system,omitempty"` // string (API key) or []claudeSystemBlock (OAuth)
 	Messages  []claudeMessage `json:"messages"`
+}
+
+// systemField returns the system value for the request: a plain string for the
+// API-key path, or, for OAuth, an array whose first block is the required
+// Claude Code identity followed by our actual system prompt.
+func (c *Claude) systemField(system string) any {
+	if c.bearer == "" {
+		if system == "" {
+			return nil
+		}
+		return system
+	}
+	blocks := []claudeSystemBlock{{Type: "text", Text: claudeCodeIdentity}}
+	if system != "" {
+		blocks = append(blocks, claudeSystemBlock{Type: "text", Text: system})
+	}
+	return blocks
 }
 
 type claudeResponse struct {
@@ -87,7 +116,7 @@ func (c *Claude) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	body, _ := json.Marshal(claudeRequest{
 		Model:     c.model,
 		MaxTokens: maxTok,
-		System:    req.System,
+		System:    c.systemField(req.System),
 		Messages:  []claudeMessage{{Role: "user", Content: req.Prompt}},
 	})
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, claudeEndpoint, bytes.NewReader(body))
