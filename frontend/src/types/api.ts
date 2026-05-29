@@ -1188,7 +1188,7 @@ export interface RollbackResponse {
 
 // AI Assistant types (Feature 31)
 
-export type AIProvider = 'ollama' | 'claude' | ''
+export type AIProvider = 'ollama' | 'claude' | 'claude-oauth' | ''
 
 export interface AIConfig {
   provider: AIProvider
@@ -1196,7 +1196,14 @@ export interface AIConfig {
   ollama_model: string
   claude_model: string
   has_api_key: boolean
+  oauth_connected: boolean
   configured: boolean
+}
+
+export interface AIOAuthStartResponse {
+  authorize_url: string
+  verifier: string
+  state: string
 }
 
 export interface SetAIConfigRequest {

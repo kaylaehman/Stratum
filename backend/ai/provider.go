@@ -1,9 +1,10 @@
 // Package ai implements the AI Assistant (Feature 31): a provider-agnostic
 // "ask" capability used for log explanation, container diagnosis, and config
-// questions. Two providers are supported — a local Ollama-compatible endpoint
-// and the Claude (Anthropic) API. The Claude OAuth ("-p") flow is a deferred
-// follow-on. All outbound calls go through an injectable *http.Client so the
-// providers are unit-testable without a network.
+// questions. Three providers are supported — a local Ollama-compatible
+// endpoint, the Claude (Anthropic) API key, and Claude OAuth (the "claude.ai
+// -p" sign-in, which uses a subscription token instead of an API key). All
+// outbound calls go through an injectable *http.Client so the providers are
+// unit-testable without a network.
 package ai
 
 import (
@@ -13,8 +14,9 @@ import (
 
 // Provider kinds.
 const (
-	ProviderOllama = "ollama"
-	ProviderClaude = "claude"
+	ProviderOllama      = "ollama"
+	ProviderClaude      = "claude"
+	ProviderClaudeOAuth = "claude-oauth"
 )
 
 // ErrNotConfigured is returned when no usable provider is configured.

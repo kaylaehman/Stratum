@@ -115,6 +115,7 @@ func NewRouter(d *Deps) http.Handler {
 
 			// AI assistant config (admin gate in handler; set/ask are audited below).
 			r.Get("/ai/config", d.Handlers.AIConfigGet)
+			r.Get("/ai/oauth/start", d.Handlers.AIOAuthStart)
 
 			// Certificate inventory (admin gate in handler; rescan is audited below).
 			r.Get("/certs", d.Handlers.CertList)
@@ -244,6 +245,8 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/{id}/backups", d.Handlers.StartBackup)
 			audited.Put("/ai/config", d.Handlers.AIConfigSet)
 			audited.Post("/ai/ask", d.Handlers.AIAsk)
+			audited.Post("/ai/oauth/exchange", d.Handlers.AIOAuthExchange)
+			audited.Post("/ai/oauth/disconnect", d.Handlers.AIOAuthDisconnect)
 			audited.Post("/certs/rescan", d.Handlers.CertRescan)
 			audited.Put("/nodes/{id}/proxy/config", d.Handlers.SetNodeProxyConfig)
 			audited.Put("/nodes/{id}/dns/config", d.Handlers.SetNodeDNSConfig)

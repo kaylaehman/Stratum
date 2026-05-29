@@ -43,12 +43,13 @@ func New(store db.Store, cipher *crypto.Cipher, envClaudeKey, envOllamaURL strin
 
 // ConfigView is the non-secret config returned to the UI.
 type ConfigView struct {
-	Provider      string `json:"provider"`
-	OllamaBaseURL string `json:"ollama_base_url"`
-	OllamaModel   string `json:"ollama_model"`
-	ClaudeModel   string `json:"claude_model"`
-	HasAPIKey     bool   `json:"has_api_key"`
-	Configured    bool   `json:"configured"`
+	Provider       string `json:"provider"`
+	OllamaBaseURL  string `json:"ollama_base_url"`
+	OllamaModel    string `json:"ollama_model"`
+	ClaudeModel    string `json:"claude_model"`
+	HasAPIKey      bool   `json:"has_api_key"`
+	OAuthConnected bool   `json:"oauth_connected"`
+	Configured     bool   `json:"configured"`
 }
 
 // ConfigUpdate is an admin's settings change. APIKey is optional: when nil the
@@ -65,11 +66,12 @@ type ConfigUpdate struct {
 func (s *Service) Config(ctx context.Context) ConfigView {
 	cfg, _ := s.store.GetAIConfig(ctx)
 	v := ConfigView{
-		Provider:      cfg.Provider,
-		OllamaBaseURL: cfg.OllamaBaseURL,
-		OllamaModel:   cfg.OllamaModel,
-		ClaudeModel:   cfg.ClaudeModel,
-		HasAPIKey:     len(cfg.APIKeyEncrypted) > 0 || s.envClaudeKey != "",
+		Provider:       cfg.Provider,
+		OllamaBaseURL:  cfg.OllamaBaseURL,
+		OllamaModel:    cfg.OllamaModel,
+		ClaudeModel:    cfg.ClaudeModel,
+		HasAPIKey:      len(cfg.APIKeyEncrypted) > 0 || s.envClaudeKey != "",
+		OAuthConnected: len(cfg.OAuthAccessEncrypted) > 0,
 	}
 	if v.OllamaBaseURL == "" {
 		v.OllamaBaseURL = s.envOllamaURL
@@ -86,7 +88,7 @@ var ErrInvalidConfig = errors.New("ai: invalid configuration")
 // supplied, is sealed before storage.
 func (s *Service) SetConfig(ctx context.Context, u ConfigUpdate) error {
 	switch u.Provider {
-	case ProviderOllama, ProviderClaude, "":
+	case ProviderOllama, ProviderClaude, ProviderClaudeOAuth, "":
 	default:
 		return fmt.Errorf("%w: unknown provider %q", ErrInvalidConfig, u.Provider)
 	}
@@ -103,6 +105,11 @@ func (s *Service) SetConfig(ctx context.Context, u ConfigUpdate) error {
 		OllamaModel:     u.OllamaModel,
 		ClaudeModel:     u.ClaudeModel,
 		APIKeyEncrypted: existing.APIKeyEncrypted, // preserved unless changed below
+		// OAuth tokens are managed by the sign-in flow, not this settings save —
+		// always carry them over so switching provider/model doesn't drop them.
+		OAuthAccessEncrypted:  existing.OAuthAccessEncrypted,
+		OAuthRefreshEncrypted: existing.OAuthRefreshEncrypted,
+		OAuthExpiresAt:        existing.OAuthExpiresAt,
 	}
 	if u.APIKey != nil {
 		if *u.APIKey == "" {
@@ -123,6 +130,12 @@ func (s *Service) SetConfig(ctx context.Context, u ConfigUpdate) error {
 // truncated before sending. Returns ErrNotConfigured when no provider is usable.
 func (s *Service) Ask(ctx context.Context, task, prompt, contextText string) (AskResponse, string, error) {
 	cfg, _ := s.store.GetAIConfig(ctx)
+	if cfg.Provider == ProviderClaudeOAuth {
+		var err error
+		if cfg, err = s.ensureFreshOAuth(ctx, cfg); err != nil {
+			return AskResponse{}, "", err
+		}
+	}
 	provider, err := s.providerFrom(cfg)
 	if err != nil {
 		return AskResponse{}, "", err
@@ -169,9 +182,108 @@ func (s *Service) providerFrom(cfg db.AIConfig) (Provider, error) {
 			return nil, ErrNotConfigured
 		}
 		return NewClaude(key, cfg.ClaudeModel, s.http), nil
+	case ProviderClaudeOAuth:
+		if len(cfg.OAuthAccessEncrypted) == 0 {
+			return nil, ErrNotConfigured
+		}
+		tok, err := s.cipher.Open(cfg.OAuthAccessEncrypted)
+		if err != nil {
+			return nil, err
+		}
+		return NewClaudeOAuth(string(tok), cfg.ClaudeModel, s.http), nil
 	default:
 		return nil, ErrNotConfigured
 	}
+}
+
+// --- Claude OAuth (Feature 31) ---
+
+// OAuthStart begins a sign-in: it returns the authorize URL the operator opens
+// in a browser, plus the PKCE verifier and state the caller must hand back to
+// OAuthExchange. Nothing is persisted yet.
+func (s *Service) OAuthStart() (authorizeURL, verifier, state string, err error) {
+	p, err := GeneratePKCE()
+	if err != nil {
+		return "", "", "", err
+	}
+	state, err = GenerateState()
+	if err != nil {
+		return "", "", "", err
+	}
+	return AuthorizeURL(p.Challenge, state), p.Verifier, state, nil
+}
+
+// OAuthExchange swaps the pasted authorization code for tokens and persists them
+// (sealed), switching the active provider to claude-oauth. The Claude callback
+// page shows "code#state"; SplitPastedCode tolerates either form.
+func (s *Service) OAuthExchange(ctx context.Context, pastedCode, verifier, state string) error {
+	code, embeddedState := SplitPastedCode(pastedCode)
+	if embeddedState != "" {
+		state = embeddedState
+	}
+	if code == "" || verifier == "" {
+		return fmt.Errorf("%w: missing code or verifier", ErrInvalidConfig)
+	}
+	ts, err := ExchangeCode(ctx, s.http, code, verifier, state, time.Now())
+	if err != nil {
+		return err
+	}
+	cfg, _ := s.store.GetAIConfig(ctx)
+	cfg.Provider = ProviderClaudeOAuth
+	_, err = s.persistTokens(ctx, cfg, ts)
+	return err
+}
+
+// OAuthDisconnect clears the stored OAuth tokens. If claude-oauth was the active
+// provider, it is reset to "none" so the assistant doesn't report half-configured.
+func (s *Service) OAuthDisconnect(ctx context.Context) error {
+	cfg, _ := s.store.GetAIConfig(ctx)
+	cfg.OAuthAccessEncrypted = nil
+	cfg.OAuthRefreshEncrypted = nil
+	cfg.OAuthExpiresAt = time.Time{}
+	if cfg.Provider == ProviderClaudeOAuth {
+		cfg.Provider = ""
+	}
+	return s.store.UpsertAIConfig(ctx, cfg)
+}
+
+// ensureFreshOAuth refreshes the access token when it's near/after expiry,
+// persisting the new tokens. A token with no expiry is treated as long-lived.
+func (s *Service) ensureFreshOAuth(ctx context.Context, cfg db.AIConfig) (db.AIConfig, error) {
+	if !tokenExpired(cfg.OAuthExpiresAt, time.Now()) {
+		return cfg, nil
+	}
+	if len(cfg.OAuthRefreshEncrypted) == 0 {
+		return cfg, ErrNotConfigured // expired and nothing to refresh with
+	}
+	refresh, err := s.cipher.Open(cfg.OAuthRefreshEncrypted)
+	if err != nil {
+		return cfg, err
+	}
+	ts, err := RefreshToken(ctx, s.http, string(refresh), time.Now())
+	if err != nil {
+		return cfg, err
+	}
+	return s.persistTokens(ctx, cfg, ts)
+}
+
+// persistTokens seals the token set into cfg and writes it. A refresh response
+// may omit a new refresh token, in which case the existing one is kept.
+func (s *Service) persistTokens(ctx context.Context, cfg db.AIConfig, ts TokenSet) (db.AIConfig, error) {
+	access, err := s.cipher.Seal([]byte(ts.AccessToken))
+	if err != nil {
+		return cfg, err
+	}
+	cfg.OAuthAccessEncrypted = access
+	if ts.RefreshToken != "" {
+		refresh, err := s.cipher.Seal([]byte(ts.RefreshToken))
+		if err != nil {
+			return cfg, err
+		}
+		cfg.OAuthRefreshEncrypted = refresh
+	}
+	cfg.OAuthExpiresAt = ts.ExpiresAt
+	return cfg, s.store.UpsertAIConfig(ctx, cfg)
 }
 
 // claudeKey decrypts the stored key, falling back to the env key.

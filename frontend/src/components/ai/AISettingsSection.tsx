@@ -1,8 +1,118 @@
 import { useState, useEffect } from 'react'
-import { Bot, Loader } from 'lucide-react'
-import { useAIConfig, useSetAIConfig } from '../../lib/api/ai'
+import { Bot, Loader, ExternalLink } from 'lucide-react'
+import {
+  useAIConfig,
+  useSetAIConfig,
+  useAIOAuthStart,
+  useAIOAuthExchange,
+  useAIOAuthDisconnect,
+} from '../../lib/api/ai'
 import { ApiError } from '../../lib/api'
 import type { AIProvider } from '../../types/api'
+
+// ClaudeOAuthPanel drives the "sign in with Claude" flow: start (PKCE) → open
+// the authorize URL → paste the returned code → exchange for tokens. The
+// verifier/state live only in this component's state between start and exchange.
+function ClaudeOAuthPanel({ connected }: { connected: boolean }) {
+  const start = useAIOAuthStart()
+  const exchange = useAIOAuthExchange()
+  const disconnect = useAIOAuthDisconnect()
+  const [pkce, setPkce] = useState<{ verifier: string; state: string } | null>(null)
+  const [code, setCode] = useState('')
+  const [err, setErr] = useState('')
+
+  const btn: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    background: 'var(--accent)', color: '#fff', border: 'none',
+    borderRadius: '3px', fontSize: 12, padding: '6px 12px', cursor: 'pointer',
+  }
+
+  async function beginSignIn() {
+    setErr('')
+    try {
+      const res = await start.mutateAsync()
+      setPkce({ verifier: res.verifier, state: res.state })
+      window.open(res.authorize_url, '_blank', 'noopener,noreferrer')
+    } catch {
+      setErr('Could not start sign-in.')
+    }
+  }
+
+  async function finishSignIn() {
+    if (!pkce || !code.trim()) return
+    setErr('')
+    try {
+      await exchange.mutateAsync({ code: code.trim(), verifier: pkce.verifier, state: pkce.state })
+      setPkce(null)
+      setCode('')
+    } catch (e) {
+      const rejected = e instanceof ApiError && (e.body as { error?: string })?.error === 'invalid_code'
+      setErr(rejected ? 'That code was rejected — start again and re-copy it.' : 'Sign-in failed. Try again.')
+    }
+  }
+
+  if (connected) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span className="font-mono text-xs" style={{ color: 'var(--status-ok)' }}>
+          Connected to Claude
+        </span>
+        <button
+          type="button"
+          disabled={disconnect.isPending}
+          onClick={() => void disconnect.mutateAsync()}
+          style={{
+            background: 'transparent', border: '1px solid var(--status-error)', borderRadius: '3px',
+            color: 'var(--status-error)', fontSize: '0.7rem', padding: '2px 10px', cursor: 'pointer',
+            fontFamily: 'monospace',
+          }}
+        >
+          Disconnect
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {!pkce ? (
+        <button type="button" onClick={() => void beginSignIn()} disabled={start.isPending} style={btn}>
+          <ExternalLink size={12} />
+          {start.isPending ? 'Starting…' : 'Sign in with Claude'}
+        </button>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)', margin: 0 }}>
+            A Claude sign-in tab opened. Approve access, then paste the code it shows here.
+          </p>
+          <textarea
+            rows={2}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="paste the authorization code"
+            style={{ ...inputStyle(false), resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={() => void finishSignIn()} disabled={exchange.isPending || !code.trim()} style={btn}>
+              {exchange.isPending ? 'Connecting…' : 'Connect'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPkce(null); setCode(''); setErr('') }}
+              style={{
+                background: 'transparent', border: '1px solid var(--border-default)', borderRadius: '3px',
+                color: 'var(--text-secondary)', fontSize: 12, padding: '6px 12px', cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {err && <p className="text-xs" style={{ color: 'var(--status-error)', margin: 0 }}>{err}</p>}
+    </div>
+  )
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,7 +170,7 @@ export function AISettingsSection() {
         provider,
         ollama_base_url: provider === 'ollama' ? ollamaUrl : undefined,
         ollama_model: provider === 'ollama' ? ollamaModel : undefined,
-        claude_model: provider === 'claude' ? claudeModel : undefined,
+        claude_model: provider === 'claude' || provider === 'claude-oauth' ? claudeModel : undefined,
         // Only include api_key in payload if user actually typed something or explicitly cleared
         ...(newApiKey !== undefined ? { api_key: newApiKey } : {}),
       })
@@ -148,6 +258,7 @@ export function AISettingsSection() {
               <option value="">None</option>
               <option value="ollama">Local (Ollama)</option>
               <option value="claude">Claude API</option>
+              <option value="claude-oauth">Claude (sign in — no API key)</option>
             </select>
             <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>
               Choosing a provider <strong style={{ color: 'var(--text-secondary)' }}>enables</strong> the
@@ -296,6 +407,35 @@ export function AISettingsSection() {
                     Key will be cleared on save.
                   </p>
                 )}
+              </div>
+            </>
+          )}
+
+          {/* Claude OAuth (sign in) */}
+          {provider === 'claude-oauth' && (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  Model
+                </label>
+                <input
+                  type="text"
+                  value={claudeModel}
+                  onChange={e => setClaudeModel(e.target.value)}
+                  onFocus={() => setFocusField('claudeModel')}
+                  onBlur={() => setFocusField(null)}
+                  placeholder="claude-sonnet-4-6"
+                  style={inputStyle(focusField === 'claudeModel')}
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  Claude account
+                </label>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+                  Sign in with your Claude subscription instead of an API key. Save the provider first, then connect.
+                </p>
+                <ClaudeOAuthPanel connected={config?.oauth_connected ?? false} />
               </div>
             </>
           )}
