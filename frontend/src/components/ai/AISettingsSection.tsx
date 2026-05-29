@@ -326,7 +326,7 @@ export function AISettingsSection() {
               <option value="claude">Claude API</option>
               <option value="claude-oauth">Claude (sign in — no API key)</option>
               <option value="openai">OpenAI API</option>
-              <option value="gemini">Gemini API</option>
+              <option value="gemini">Gemini (Google AI Studio)</option>
             </select>
             <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>
               Choosing a provider <strong style={{ color: 'var(--text-secondary)' }}>enables</strong> the
@@ -410,6 +410,18 @@ export function AISettingsSection() {
                 placeholder="gemini-2.0-flash"
                 style={inputStyle(focusField === 'geminiModel')}
               />
+              <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                Uses a Google AI Studio API key (starts with <code>AIza…</code>) — create one at{' '}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  aistudio.google.com/app/apikey
+                </a>
+                . Paste it in the API Key field below.
+              </p>
             </div>
           )}
 
