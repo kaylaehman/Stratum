@@ -17,6 +17,8 @@ const (
 	ProviderOllama      = "ollama"
 	ProviderClaude      = "claude"
 	ProviderClaudeOAuth = "claude-oauth"
+	ProviderOpenAI      = "openai"
+	ProviderGemini      = "gemini"
 )
 
 // ErrNotConfigured is returned when no usable provider is configured.

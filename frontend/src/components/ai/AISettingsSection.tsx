@@ -201,6 +201,8 @@ export function AISettingsSection() {
   const [ollamaUrl, setOllamaUrl] = useState('')
   const [ollamaModel, setOllamaModel] = useState('')
   const [claudeModel, setClaudeModel] = useState('')
+  const [openaiModel, setOpenaiModel] = useState('')
+  const [geminiModel, setGeminiModel] = useState('')
   // newApiKey: undefined = not touched (don't send), '' = clear, string = set
   const [newApiKey, setNewApiKey] = useState<string | undefined>(undefined)
   const [showKeyInput, setShowKeyInput] = useState(false)
@@ -216,6 +218,8 @@ export function AISettingsSection() {
     setOllamaUrl(config.ollama_base_url ?? '')
     setOllamaModel(config.ollama_model ?? '')
     setClaudeModel(config.claude_model ?? '')
+    setOpenaiModel(config.openai_model ?? '')
+    setGeminiModel(config.gemini_model ?? '')
     setNewApiKey(undefined)
     setShowKeyInput(false)
   }, [config])
@@ -231,6 +235,8 @@ export function AISettingsSection() {
         ollama_base_url: provider === 'ollama' ? ollamaUrl : undefined,
         ollama_model: provider === 'ollama' ? ollamaModel : undefined,
         claude_model: provider === 'claude' || provider === 'claude-oauth' ? claudeModel : undefined,
+        openai_model: provider === 'openai' ? openaiModel : undefined,
+        gemini_model: provider === 'gemini' ? geminiModel : undefined,
         // Only include api_key in payload if user actually typed something or explicitly cleared
         ...(newApiKey !== undefined ? { api_key: newApiKey } : {}),
       })
@@ -319,6 +325,8 @@ export function AISettingsSection() {
               <option value="ollama">Local (Ollama)</option>
               <option value="claude">Claude API</option>
               <option value="claude-oauth">Claude (sign in — no API key)</option>
+              <option value="openai">OpenAI API</option>
+              <option value="gemini">Gemini API</option>
             </select>
             <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>
               Choosing a provider <strong style={{ color: 'var(--text-secondary)' }}>enables</strong> the
@@ -361,25 +369,52 @@ export function AISettingsSection() {
             </>
           )}
 
-          {/* Claude fields */}
+          {/* Model field — per API-key provider */}
           {provider === 'claude' && (
-            <>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-                  Model
-                </label>
-                <input
-                  type="text"
-                  value={claudeModel}
-                  onChange={e => setClaudeModel(e.target.value)}
-                  onFocus={() => setFocusField('claudeModel')}
-                  onBlur={() => setFocusField(null)}
-                  placeholder="claude-sonnet-4-6"
-                  style={inputStyle(focusField === 'claudeModel')}
-                />
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Model</label>
+              <input
+                type="text"
+                value={claudeModel}
+                onChange={e => setClaudeModel(e.target.value)}
+                onFocus={() => setFocusField('claudeModel')}
+                onBlur={() => setFocusField(null)}
+                placeholder="claude-sonnet-4-6"
+                style={inputStyle(focusField === 'claudeModel')}
+              />
+            </div>
+          )}
+          {provider === 'openai' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Model</label>
+              <input
+                type="text"
+                value={openaiModel}
+                onChange={e => setOpenaiModel(e.target.value)}
+                onFocus={() => setFocusField('openaiModel')}
+                onBlur={() => setFocusField(null)}
+                placeholder="gpt-4o-mini"
+                style={inputStyle(focusField === 'openaiModel')}
+              />
+            </div>
+          )}
+          {provider === 'gemini' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Model</label>
+              <input
+                type="text"
+                value={geminiModel}
+                onChange={e => setGeminiModel(e.target.value)}
+                onFocus={() => setFocusField('geminiModel')}
+                onBlur={() => setFocusField(null)}
+                placeholder="gemini-2.0-flash"
+                style={inputStyle(focusField === 'geminiModel')}
+              />
+            </div>
+          )}
 
-              {/* API Key management */}
+          {/* Shared API key — Claude / OpenAI / Gemini (one active provider at a time) */}
+          {(provider === 'claude' || provider === 'openai' || provider === 'gemini') && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
                   API Key
@@ -438,7 +473,7 @@ export function AISettingsSection() {
                       onChange={e => setNewApiKey(e.target.value)}
                       onFocus={() => setFocusField('apiKey')}
                       onBlur={() => setFocusField(null)}
-                      placeholder="sk-ant-…"
+                      placeholder={provider === 'openai' ? 'sk-…' : provider === 'gemini' ? 'AIza…' : 'sk-ant-…'}
                       autoComplete="off"
                       style={inputStyle(focusField === 'apiKey')}
                     />
@@ -468,7 +503,6 @@ export function AISettingsSection() {
                   </p>
                 )}
               </div>
-            </>
           )}
 
           {/* Claude OAuth (sign in) */}

@@ -47,6 +47,8 @@ type ConfigView struct {
 	OllamaBaseURL  string `json:"ollama_base_url"`
 	OllamaModel    string `json:"ollama_model"`
 	ClaudeModel    string `json:"claude_model"`
+	OpenAIModel    string `json:"openai_model"`
+	GeminiModel    string `json:"gemini_model"`
 	HasAPIKey      bool   `json:"has_api_key"`
 	OAuthConnected bool   `json:"oauth_connected"`
 	Configured     bool   `json:"configured"`
@@ -59,6 +61,8 @@ type ConfigUpdate struct {
 	OllamaBaseURL string  `json:"ollama_base_url"`
 	OllamaModel   string  `json:"ollama_model"`
 	ClaudeModel   string  `json:"claude_model"`
+	OpenAIModel   string  `json:"openai_model"`
+	GeminiModel   string  `json:"gemini_model"`
 	APIKey        *string `json:"api_key"`
 }
 
@@ -70,6 +74,8 @@ func (s *Service) Config(ctx context.Context) ConfigView {
 		OllamaBaseURL:  cfg.OllamaBaseURL,
 		OllamaModel:    cfg.OllamaModel,
 		ClaudeModel:    cfg.ClaudeModel,
+		OpenAIModel:    cfg.OpenAIModel,
+		GeminiModel:    cfg.GeminiModel,
 		HasAPIKey:      len(cfg.APIKeyEncrypted) > 0 || s.envClaudeKey != "",
 		OAuthConnected: len(cfg.OAuthAccessEncrypted) > 0,
 	}
@@ -88,7 +94,7 @@ var ErrInvalidConfig = errors.New("ai: invalid configuration")
 // supplied, is sealed before storage.
 func (s *Service) SetConfig(ctx context.Context, u ConfigUpdate) error {
 	switch u.Provider {
-	case ProviderOllama, ProviderClaude, ProviderClaudeOAuth, "":
+	case ProviderOllama, ProviderClaude, ProviderClaudeOAuth, ProviderOpenAI, ProviderGemini, "":
 	default:
 		return fmt.Errorf("%w: unknown provider %q", ErrInvalidConfig, u.Provider)
 	}
@@ -104,6 +110,8 @@ func (s *Service) SetConfig(ctx context.Context, u ConfigUpdate) error {
 		OllamaBaseURL:   u.OllamaBaseURL,
 		OllamaModel:     u.OllamaModel,
 		ClaudeModel:     u.ClaudeModel,
+		OpenAIModel:     u.OpenAIModel,
+		GeminiModel:     u.GeminiModel,
 		APIKeyEncrypted: existing.APIKeyEncrypted, // preserved unless changed below
 		// OAuth tokens are managed by the sign-in flow, not this settings save —
 		// always carry them over so switching provider/model doesn't drop them.
@@ -191,9 +199,34 @@ func (s *Service) providerFrom(cfg db.AIConfig) (Provider, error) {
 			return nil, err
 		}
 		return NewClaudeOAuth(string(tok), cfg.ClaudeModel, s.http), nil
+	case ProviderOpenAI:
+		key, err := s.storedAPIKey(cfg)
+		if err != nil || key == "" {
+			return nil, ErrNotConfigured
+		}
+		return NewOpenAI(key, cfg.OpenAIModel, s.http), nil
+	case ProviderGemini:
+		key, err := s.storedAPIKey(cfg)
+		if err != nil || key == "" {
+			return nil, ErrNotConfigured
+		}
+		return NewGemini(key, cfg.GeminiModel, s.http), nil
 	default:
 		return nil, ErrNotConfigured
 	}
+}
+
+// storedAPIKey decrypts the shared API key (used by the OpenAI/Gemini providers).
+// Unlike claudeKey it has no environment fallback.
+func (s *Service) storedAPIKey(cfg db.AIConfig) (string, error) {
+	if len(cfg.APIKeyEncrypted) == 0 {
+		return "", nil
+	}
+	pt, err := s.cipher.Open(cfg.APIKeyEncrypted)
+	if err != nil {
+		return "", err
+	}
+	return string(pt), nil
 }
 
 // --- Claude OAuth (Feature 31) ---
