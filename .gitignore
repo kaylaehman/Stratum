@@ -24,6 +24,9 @@ data/
 /bin/
 /backend/bin/
 /agent/bin/
+/agent/agent
+/agent/stratum-agent
+/backend/stratum
 /dist/
 *.exe
 *.exe~
@@ -91,10 +94,8 @@ tmp/
 /CLAUDE.md
 /FEATURES.md
 /DESIGN.md
-# Ignore loose files in /assets/ (brand assets stay local-only) but
-# track the bundled skill library which ships with Stratum.
-/assets/*
-!/assets/skills/
-!/assets/skills/**
 skills-lock.json
+# Internal sub-project design specs — local-only, never committed
+docs/superpowers/specs/
+**/superpowers/specs/
 
