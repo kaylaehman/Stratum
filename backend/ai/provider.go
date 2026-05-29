@@ -10,7 +10,26 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 )
+
+// ProviderError is a structured error built from an LLM provider's API error
+// RESPONSE (its error type + message). These fields are host- and secret-free,
+// so they are safe to surface to an operator. Transport/decode errors are NOT
+// wrapped in this type — they may embed request URLs/keys and must never be
+// returned to the client; callers surface only *ProviderError detail.
+type ProviderError struct {
+	Provider string
+	Type     string
+	Message  string
+}
+
+func (e *ProviderError) Error() string {
+	if e.Type != "" {
+		return fmt.Sprintf("%s: %s: %s", e.Provider, e.Type, e.Message)
+	}
+	return fmt.Sprintf("%s: %s", e.Provider, e.Message)
+}
 
 // Provider kinds.
 const (

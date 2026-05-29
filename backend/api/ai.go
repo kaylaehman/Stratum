@@ -250,12 +250,18 @@ func (h *Handlers) AIAsk(w http.ResponseWriter, r *http.Request) {
 		if h.Logger != nil {
 			h.Logger.Warn("ai ask failed", "error", err)
 		}
-		// Surface the provider's (already host/secret-free) message so an operator
-		// can see WHY a request failed instead of a generic "error occurred".
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"error":  "ai_request_failed",
-			"detail": err.Error(),
-		})
+		// Surface ONLY a structured provider error (type+message — host/secret
+		// free) so an operator sees why the request failed. Transport/decode
+		// errors may embed request URLs/keys, so those get the generic code only.
+		var provErr *ai.ProviderError
+		if errors.As(err, &provErr) {
+			writeJSON(w, http.StatusBadGateway, map[string]any{
+				"error":  "ai_request_failed",
+				"detail": provErr.Error(),
+			})
+		} else {
+			writeError(w, http.StatusBadGateway, "ai_request_failed")
+		}
 		return
 	}
 
