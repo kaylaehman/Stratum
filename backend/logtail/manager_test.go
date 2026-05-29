@@ -287,17 +287,18 @@ func TestManager_Publish_BroadcastsToHub(t *testing.T) {
 		publishedMu sync.Mutex
 		published   []LogLine
 	)
-	m := NewManager(stubProvider, h, allowAll)
-	m.startTailer = func(ctx context.Context, cancel context.CancelFunc, containerID string, client tailClient, publish func(LogLine)) {
-		// Immediately emit one line.
-		publish(LogLine{ContainerID: containerID, Stream: "stdout", Text: "hello"})
-	}
+	// Provider succeeds and the tailer is a no-op, so the ONLY line the listener
+	// can observe is the explicit publishLine below. Previously this used
+	// stubProvider (which errors), so Subscribe's async goroutine published a
+	// synthetic "could not connect" line at a nondeterministic time, racing it
+	// into the listener and making the test flaky under -race.
+	m := NewManager(func(context.Context, string) (*docker.Client, error) { return nil, nil }, h, allowAll)
+	m.startTailer = noopStartTailer
 
 	_ = m.Subscribe(context.Background(), "u", "n", "c", "docker1", "c1")
 
-	// Add a listener after Subscribe (tailer already started and published).
-	// publishLine invokes listeners from whichever goroutine called it (the
-	// tailer goroutine here), so the slice append races with the main
+	// Add a listener after Subscribe. publishLine invokes listeners from
+	// whichever goroutine called it, so the slice append races with the main
 	// goroutine's read below — guard with a mutex.
 	m.AddListener("docker1", func(ll LogLine) {
 		publishedMu.Lock()
