@@ -18,7 +18,7 @@ export function Topbar({ user, onLogout, onSearchOpen }: TopbarProps) {
     >
       {/* Brand — logo includes the wordmark, no adjacent text needed. */}
       <div className="flex items-center w-52 shrink-0">
-        <img src="/logo.png" alt="Stratum" height={28} style={{ height: 28, width: 'auto', display: 'block' }} />
+        <img src="/logo.png?v=2" alt="Stratum" height={28} style={{ height: 28, width: 'auto', display: 'block' }} />
       </div>
 
       {/* Search trigger button */}
