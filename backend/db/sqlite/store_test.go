@@ -58,6 +58,46 @@ func TestUserCRUD(t *testing.T) {
 	if n, _ := st.CountUsers(ctx); n != 1 {
 		t.Errorf("CountUsers = %d, want 1", n)
 	}
+
+	// Password reset.
+	if err := st.UpdatePasswordHash(ctx, "u1", "newhash"); err != nil {
+		t.Fatalf("UpdatePasswordHash: %v", err)
+	}
+	if got, _ := st.GetUserByID(ctx, "u1"); got.PasswordHash != "newhash" {
+		t.Errorf("PasswordHash = %q, want newhash", got.PasswordHash)
+	}
+	if err := st.UpdatePasswordHash(ctx, "missing", "x"); err != appdb.ErrNotFound {
+		t.Errorf("UpdatePasswordHash(missing) = %v, want ErrNotFound", err)
+	}
+
+	// Profile (username + email) edit.
+	if err := st.UpdateUserProfile(ctx, "u1", "kayla2", "k2@example.com"); err != nil {
+		t.Fatalf("UpdateUserProfile: %v", err)
+	}
+	got2, err := st.GetUserByID(ctx, "u1")
+	if err != nil {
+		t.Fatalf("GetUserByID after profile update: %v", err)
+	}
+	if got2.Username != "kayla2" || got2.Email != "k2@example.com" {
+		t.Errorf("after profile update got %+v", got2)
+	}
+	// Old username no longer resolves; new one does.
+	if _, err := st.GetUserByUsername(ctx, "kayla"); err != appdb.ErrNotFound {
+		t.Errorf("old username should be gone, got %v", err)
+	}
+	if _, err := st.GetUserByUsername(ctx, "kayla2"); err != nil {
+		t.Errorf("new username should resolve, got %v", err)
+	}
+	// Clearing email round-trips as empty.
+	if err := st.UpdateUserProfile(ctx, "u1", "kayla2", ""); err != nil {
+		t.Fatalf("UpdateUserProfile clear email: %v", err)
+	}
+	if got, _ := st.GetUserByID(ctx, "u1"); got.Email != "" {
+		t.Errorf("Email = %q, want empty after clear", got.Email)
+	}
+	if err := st.UpdateUserProfile(ctx, "missing", "x", ""); err != appdb.ErrNotFound {
+		t.Errorf("UpdateUserProfile(missing) = %v, want ErrNotFound", err)
+	}
 }
 
 func TestSessionLifecycle(t *testing.T) {

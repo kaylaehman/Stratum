@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import {
   ShieldCheck,
   Copy,
@@ -16,6 +16,7 @@ import {
   Plus,
   X,
   Save,
+  Pencil,
 } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 import {
@@ -31,10 +32,12 @@ import {
   useDeleteUser,
   useSessions,
   useRevokeSession,
+  useChangePassword,
+  useUpdateUser,
 } from '../lib/api/users'
 import { useCan } from '../lib/roles'
 import { ApiError } from '../lib/api'
-import type { TwoFASetupResponse, UserRole } from '../types/api'
+import type { TwoFASetupResponse, UserRole, User } from '../types/api'
 import { AISettingsSection } from '../components/ai/AISettingsSection'
 import { MemoryPanel } from '../components/ai/MemoryPanel'
 import { RunbooksSection } from '../components/ai/RunbooksSection'
@@ -523,7 +526,7 @@ function RoleBadge({ role }: { role: UserRole }) {
 
 // ── Users section (admin-only) ────────────────────────────────────────────────
 
-function errorMsg(err: unknown, field: 'username' | 'password' | 'role' | 'delete'): string | null {
+function errorMsg(err: unknown, field: 'username' | 'password' | 'role' | 'delete' | 'edit' | 'changepw'): string | null {
   if (!(err instanceof ApiError)) return null
   const code = (err.body as { error?: string })?.error
   if (field === 'username' && code === 'username_taken') return 'Username already taken.'
@@ -534,6 +537,12 @@ function errorMsg(err: unknown, field: 'username' | 'password' | 'role' | 'delet
   if (field === 'delete' && code === 'last_admin') return "Can't delete the only admin."
   if (field === 'delete' && code === 'cannot_delete_self') return "Can't delete your own account."
   if (field === 'delete' && code === 'not_found') return 'User not found.'
+  if (field === 'edit' && code === 'username_taken') return 'Username already taken.'
+  if (field === 'edit' && code === 'username_required') return 'Username cannot be empty.'
+  if (field === 'edit' && code === 'password_min_8') return 'Password must be at least 8 characters.'
+  if (field === 'edit' && code === 'not_found') return 'User not found.'
+  if (field === 'changepw' && code === 'current_password_incorrect') return 'Current password is incorrect.'
+  if (field === 'changepw' && code === 'password_min_8') return 'New password must be at least 8 characters.'
   return 'Something went wrong.'
 }
 
@@ -683,12 +692,114 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
   )
 }
 
+// EditUserForm lets an admin edit a user's username/email and optionally reset
+// their password. Only changed fields are sent. Leaving the password blank
+// keeps the existing password.
+function EditUserForm({ user, onDone }: { user: User; onDone: () => void }) {
+  const updateUser = useUpdateUser()
+  const [username, setUsername] = useState(user.username)
+  const [email, setEmail] = useState(user.email ?? '')
+  const [password, setPassword] = useState('')
+  const [err, setErr] = useState('')
+
+  const input: React.CSSProperties = {
+    background: 'var(--bg-elevated)',
+    border: '1px solid var(--border-default)',
+    color: 'var(--text-primary)',
+    borderRadius: '3px',
+    fontSize: '11px',
+    fontFamily: 'monospace',
+    padding: '4px 8px',
+    width: '100%',
+  }
+
+  async function save() {
+    setErr('')
+    const payload: { id: string; username?: string; email?: string; password?: string } = { id: user.id }
+    if (username.trim() !== user.username) payload.username = username.trim()
+    if (email.trim() !== (user.email ?? '')) payload.email = email.trim()
+    if (password) payload.password = password
+    if (payload.username === undefined && payload.email === undefined && payload.password === undefined) {
+      onDone()
+      return
+    }
+    try {
+      await updateUser.mutateAsync(payload)
+      onDone()
+    } catch (e) {
+      setErr(errorMsg(e, 'edit') ?? 'Error')
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: '10px 8px',
+        background: 'var(--bg-base)',
+      }}
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Username</span>
+          <input style={input} value={username} onChange={(e) => setUsername(e.target.value)} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Email</span>
+          <input style={input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="(none)" />
+        </label>
+      </div>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Reset password (leave blank to keep)</span>
+        <input
+          style={input}
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="new password (8+ chars)"
+          autoComplete="new-password"
+        />
+      </label>
+      {err && <span style={{ fontSize: 10, color: 'var(--status-error)', fontFamily: 'monospace' }}>{err}</span>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          disabled={updateUser.isPending}
+          onClick={() => void save()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: 'var(--accent)', color: '#fff', border: 'none',
+            borderRadius: '3px', fontSize: 11, padding: '4px 12px', cursor: 'pointer',
+          }}
+        >
+          <Save size={11} />
+          {updateUser.isPending ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          style={{
+            background: 'transparent', color: 'var(--text-secondary)',
+            border: '1px solid var(--border-default)', borderRadius: '3px',
+            fontSize: 11, padding: '4px 12px', cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function UsersSection() {
   const { data, isLoading } = useUsers()
   const updateRole = useUpdateUserRole()
   const deleteUser = useDeleteUser()
   const currentUser = useAuthStore((s) => s.user)
   const [showCreate, setShowCreate] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({})
   const [roleErrors, setRoleErrors] = useState<Record<string, string>>({})
 
@@ -796,8 +907,8 @@ function UsersSection() {
               {users.map(u => {
                 const isSelf = u.id === currentUser?.id
                 return (
+                  <Fragment key={u.id}>
                   <tr
-                    key={u.id}
                     style={{ borderBottom: '1px solid var(--border-subtle)' }}
                   >
                     <td style={{ ...cell, color: 'var(--text-primary)', fontWeight: isSelf ? 600 : 400 }}>
@@ -842,6 +953,22 @@ function UsersSection() {
                     </td>
                     <td style={{ ...cell, textAlign: 'right' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditingId(editingId === u.id ? null : u.id)}
+                          title={`Edit ${u.username}`}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            background: editingId === u.id ? 'var(--accent-glow)' : 'transparent',
+                            border: '1px solid var(--border-default)', borderRadius: '3px',
+                            color: 'var(--text-secondary)', fontSize: '11px', fontFamily: 'monospace',
+                            padding: '2px 8px', cursor: 'pointer',
+                          }}
+                        >
+                          <Pencil size={11} />
+                          Edit
+                        </button>
                         <button
                           type="button"
                           disabled={isSelf || deleteUser.isPending}
@@ -865,6 +992,7 @@ function UsersSection() {
                           <Trash2 size={11} />
                           Delete
                         </button>
+                        </div>
                         {deleteErrors[u.id] && (
                           <span style={{ fontSize: 10, color: 'var(--status-error)', fontFamily: 'monospace' }}>
                             {deleteErrors[u.id]}
@@ -873,6 +1001,14 @@ function UsersSection() {
                       </div>
                     </td>
                   </tr>
+                  {editingId === u.id && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: 0, borderBottom: '1px solid var(--border-subtle)' }}>
+                        <EditUserForm user={u} onDone={() => setEditingId(null)} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -884,6 +1020,105 @@ function UsersSection() {
 }
 
 // ── Sessions section (any auth user) ─────────────────────────────────────────
+
+// ChangePasswordSection lets the signed-in user change their own password.
+// Available to every role.
+function ChangePasswordSection() {
+  const changePw = useChangePassword()
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [err, setErr] = useState('')
+  const [done, setDone] = useState(false)
+
+  const input: React.CSSProperties = {
+    background: 'var(--bg-elevated)',
+    border: '1px solid var(--border-default)',
+    color: 'var(--text-primary)',
+    borderRadius: '3px',
+    fontSize: '12px',
+    fontFamily: 'monospace',
+    padding: '6px 8px',
+    width: '100%',
+    maxWidth: 320,
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setErr('')
+    setDone(false)
+    if (next.length < 8) {
+      setErr('New password must be at least 8 characters.')
+      return
+    }
+    if (next !== confirm) {
+      setErr('New passwords do not match.')
+      return
+    }
+    try {
+      await changePw.mutateAsync({ current_password: current, new_password: next })
+      setDone(true)
+      setCurrent('')
+      setNext('')
+      setConfirm('')
+    } catch (e2) {
+      setErr(errorMsg(e2, 'changepw') ?? 'Error')
+    }
+  }
+
+  return (
+    <section
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '3px',
+        padding: '20px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+        <KeyRound size={16} style={{ color: 'var(--accent)' }} />
+        <div>
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)', margin: 0 }}>
+            Change Password
+          </h2>
+          <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+            Update the password for your own account
+          </p>
+        </div>
+      </div>
+
+      <form onSubmit={(e) => void submit(e)} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Current password</span>
+          <input style={input} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>New password</span>
+          <input style={input} type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} required />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Confirm new password</span>
+          <input style={input} type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+        </label>
+        {err && <span style={{ fontSize: 11, color: 'var(--status-error)', fontFamily: 'monospace' }}>{err}</span>}
+        {done && <span style={{ fontSize: 11, color: 'var(--status-ok)', fontFamily: 'monospace' }}>Password updated.</span>}
+        <button
+          type="submit"
+          disabled={changePw.isPending}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+            background: 'var(--accent)', color: '#fff', border: 'none',
+            borderRadius: '3px', fontSize: 12, padding: '6px 14px', cursor: 'pointer',
+            opacity: changePw.isPending ? 0.6 : 1,
+          }}
+        >
+          <Save size={12} />
+          {changePw.isPending ? 'Updating…' : 'Update password'}
+        </button>
+      </form>
+    </section>
+  )
+}
 
 function SessionsSection() {
   const { data, isLoading } = useSessions()
@@ -1619,6 +1854,8 @@ export default function Settings() {
         </div>
 
         <TwoFactorSection />
+
+        <ChangePasswordSection />
 
         <SessionsSection />
 

@@ -178,6 +178,30 @@ func (s *Store) UpdateUserRole(ctx context.Context, id, role string) error {
 	return nil
 }
 
+func (s *Store) UpdatePasswordHash(ctx context.Context, id, hash string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: update password hash: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return appdb.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateUserProfile(ctx context.Context, id, username, email string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE users SET username = ?, email = ? WHERE id = ?`,
+		username, nullableEmpty(email), id)
+	if err != nil {
+		return fmt.Errorf("sqlite: update user profile: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return appdb.ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
 	if err != nil {

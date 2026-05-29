@@ -504,6 +504,8 @@ type Store interface {
 	CountUsers(ctx context.Context) (int, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	UpdateUserRole(ctx context.Context, id, role string) error
+	UpdatePasswordHash(ctx context.Context, id, hash string) error
+	UpdateUserProfile(ctx context.Context, id, username, email string) error
 	DeleteUser(ctx context.Context, id string) error
 	CountUsersByRole(ctx context.Context, role string) (int, error)
 
