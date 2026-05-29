@@ -62,9 +62,10 @@ func TestOpenAI_Error(t *testing.T) {
 }
 
 func TestGemini_Ask(t *testing.T) {
-	var gotPath, gotBody string
+	var gotPath, gotBody, gotKeyHeader string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path + "?" + r.URL.RawQuery
+		gotKeyHeader = r.Header.Get("x-goog-api-key")
 		b := make([]byte, r.ContentLength)
 		_, _ = r.Body.Read(b)
 		gotBody = string(b)
@@ -87,8 +88,15 @@ func TestGemini_Ask(t *testing.T) {
 	if resp.Answer != "hello" || resp.InputTokens != 5 || resp.OutputTokens != 2 {
 		t.Errorf("resp = %+v", resp)
 	}
-	if !strings.Contains(gotPath, DefaultGeminiModel+":generateContent") || !strings.Contains(gotPath, "key=AIza-test") {
-		t.Errorf("request path missing model/key: %s", gotPath)
+	if !strings.Contains(gotPath, DefaultGeminiModel+":generateContent") {
+		t.Errorf("request path missing model: %s", gotPath)
+	}
+	// The key must travel in the header, never the URL (no leak via url.Error).
+	if gotKeyHeader != "AIza-test" {
+		t.Errorf("x-goog-api-key header = %q, want AIza-test", gotKeyHeader)
+	}
+	if strings.Contains(gotPath, "AIza-test") {
+		t.Errorf("API key must NOT appear in the URL: %s", gotPath)
 	}
 	if !strings.Contains(gotBody, `"system_instruction"`) {
 		t.Errorf("body missing system_instruction: %s", gotBody)

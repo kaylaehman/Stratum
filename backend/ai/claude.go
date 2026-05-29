@@ -146,9 +146,8 @@ func (c *Claude) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		if out.Error != nil {
-			// Never echo the request (it could contain the key in a header dump);
-			// surface only the provider's error category/message.
-			return AskResponse{}, fmt.Errorf("claude: %s: %s", out.Error.Type, out.Error.Message)
+			// Structured, secret-free provider error — safe to surface.
+			return AskResponse{}, &ProviderError{Provider: "claude", Type: out.Error.Type, Message: out.Error.Message}
 		}
 		return AskResponse{}, fmt.Errorf("claude: status %d", resp.StatusCode)
 	}

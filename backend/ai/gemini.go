@@ -80,13 +80,17 @@ func (c *Gemini) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	body.GenerationConfig.MaxOutputTokens = maxTok
 
 	raw, _ := json.Marshal(body)
-	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
-		strings.TrimRight(geminiBaseURL, "/"), url.PathEscape(c.model), url.QueryEscape(c.apiKey))
+	// Key goes in the x-goog-api-key HEADER, never the URL: a transport error
+	// wraps the request URL, so a key in the query string would leak into error
+	// messages and logs.
+	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent",
+		strings.TrimRight(geminiBaseURL, "/"), url.PathEscape(c.model))
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return AskResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", c.apiKey)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
@@ -101,7 +105,7 @@ func (c *Gemini) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		if out.Error != nil {
-			return AskResponse{}, fmt.Errorf("gemini: %s: %s", out.Error.Status, out.Error.Message)
+			return AskResponse{}, &ProviderError{Provider: "gemini", Type: out.Error.Status, Message: out.Error.Message}
 		}
 		return AskResponse{}, fmt.Errorf("gemini: status %d", resp.StatusCode)
 	}

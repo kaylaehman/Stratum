@@ -91,7 +91,7 @@ func (c *OpenAI) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		if out.Error != nil {
-			return AskResponse{}, fmt.Errorf("openai: %s: %s", out.Error.Type, out.Error.Message)
+			return AskResponse{}, &ProviderError{Provider: "openai", Type: out.Error.Type, Message: out.Error.Message}
 		}
 		return AskResponse{}, fmt.Errorf("openai: status %d", resp.StatusCode)
 	}
