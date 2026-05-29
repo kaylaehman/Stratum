@@ -149,6 +149,11 @@ export function AISettingsSection() {
               <option value="ollama">Local (Ollama)</option>
               <option value="claude">Claude API</option>
             </select>
+            <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>
+              Choosing a provider <strong style={{ color: 'var(--text-secondary)' }}>enables</strong> the
+              assistant; <code>None</code> turns it off. Once enabled, open it with the robot button at the
+              bottom-right of any page or <code>Ctrl/Cmd+Shift+A</code>.
+            </p>
           </div>
 
           {/* Ollama fields */}
