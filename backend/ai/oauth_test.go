@@ -37,10 +37,15 @@ func TestAuthorizeURL(t *testing.T) {
 	for _, want := range []string{
 		"code_challenge=chal123", "code_challenge_method=S256",
 		"state=state456", "response_type=code", "client_id=",
+		// Scope must use %20 between tokens (Claude rejects "+"); colons stay %3A.
+		"scope=org%3Acreate_api_key%20user%3Aprofile%20user%3Ainference",
 	} {
 		if !strings.Contains(u, want) {
 			t.Errorf("authorize URL missing %q: %s", want, u)
 		}
+	}
+	if strings.Contains(u, "+") {
+		t.Errorf("authorize URL must not contain '+'-encoded spaces: %s", u)
 	}
 }
 
