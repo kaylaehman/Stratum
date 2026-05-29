@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useNodes } from '../lib/api/nodes'
+import { useTree } from '../lib/api/tree'
+import { useCVEScans } from '../lib/api/cve'
 import { Activity, HardDrive, Container, Shield } from 'lucide-react'
 import type { NodeStatus, NodeView } from '../types/api'
 
@@ -94,10 +96,18 @@ function NodeRow({ node }: { node: NodeView }) {
 export default function Dashboard() {
   const { data: me, isLoading: meLoading, isError: meError } = useMe()
   const { data: nodes, isLoading: nodesLoading, isError: nodesError } = useNodes()
+  const isAdmin = me?.role === 'admin'
+  const { data: tree } = useTree()
+  // CVE scans are admin-only; only query when we're allowed to.
+  const { data: cve } = useCVEScans(isAdmin)
 
   const total = nodes?.length ?? 0
   const online = nodes?.filter((n) => n.status === 'ok').length ?? 0
   const unhealthy = nodes?.filter((n) => n.status === 'error' || n.status === 'unreachable').length ?? 0
+
+  const allContainers = tree?.nodes.flatMap((n) => n.containers) ?? []
+  const runningContainers = allContainers.filter((c) => c.status === 'running').length
+  const criticalCves = cve?.scans?.reduce((sum, s) => sum + (s.critical ?? 0), 0) ?? 0
 
   return (
     <AppShell>
@@ -139,8 +149,18 @@ export default function Dashboard() {
             value={nodesLoading ? '…' : `${online}/${total}`}
             status={total > 0 && unhealthy === 0 ? 'ok' : unhealthy > 0 ? 'warn' : 'muted'}
           />
-          <StatCard icon={<Container size={18} />} label="Running containers" value="—" status="muted" />
-          <StatCard icon={<Shield size={18} />} label="Critical CVEs" value="—" status="muted" />
+          <StatCard
+            icon={<Container size={18} />}
+            label="Running containers"
+            value={tree ? `${runningContainers}/${allContainers.length}` : '—'}
+            status={runningContainers > 0 ? 'ok' : 'muted'}
+          />
+          <StatCard
+            icon={<Shield size={18} />}
+            label="Critical CVEs"
+            value={!isAdmin ? '—' : cve ? String(criticalCves) : '…'}
+            status={criticalCves > 0 ? 'warn' : 'muted'}
+          />
           <StatCard
             icon={<Activity size={18} />}
             label="Unhealthy nodes"
