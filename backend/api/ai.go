@@ -106,6 +106,38 @@ func (h *Handlers) AIOAuthExchange(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.AI.Config(r.Context()))
 }
 
+type aiOAuthTokenRequest struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+// AIOAuthToken stores a manually-pasted Claude OAuth token (admin), e.g. from
+// `claude setup-token` — a fallback that skips the browser PKCE handshake.
+// Audited; the token is sealed and never echoed.
+func (h *Handlers) AIOAuthToken(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	var req aiOAuthTokenRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	if err := h.AI.SetOAuthToken(r.Context(), req.AccessToken, req.RefreshToken); errors.Is(err, ai.ErrInvalidConfig) {
+		writeError(w, http.StatusBadRequest, "invalid_token")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "save_failed")
+		return
+	}
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = activity.ActionAIConfig
+		e.TargetType = ptr(activity.TargetAI)
+		e.Detail = map[string]string{"provider": ai.ProviderClaudeOAuth, "event": "oauth_token_set"}
+	}
+	writeJSON(w, http.StatusOK, h.AI.Config(r.Context()))
+}
+
 // AIOAuthDisconnect clears the stored Claude OAuth tokens (admin). Audited.
 func (h *Handlers) AIOAuthDisconnect(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {

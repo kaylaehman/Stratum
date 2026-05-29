@@ -248,6 +248,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/ai/config", d.Handlers.AIConfigSet)
 			audited.Post("/ai/ask", d.Handlers.AIAsk)
 			audited.Post("/ai/oauth/exchange", d.Handlers.AIOAuthExchange)
+			audited.Post("/ai/oauth/token", d.Handlers.AIOAuthToken)
 			audited.Post("/ai/oauth/disconnect", d.Handlers.AIOAuthDisconnect)
 			audited.Post("/certs/rescan", d.Handlers.CertRescan)
 			audited.Put("/nodes/{id}/proxy/config", d.Handlers.SetNodeProxyConfig)

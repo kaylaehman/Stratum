@@ -6,6 +6,7 @@ import {
   useAIOAuthStart,
   useAIOAuthExchange,
   useAIOAuthDisconnect,
+  useAIOAuthSetToken,
 } from '../../lib/api/ai'
 import { ApiError } from '../../lib/api'
 import type { AIProvider } from '../../types/api'
@@ -17,9 +18,12 @@ function ClaudeOAuthPanel({ connected }: { connected: boolean }) {
   const start = useAIOAuthStart()
   const exchange = useAIOAuthExchange()
   const disconnect = useAIOAuthDisconnect()
+  const setToken = useAIOAuthSetToken()
   const [pkce, setPkce] = useState<{ verifier: string; state: string } | null>(null)
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
+  const [showPaste, setShowPaste] = useState(false)
+  const [pasteToken, setPasteToken] = useState('')
 
   const btn: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
@@ -48,6 +52,19 @@ function ClaudeOAuthPanel({ connected }: { connected: boolean }) {
     } catch (e) {
       const rejected = e instanceof ApiError && (e.body as { error?: string })?.error === 'invalid_code'
       setErr(rejected ? 'That code was rejected — start again and re-copy it.' : 'Sign-in failed. Try again.')
+    }
+  }
+
+  async function savePastedToken() {
+    if (!pasteToken.trim()) return
+    setErr('')
+    try {
+      await setToken.mutateAsync({ access_token: pasteToken.trim() })
+      setPasteToken('')
+      setShowPaste(false)
+    } catch (e) {
+      const bad = e instanceof ApiError && (e.body as { error?: string })?.error === 'invalid_token'
+      setErr(bad ? 'That token was rejected.' : 'Could not save token.')
     }
   }
 
@@ -109,6 +126,49 @@ function ClaudeOAuthPanel({ connected }: { connected: boolean }) {
           </div>
         </div>
       )}
+
+      {/* Fallback: paste a token (e.g. from `claude setup-token`) — skips the
+          browser handshake entirely. */}
+      {!pkce && (
+        showPaste ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <textarea
+              rows={2}
+              value={pasteToken}
+              onChange={(e) => setPasteToken(e.target.value)}
+              placeholder="paste a Claude OAuth token (e.g. from `claude setup-token`)"
+              style={{ ...inputStyle(false), resize: 'vertical' }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => void savePastedToken()} disabled={setToken.isPending || !pasteToken.trim()} style={btn}>
+                {setToken.isPending ? 'Saving…' : 'Save token'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowPaste(false); setPasteToken(''); setErr('') }}
+                style={{
+                  background: 'transparent', border: '1px solid var(--border-default)', borderRadius: '3px',
+                  color: 'var(--text-secondary)', fontSize: 12, padding: '6px 12px', cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowPaste(true)}
+            style={{
+              background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 11,
+              textDecoration: 'underline', cursor: 'pointer', alignSelf: 'flex-start', padding: 0,
+            }}
+          >
+            or paste a token instead
+          </button>
+        )
+      )}
+
       {err && <p className="text-xs" style={{ color: 'var(--status-error)', margin: 0 }}>{err}</p>}
     </div>
   )

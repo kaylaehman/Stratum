@@ -50,6 +50,14 @@ export function useAIOAuthExchange() {
   })
 }
 
+export function useAIOAuthSetToken() {
+  const qc = useQueryClient()
+  return useMutation<AIConfig, unknown, { access_token: string; refresh_token?: string }>({
+    mutationFn: (body) => apiPost<AIConfig>('/api/ai/oauth/token', body),
+    onSuccess: (data) => qc.setQueryData(AI_CONFIG_KEY, data),
+  })
+}
+
 export function useAIOAuthDisconnect() {
   const qc = useQueryClient()
   return useMutation<AIConfig, unknown, void>({
