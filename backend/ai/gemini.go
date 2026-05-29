@@ -94,20 +94,23 @@ func (c *Gemini) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return AskResponse{}, fmt.Errorf("gemini: request: %w", err)
+		return AskResponse{}, &ProviderError{Provider: "gemini", Type: "network_error", Message: "couldn't reach the Google AI Studio API (check the Stratum host's outbound network, DNS, and TLS)"}
 	}
 	defer resp.Body.Close()
 	respRaw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
-	var out geminiResponse
-	if err := json.Unmarshal(respRaw, &out); err != nil {
-		return AskResponse{}, fmt.Errorf("gemini: decode (status %d): %w", resp.StatusCode, err)
-	}
 	if resp.StatusCode != http.StatusOK {
+		var out geminiResponse
+		_ = json.Unmarshal(respRaw, &out)
 		if out.Error != nil {
 			return AskResponse{}, &ProviderError{Provider: "gemini", Type: out.Error.Status, Message: out.Error.Message}
 		}
-		return AskResponse{}, fmt.Errorf("gemini: status %d", resp.StatusCode)
+		return AskResponse{}, &ProviderError{Provider: "gemini", Type: fmt.Sprintf("status_%d", resp.StatusCode), Message: errSnippet(respRaw)}
+	}
+
+	var out geminiResponse
+	if err := json.Unmarshal(respRaw, &out); err != nil {
+		return AskResponse{}, fmt.Errorf("gemini: decode: %w", err)
 	}
 	var sb strings.Builder
 	for _, cand := range out.Candidates {

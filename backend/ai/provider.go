@@ -11,7 +11,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
+
+// errSnippet returns a short single-line snippet of a provider RESPONSE body.
+// Safe to surface: it's the provider's own response text (their error wording),
+// not our request — so it carries no API key or request URL.
+func errSnippet(raw []byte) string {
+	s := strings.Join(strings.Fields(string(raw)), " ")
+	const max = 300
+	if len(s) > max {
+		s = s[:max] + "…"
+	}
+	if s == "" {
+		return "(empty response body)"
+	}
+	return s
+}
 
 // ProviderError is a structured error built from an LLM provider's API error
 // RESPONSE (its error type + message). These fields are host- and secret-free,

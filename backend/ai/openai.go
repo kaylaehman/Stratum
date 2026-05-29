@@ -80,20 +80,23 @@ func (c *OpenAI) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return AskResponse{}, fmt.Errorf("openai: request: %w", err)
+		return AskResponse{}, &ProviderError{Provider: "openai", Type: "network_error", Message: "couldn't reach the OpenAI API (check the Stratum host's outbound network, DNS, and TLS)"}
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
-	var out openaiResponse
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return AskResponse{}, fmt.Errorf("openai: decode (status %d): %w", resp.StatusCode, err)
-	}
 	if resp.StatusCode != http.StatusOK {
+		var out openaiResponse
+		_ = json.Unmarshal(raw, &out)
 		if out.Error != nil {
 			return AskResponse{}, &ProviderError{Provider: "openai", Type: out.Error.Type, Message: out.Error.Message}
 		}
-		return AskResponse{}, fmt.Errorf("openai: status %d", resp.StatusCode)
+		return AskResponse{}, &ProviderError{Provider: "openai", Type: fmt.Sprintf("status_%d", resp.StatusCode), Message: errSnippet(raw)}
+	}
+
+	var out openaiResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return AskResponse{}, fmt.Errorf("openai: decode: %w", err)
 	}
 	var sb strings.Builder
 	for _, ch := range out.Choices {
