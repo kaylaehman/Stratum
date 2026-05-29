@@ -135,21 +135,25 @@ func (c *Claude) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return AskResponse{}, fmt.Errorf("claude: request: %w", err)
+		return AskResponse{}, &ProviderError{Provider: "claude", Type: "network_error", Message: "couldn't reach the Anthropic API (check the Stratum host's outbound network, DNS, and TLS)"}
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
-	var out claudeResponse
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return AskResponse{}, fmt.Errorf("claude: decode (status %d): %w", resp.StatusCode, err)
-	}
 	if resp.StatusCode != http.StatusOK {
+		var out claudeResponse
+		_ = json.Unmarshal(raw, &out)
 		if out.Error != nil {
-			// Structured, secret-free provider error — safe to surface.
 			return AskResponse{}, &ProviderError{Provider: "claude", Type: out.Error.Type, Message: out.Error.Message}
 		}
-		return AskResponse{}, fmt.Errorf("claude: status %d", resp.StatusCode)
+		// Non-standard error body — surface the status + the provider's response
+		// snippet (their words, no request secrets).
+		return AskResponse{}, &ProviderError{Provider: "claude", Type: fmt.Sprintf("status_%d", resp.StatusCode), Message: errSnippet(raw)}
+	}
+
+	var out claudeResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return AskResponse{}, fmt.Errorf("claude: decode: %w", err)
 	}
 	var sb bytes.Buffer
 	for _, blk := range out.Content {
