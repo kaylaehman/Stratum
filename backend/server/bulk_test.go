@@ -15,7 +15,8 @@ func TestBulkInvalidRequest(t *testing.T) {
 		{"container_ids": []string{"x"}},                    // missing action
 	}
 	for _, body := range cases {
-		resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/containers/bulk", token, body))
+		resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/containers/bulk", token, body))
+		if err != nil { t.Fatalf("request: %v", err) }
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("bulk %v = %d, want 400", body, resp.StatusCode)

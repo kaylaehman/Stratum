@@ -26,7 +26,8 @@ func TestAIConfigAndAskGating(t *testing.T) {
 		Configured bool `json:"configured"`
 		HasAPIKey  bool `json:"has_api_key"`
 	}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/ai/config", adminTok, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/ai/config", adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	json.NewDecoder(resp.Body).Decode(&cfg)
 	resp.Body.Close()
 	if cfg.Configured || cfg.HasAPIKey {

@@ -62,8 +62,10 @@ pnpm-debug.log*
 docker-compose.override.yml
 
 # ─── Logs ─────────────────────────────────────────────────────────────────
+# `/logs/` (not bare `logs/`) — bare pattern matches any `logs/` directory in
+# the tree, including source dirs like `frontend/src/components/logs/`.
 *.log
-logs/
+/logs/
 
 # ─── OS cruft ─────────────────────────────────────────────────────────────
 .DS_Store

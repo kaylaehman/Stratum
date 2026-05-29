@@ -19,9 +19,10 @@ func TestFileWatchCRUD(t *testing.T) {
 	var node struct {
 		ID string `json:"id"`
 	}
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
 		"name": "watchnode", "host": "10.0.0.8", "ssh_port": 22, "credentials": map[string]string{"method": "ssh_key"},
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	json.NewDecoder(resp.Body).Decode(&node)
 	resp.Body.Close()
 	base := srv.URL + "/api/nodes/" + node.ID + "/watches"
@@ -38,7 +39,8 @@ func TestFileWatchCRUD(t *testing.T) {
 	var wch struct {
 		ID string `json:"id"`
 	}
-	resp2, _ := c.Do(authReq(t, http.MethodPost, base, adminTok, map[string]any{"path": "/etc", "recursive": true}))
+	resp2, err := c.Do(authReq(t, http.MethodPost, base, adminTok, map[string]any{"path": "/etc", "recursive": true}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	if resp2.StatusCode != http.StatusCreated {
 		t.Fatalf("add watch = %d, want 201", resp2.StatusCode)
 	}
@@ -46,7 +48,8 @@ func TestFileWatchCRUD(t *testing.T) {
 	resp2.Body.Close()
 
 	// List shows it.
-	resp3, _ := c.Do(authReq(t, http.MethodGet, base, adminTok, nil))
+	resp3, err := c.Do(authReq(t, http.MethodGet, base, adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var list struct {
 		Watches []map[string]any `json:"watches"`
 	}

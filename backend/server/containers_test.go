@@ -12,10 +12,12 @@ import (
 func TestInspectUnknownContainer404(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/containers/nope/", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/containers/nope/", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	// chi trims trailing slash differently; hit the canonical path.
-	resp2, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/containers/nope", token, nil))
+	resp2, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/containers/nope", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Fatalf("inspect unknown container = %d, want 404", resp2.StatusCode)
@@ -25,7 +27,8 @@ func TestInspectUnknownContainer404(t *testing.T) {
 func TestUIDAnalysisUnknownContainer404(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/containers/nope/uid-analysis", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/containers/nope/uid-analysis", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("uid-analysis unknown container = %d, want 404", resp.StatusCode)
@@ -36,7 +39,8 @@ func TestFileUIDRequiresAuth(t *testing.T) {
 	srv, _ := newNodeTestServer(t)
 	c := &http.Client{}
 	// No bearer token -> 401 (auth middleware) before the handler.
-	resp, _ := c.Get(srv.URL + "/api/containers/x/file-uid?host_path=/etc/hosts")
+	resp, err := c.Get(srv.URL + "/api/containers/x/file-uid?host_path=/etc/hosts")
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("file-uid without auth = %d, want 401", resp.StatusCode)
@@ -46,7 +50,8 @@ func TestFileUIDRequiresAuth(t *testing.T) {
 func TestDiagnosticUnknownContainer404(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/containers/nope/diagnostic", token, map[string]string{"host_path": "/etc/hosts"}))
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/containers/nope/diagnostic", token, map[string]string{"host_path": "/etc/hosts"}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("diagnostic unknown container = %d, want 404", resp.StatusCode)

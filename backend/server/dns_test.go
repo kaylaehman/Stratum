@@ -18,7 +18,8 @@ func TestDNSEndpointAdminGate(t *testing.T) {
 	if s := status(t, c, authReq(t, http.MethodGet, srv.URL+"/api/nodes/x/dns", viewerTok, nil)); s != http.StatusForbidden {
 		t.Errorf("viewer GET dns = %d, want 403", s)
 	}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/x/dns", adminTok, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/x/dns", adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var st struct {
 		Detected  string `json:"detected"`
 		Supported []struct {
@@ -35,9 +36,10 @@ func TestDNSEndpointAdminGate(t *testing.T) {
 	var node struct {
 		ID string `json:"id"`
 	}
-	resp2, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
+	resp2, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
 		"name": "dnsnode", "host": "10.0.0.7", "ssh_port": 22, "credentials": map[string]string{"method": "ssh_key"},
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	json.NewDecoder(resp2.Body).Decode(&node)
 	resp2.Body.Close()
 	cfg := srv.URL + "/api/nodes/" + node.ID + "/dns/config"

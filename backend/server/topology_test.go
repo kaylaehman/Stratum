@@ -9,7 +9,8 @@ import (
 func TestNodeTopologyUnknownNode(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/nope/topology", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/nope/topology", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("topology for unknown node = %d, want 404", resp.StatusCode)
@@ -36,7 +37,9 @@ func TestNodeTopologyNoDocker(t *testing.T) {
 		t.Fatal("node create returned no id")
 	}
 
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/"+created.ID+"/topology", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/"+created.ID+"/topology", token, nil))
+
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("topology on non-docker node = %d, want 409", resp.StatusCode)

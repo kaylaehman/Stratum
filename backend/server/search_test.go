@@ -17,7 +17,8 @@ func TestSearchEmptyQuery(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
 	// No q => all groups empty arrays (not null), 200.
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/search", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/search", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("empty search = %d, want 200", resp.StatusCode)
@@ -39,7 +40,9 @@ func TestSearchFindsNode(t *testing.T) {
 	}))
 	createResp.Body.Close()
 
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/search?q=search-target", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/search?q=search-target", token, nil))
+
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	var body searchResponse
 	json.NewDecoder(resp.Body).Decode(&body)

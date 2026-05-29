@@ -9,7 +9,8 @@ import (
 func TestDepGraphUnknownNode(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/nope/depgraph", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/nope/depgraph", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("depgraph unknown node = %d, want 404", resp.StatusCode)
@@ -34,7 +35,8 @@ func TestDepGraphNoDocker(t *testing.T) {
 	if created.ID == "" {
 		t.Fatal("node create returned no id")
 	}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/"+created.ID+"/depgraph", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/"+created.ID+"/depgraph", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("depgraph non-docker node = %d, want 409", resp.StatusCode)

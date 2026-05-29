@@ -49,7 +49,8 @@ func TestScriptCRUDAndRunValidation(t *testing.T) {
 	}
 
 	// Run against an unreachable node => 200 with a per-node failure result.
-	run, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/scripts/"+created.ID+"/run", token, map[string]any{"node_ids": []string{"nope"}}))
+	run, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/scripts/"+created.ID+"/run", token, map[string]any{"node_ids": []string{"nope"}}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer run.Body.Close()
 	if run.StatusCode != http.StatusOK {
 		t.Fatalf("run = %d, want 200", run.StatusCode)

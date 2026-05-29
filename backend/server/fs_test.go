@@ -14,7 +14,8 @@ func TestFSDeleteRequiresConfirm(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
 	// No confirm=yes -> 400 before any filesystem op.
-	resp, _ := c.Do(authReq(t, http.MethodDelete, srv.URL+"/api/nodes/n/fs?path=/home/x", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodDelete, srv.URL+"/api/nodes/n/fs?path=/home/x", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("delete without confirm = %d, want 400", resp.StatusCode)
@@ -25,7 +26,8 @@ func TestFSListInvalidPath(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
 	// Relative path is rejected by ValidatePath before any dial.
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/n/fs?path=relative/path", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/n/fs?path=relative/path", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("list relative path = %d, want 400", resp.StatusCode)
@@ -35,7 +37,8 @@ func TestFSListInvalidPath(t *testing.T) {
 func TestFSMkdirRequiresPath(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/n/fs/mkdir", token, map[string]string{}))
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/n/fs/mkdir", token, map[string]string{}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("mkdir without path = %d, want 400", resp.StatusCode)

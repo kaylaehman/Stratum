@@ -33,7 +33,8 @@ func TestUpdatesRescanAdminGate(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
 	// Admin token => 204 (no docker nodes, but the gate + action run).
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/updates/rescan", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/updates/rescan", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("rescan (admin) = %d, want 204", resp.StatusCode)

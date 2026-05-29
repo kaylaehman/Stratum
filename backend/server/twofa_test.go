@@ -9,7 +9,8 @@ import (
 func TestTwoFAStatusDefaultDisabled(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/me/2fa", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/me/2fa", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /api/me/2fa = %d, want 200", resp.StatusCode)
@@ -26,7 +27,8 @@ func TestTwoFAStatusDefaultDisabled(t *testing.T) {
 func TestTwoFASetupReturnsSecretAndRecovery(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/me/2fa/setup", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/me/2fa/setup", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("setup = %d, want 200", resp.StatusCode)
