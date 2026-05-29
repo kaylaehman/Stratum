@@ -84,7 +84,10 @@ func AuthorizeURL(challenge, state string) string {
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
 	q.Set("state", state)
-	return oauthAuthorizeURL + "?" + q.Encode()
+	// url.Values.Encode() encodes spaces as "+", but Claude's authorize endpoint
+	// rejects that ("Invalid request format") and expects %20 in the
+	// space-delimited scope. Colons stay %3A-encoded (matches Claude Code).
+	return oauthAuthorizeURL + "?" + strings.ReplaceAll(q.Encode(), "+", "%20")
 }
 
 // SplitPastedCode handles the "code#state" value Claude's callback page shows:
