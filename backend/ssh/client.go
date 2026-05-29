@@ -88,7 +88,11 @@ func Detect(ctx context.Context, host string, port int, creds Credentials, pinne
 		if hostKeyMismatch {
 			return Detection{}, HostKey{}, fmt.Errorf("%w (dial %s)", ErrHostKeyMismatch, addr)
 		}
-		return Detection{}, HostKey{}, fmt.Errorf("ssh: dial %s: %w", addr, err)
+		// Host-key callback fires DURING the handshake, before auth runs.
+		// So if auth fails (or any post-handshake step), capturedHostKey is
+		// still populated — return it so the wizard can show the fingerprint
+		// and the user can verify the host while fixing credentials.
+		return Detection{}, capturedHostKey, fmt.Errorf("ssh: dial %s: %w", addr, err)
 	}
 	defer client.Close()
 

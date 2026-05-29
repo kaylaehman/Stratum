@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { X, AlertTriangle, Loader } from 'lucide-react'
 import { ApiError } from '../../lib/api'
 import { useCreateNode, useProbePreview } from '../../lib/api/nodes'
-import { ProbeResult } from './ProbeResult'
+import { ProbeResult, isBlockingProbeError } from './ProbeResult'
 import type { NodeType, CredentialMethod, PreviewResult } from '../../types/api'
 
 interface AddNodeWizardProps {
@@ -639,7 +639,10 @@ export function AddNodeWizard({ onClose }: AddNodeWizardProps) {
               disabled={
                 (step === 1 && !step1Valid()) ||
                 (step === 2 && !step2Valid()) ||
-                (step === 3 && (!probeResult || !keyAccepted))
+                (step === 3 &&
+                  (!probeResult ||
+                    !keyAccepted ||
+                    isBlockingProbeError(probeResult.probe_errors?.ssh)))
               }
               className="px-4 py-1.5 text-xs font-medium disabled:opacity-40"
               style={{

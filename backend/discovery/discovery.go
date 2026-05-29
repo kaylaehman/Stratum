@@ -53,7 +53,11 @@ type Result struct {
 	SSHHostKeyLine     string
 	DockerVersion      string
 	ProxmoxVersion     string
-	PerProbeError      map[string]string // {"ssh":"ssh_auth_failed", ...}
+	PerProbeError      map[string]string // {"ssh":"ssh_auth_pubkey_rejected", ...}
+	// PerProbeHint is a parallel map: same keys as PerProbeError, each value a
+	// short, host-free, user-actionable English sentence. Surfaced in the UI
+	// so the user knows what to change next.
+	PerProbeHint       map[string]string
 }
 
 type sshProbe struct {
@@ -63,12 +67,14 @@ type sshProbe struct {
 	hostKeyLn   string
 	keyMismatch bool
 	errCat      string
+	errHint     string
 }
 
 type dockerProbe struct {
 	reachable bool
 	version   string
 	errCat    string
+	errHint   string
 }
 
 type pveProbe struct {
@@ -76,6 +82,7 @@ type pveProbe struct {
 	version   string
 	status    string // confirmed | unauthed
 	errCat    string
+	errHint   string
 }
 
 // Probe runs the SSH, Docker, and Proxmox sub-probes concurrently (each with its
@@ -104,7 +111,18 @@ func probeSSH(ctx context.Context, t Target) sshProbe {
 	defer cancel()
 	det, hk, err := ssh.Detect(cctx, t.Host, t.SSHPort, t.SSHCreds, t.PinnedHostKey)
 	if err != nil {
-		return sshProbe{keyMismatch: errors.Is(err, ssh.ErrHostKeyMismatch), errCat: SanitizeProbeError(err)}
+		cat, hint := SanitizeProbeError(err)
+		// Surface whatever host-key info we captured before the failure: when
+		// auth fails AFTER the host-key callback fired, Detect still returns
+		// the captured key so the wizard can show the fingerprint and the
+		// user can verify (and re-probe) with corrected credentials.
+		return sshProbe{
+			keyMismatch: errors.Is(err, ssh.ErrHostKeyMismatch),
+			hostKeySHA:  hk.SHA256,
+			hostKeyLn:   hk.KnownHostsLine,
+			errCat:      cat,
+			errHint:     hint,
+		}
 	}
 	return sshProbe{reachable: true, detection: det, hostKeySHA: hk.SHA256, hostKeyLn: hk.KnownHostsLine}
 }
@@ -117,12 +135,14 @@ func probeDocker(ctx context.Context, t Target) dockerProbe {
 	defer cancel()
 	cli, err := docker.New(t.DockerEndpoint, t.DockerTLS)
 	if err != nil {
-		return dockerProbe{errCat: SanitizeProbeError(err)}
+		cat, hint := SanitizeProbeError(err)
+		return dockerProbe{errCat: cat, errHint: hint}
 	}
 	defer cli.Close()
 	ver, err := cli.Ping(cctx)
 	if err != nil {
-		return dockerProbe{errCat: SanitizeProbeError(err)}
+		cat, hint := SanitizeProbeError(err)
+		return dockerProbe{errCat: cat, errHint: hint}
 	}
 	return dockerProbe{reachable: true, version: ver}
 }
@@ -136,13 +156,14 @@ func probePVE(ctx context.Context, t Target) pveProbe {
 	cli := proxmox.New(t.ProxmoxEndpoint, t.ProxmoxTokenID, t.ProxmoxSecret, t.ProxmoxTLSInsecure)
 	ver, status, err := cli.Version(cctx)
 	if err != nil {
-		return pveProbe{errCat: SanitizeProbeError(err)}
+		cat, hint := SanitizeProbeError(err)
+		return pveProbe{errCat: cat, errHint: hint}
 	}
 	return pveProbe{reachable: true, version: ver, status: string(status)}
 }
 
 func classify(sp sshProbe, dp dockerProbe, pp pveProbe) Result {
-	r := Result{PerProbeError: map[string]string{}}
+	r := Result{PerProbeError: map[string]string{}, PerProbeHint: map[string]string{}}
 
 	r.OSType = parseOSType(sp.detection.OSReleaseRaw)
 	r.ReachableSSH = sp.reachable
@@ -174,12 +195,21 @@ func classify(sp sshProbe, dp dockerProbe, pp pveProbe) Result {
 
 	if sp.errCat != "" {
 		r.PerProbeError["ssh"] = sp.errCat
+		if sp.errHint != "" {
+			r.PerProbeHint["ssh"] = sp.errHint
+		}
 	}
 	if dp.errCat != "" {
 		r.PerProbeError["docker"] = dp.errCat
+		if dp.errHint != "" {
+			r.PerProbeHint["docker"] = dp.errHint
+		}
 	}
 	if pp.errCat != "" {
 		r.PerProbeError["proxmox"] = pp.errCat
+		if pp.errHint != "" {
+			r.PerProbeHint["proxmox"] = pp.errHint
+		}
 	}
 
 	// Type classification: Proxmox > standalone (Docker) > ssh.

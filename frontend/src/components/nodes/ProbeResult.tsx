@@ -1,5 +1,33 @@
-import { Server, Box, Terminal, Check, X, AlertTriangle } from 'lucide-react'
+import { useState } from 'react'
+import { Server, Box, Terminal, Check, X, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react'
 import type { PreviewResult, NodeType } from '../../types/api'
+
+// SSH-auth subcategories the backend may emit. The wizard treats any of these
+// (plus the generic ssh_auth_failed fallback) as a blocking failure — a node
+// that can't authenticate is useless to persist.
+const SSH_AUTH_CATEGORIES = new Set([
+  'ssh_auth_failed',
+  'ssh_auth_pubkey_rejected',
+  'ssh_auth_password_rejected',
+  'ssh_passphrase_required',
+  'ssh_passphrase_wrong',
+])
+
+export function isBlockingProbeError(category: string | undefined): boolean {
+  if (!category) return false
+  return SSH_AUTH_CATEGORIES.has(category) || category === 'ssh_host_key_mismatch'
+}
+
+// Common causes shown in the "What to check" expander when SSH auth fails.
+// Ordered by how often each is the actual culprit, based on the typical
+// homelab/cloud-VM setup pattern.
+const SSH_AUTH_CHECKLIST = [
+  'The matching public key is in ~/.ssh/authorized_keys for the user you supplied (not root unless you set "root" above).',
+  'The target permits the credential type you chose — PubkeyAuthentication / PasswordAuthentication in sshd_config, and PermitRootLogin if your user is root.',
+  '~/.ssh is mode 700 and ~/.ssh/authorized_keys is mode 600 — sshd silently ignores the file if either is world-accessible.',
+  'You pasted the private key (not the .pub) and copied the full PEM block including BEGIN/END lines.',
+  'If the key has a passphrase, it is filled into the Key passphrase field above.',
+]
 
 const NODE_ICONS: Record<NodeType, React.ReactNode> = {
   proxmox: <Server size={14} style={{ color: 'var(--accent)' }} />,
@@ -85,6 +113,10 @@ export function ProbeResult({
 }: ProbeResultProps) {
   const displayType = (typeOverride || result.type) as NodeType
   const pxStatus = proxmoxStatusMessage(result.proxmox_auth_status)
+  const sshCategory = result.probe_errors?.ssh
+  const sshHint = result.probe_hints?.ssh
+  const sshAuthFailed = sshCategory ? SSH_AUTH_CATEGORIES.has(sshCategory) : false
+  const [checklistOpen, setChecklistOpen] = useState(false)
 
   return (
     <div className="flex flex-col gap-4">
@@ -178,6 +210,61 @@ export function ProbeResult({
         </div>
       )}
 
+      {/* SSH auth hint — prominent, actionable, with a collapsible checklist.
+          Shown for any ssh_auth_* category. Rendered above the generic probe
+          warnings block so it's the first thing the user sees. */}
+      {sshAuthFailed && (
+        <div
+          className="flex flex-col gap-2 p-3"
+          style={{
+            backgroundColor: 'var(--bg-elevated)',
+            border: '1px solid var(--status-warn)',
+            borderRadius: '3px',
+          }}
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle
+              size={14}
+              style={{ color: 'var(--status-warn)', marginTop: '1px', flexShrink: 0 }}
+            />
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-medium" style={{ color: 'var(--status-warn)' }}>
+                SSH authentication failed — fix this before saving
+              </p>
+              {sshHint && (
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {sshHint}
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setChecklistOpen((v) => !v)}
+            className="self-start flex items-center gap-1 text-xs"
+            style={{
+              color: 'var(--text-secondary)',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+            }}
+          >
+            {checklistOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            What to check
+          </button>
+          {checklistOpen && (
+            <ul className="flex flex-col gap-1 pl-4" style={{ color: 'var(--text-secondary)' }}>
+              {SSH_AUTH_CHECKLIST.map((item, i) => (
+                <li key={i} className="text-xs list-disc">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {/* Probe errors */}
       {result.probe_errors && Object.keys(result.probe_errors).length > 0 && (
         <div
@@ -204,49 +291,55 @@ export function ProbeResult({
         </div>
       )}
 
-      {/* SSH host key */}
-      <div
-        className="flex flex-col gap-2 p-3"
-        style={{
-          backgroundColor: 'var(--bg-elevated)',
-          border: `1px solid ${acceptedKey ? 'var(--accent-dim)' : 'var(--border-default)'}`,
-          borderRadius: '3px',
-        }}
-      >
-        <p className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
-          SSH host key fingerprint
-        </p>
-        <p
-          className="font-mono text-xs break-all"
-          style={{ color: 'var(--text-secondary)' }}
+      {/* SSH host key — render only when the handshake actually captured one.
+          With auth failure the backend still returns the fingerprint (the
+          host-key callback fires before auth), so the user can verify the
+          host while fixing creds; but if SSH never connected at all we have
+          nothing to show, and rendering an empty card is misleading. */}
+      {result.ssh_host_key_sha256 && (
+        <div
+          className="flex flex-col gap-2 p-3"
+          style={{
+            backgroundColor: 'var(--bg-elevated)',
+            border: `1px solid ${acceptedKey ? 'var(--accent-dim)' : 'var(--border-default)'}`,
+            borderRadius: '3px',
+          }}
         >
-          {result.ssh_host_key_sha256}
-        </p>
-        {!acceptedKey ? (
-          <button
-            type="button"
-            onClick={onAcceptKey}
-            className="self-start flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium"
-            style={{
-              backgroundColor: 'var(--accent)',
-              color: 'var(--text-inverse)',
-              border: 'none',
-              borderRadius: '3px',
-              cursor: 'pointer',
-            }}
+          <p className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+            SSH host key fingerprint
+          </p>
+          <p
+            className="font-mono text-xs break-all"
+            style={{ color: 'var(--text-secondary)' }}
           >
-            <Check size={12} />
-            Accept this host key
-          </button>
-        ) : (
-          <div className="flex items-center gap-1.5">
-            <Check size={12} style={{ color: 'var(--status-ok)' }} />
-            <span className="text-xs" style={{ color: 'var(--status-ok)' }}>
-              Host key accepted
-            </span>
-          </div>
-        )}
-      </div>
+            {result.ssh_host_key_sha256}
+          </p>
+          {!acceptedKey ? (
+            <button
+              type="button"
+              onClick={onAcceptKey}
+              className="self-start flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium"
+              style={{
+                backgroundColor: 'var(--accent)',
+                color: 'var(--text-inverse)',
+                border: 'none',
+                borderRadius: '3px',
+                cursor: 'pointer',
+              }}
+            >
+              <Check size={12} />
+              Accept this host key
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <Check size={12} style={{ color: 'var(--status-ok)' }} />
+              <span className="text-xs" style={{ color: 'var(--status-ok)' }}>
+                Host key accepted
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
