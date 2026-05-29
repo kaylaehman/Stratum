@@ -103,6 +103,11 @@ func (h *Handlers) Ports(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	// A nil slice marshals to JSON null; the UI expects an array. Coerce so the
+	// client never has to defend against `ports: null`.
+	if ports == nil {
+		ports = []db.PortExposureRow{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ports":                 ports,
 		"non_docker_listeners": h.nonDockerListeners(ctx, ports),

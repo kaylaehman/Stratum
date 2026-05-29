@@ -360,6 +360,12 @@ export default function Security() {
 
   const isLoading = meLoading || privLoading || portsLoading
 
+  // The backend marshals empty Go slices as JSON null, so ports.ports /
+  // ports.non_docker_listeners can be null even when the object is present.
+  // Normalize to arrays here so the render never does null.length / null.map.
+  const portList = ports?.ports ?? []
+  const listeners = ports?.non_docker_listeners ?? []
+
   return (
     <AppShell>
       <div className="flex flex-col flex-1 min-h-0 h-full w-full p-6" style={{ maxWidth: '900px', margin: '0 auto' }}>
@@ -443,10 +449,10 @@ export default function Security() {
             <div className="mb-8">
               <SectionHeader
                 label="Exposed Ports Audit"
-                count={ports?.ports.length ?? 0}
+                count={portList.length}
               />
 
-              {!ports || ports.ports.length === 0 ? (
+              {portList.length === 0 ? (
                 <div
                   className="px-3 py-4 text-xs"
                   style={{
@@ -488,7 +494,7 @@ export default function Security() {
                       </tr>
                     </thead>
                     <tbody>
-                      {ports.ports.map((p) => (
+                      {portList.map((p) => (
                         <PortRow key={p.id} port={p} nodes={nodes} />
                       ))}
                     </tbody>
@@ -510,7 +516,7 @@ export default function Security() {
                     Non-Docker Host Listeners
                   </span>
                 </div>
-                {!ports || ports.non_docker_listeners.length === 0 ? (
+                {listeners.length === 0 ? (
                   <div className="px-3 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
                     None detected.
                   </div>
@@ -522,7 +528,7 @@ export default function Security() {
                       borderRadius: '3px',
                     }}
                   >
-                    {ports.non_docker_listeners.map((l: Listener, i: number) => (
+                    {listeners.map((l: Listener, i: number) => (
                       <ListenerRow
                         key={`${l.node_id}:${l.address}:${l.port}:${i}`}
                         listener={l}

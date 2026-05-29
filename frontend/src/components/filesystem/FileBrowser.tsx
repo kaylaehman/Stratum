@@ -172,9 +172,13 @@ function DeleteConfirmModal({
 }
 
 export function FileBrowser({ nodeId, containerId }: FileBrowserProps) {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const paramPath = searchParams.get('fspath') ?? '/'
-  const [path, setPath] = useState(paramPath)
+  const [, setSearchParams] = useSearchParams()
+  // Start every filesystem at root. Combined with a per-node `key` on this
+  // component (Resources DetailPane), switching to another node's filesystem
+  // remounts fresh at "/" rather than carrying over the previous node's path —
+  // which usually doesn't exist on the new host and looked like "switching is
+  // broken".
+  const [path, setPath] = useState('/')
   const [panel, setPanel] = useState<PanelMode>('list')
   const [activeEntry, setActiveEntry] = useState<FsEntry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<FsEntry | null>(null)

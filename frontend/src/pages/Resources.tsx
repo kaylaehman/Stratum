@@ -355,6 +355,7 @@ function DetailPane() {
     return (
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <FileBrowser
+          key={`${selection.nodeId}:${selection.containerId ?? ''}`}
           nodeId={selection.nodeId}
           containerId={selection.containerId}
         />
