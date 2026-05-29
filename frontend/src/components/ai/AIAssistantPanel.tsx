@@ -21,6 +21,16 @@ function isNotConfiguredError(err: unknown): boolean {
   return err instanceof ApiError && (err.body as { error?: string })?.error === 'ai_not_configured'
 }
 
+// providerErrorText surfaces the backend's sanitized provider message (e.g. the
+// actual Claude/OpenAI/Gemini rejection reason) instead of a generic error.
+function providerErrorText(err: unknown): string {
+  if (err instanceof ApiError) {
+    const detail = (err.body as { detail?: string })?.detail
+    if (detail) return detail
+  }
+  return 'An error occurred. Please try again.'
+}
+
 /** Render assistant text: preserve whitespace, style code blocks. */
 function AnswerText({ text }: { text: string }) {
   // Split on triple-backtick fences for minimal code block support
@@ -117,7 +127,7 @@ export function AIAssistantPanel() {
           role: 'assistant',
           text: notConfigured
             ? '__NOT_CONFIGURED__'
-            : 'An error occurred. Please try again.',
+            : providerErrorText(err),
           error: true,
         },
       ])
