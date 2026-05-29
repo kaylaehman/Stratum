@@ -40,6 +40,7 @@ import { MemoryPanel } from '../components/ai/MemoryPanel'
 import { RunbooksSection } from '../components/ai/RunbooksSection'
 import { useFeatures, useSetFeature, useFeatureEnabled } from '../lib/api/features'
 import { useChatConfig, useSetChatConfig } from '../lib/api/chat'
+import { AppShell } from '../components/layout/AppShell'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1601,10 +1602,7 @@ export default function Settings() {
   const { isAdmin } = useCan()
 
   return (
-    <div
-      className="flex-1 overflow-auto p-6"
-      style={{ backgroundColor: 'var(--bg-base)' }}
-    >
+    <AppShell>
       <div style={{ maxWidth: '640px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
         {/* Page header */}
         <div>
@@ -1636,6 +1634,6 @@ export default function Settings() {
 
         <RunbooksSection />
       </div>
-    </div>
+    </AppShell>
   )
 }
