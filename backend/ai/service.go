@@ -234,6 +234,25 @@ func (s *Service) OAuthExchange(ctx context.Context, pastedCode, verifier, state
 	return err
 }
 
+// SetOAuthToken stores a manually-provided Claude OAuth token (e.g. from
+// `claude setup-token`), sealing it and switching the provider to claude-oauth.
+// A bare access token is treated as long-lived (zero expiry → no auto-refresh);
+// an optional refresh token is stored for future use.
+func (s *Service) SetOAuthToken(ctx context.Context, accessToken, refreshToken string) error {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return fmt.Errorf("%w: empty access token", ErrInvalidConfig)
+	}
+	cfg, _ := s.store.GetAIConfig(ctx)
+	cfg.Provider = ProviderClaudeOAuth
+	_, err := s.persistTokens(ctx, cfg, TokenSet{
+		AccessToken:  accessToken,
+		RefreshToken: strings.TrimSpace(refreshToken),
+		// ExpiresAt left zero: tokenExpired() treats it as non-expiring.
+	})
+	return err
+}
+
 // OAuthDisconnect clears the stored OAuth tokens. If claude-oauth was the active
 // provider, it is reset to "none" so the assistant doesn't report half-configured.
 func (s *Service) OAuthDisconnect(ctx context.Context) error {
