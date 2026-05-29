@@ -47,6 +47,82 @@ func (h *Handlers) AIConfigSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.AI.Config(r.Context()))
 }
 
+// AIOAuthStart begins the Claude OAuth sign-in (admin). Returns the authorize
+// URL to open in a browser plus the PKCE verifier + state the client echoes
+// back to /exchange. No state is persisted server-side (stateless PKCE).
+func (h *Handlers) AIOAuthStart(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	authorizeURL, verifier, state, err := h.AI.OAuthStart()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "oauth_start_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authorize_url": authorizeURL,
+		"verifier":      verifier,
+		"state":         state,
+	})
+}
+
+type aiOAuthExchangeRequest struct {
+	Code     string `json:"code"`
+	Verifier string `json:"verifier"`
+	State    string `json:"state"`
+}
+
+// oauthExchangeTimeout bounds the token round-trip to Anthropic.
+const oauthExchangeTimeout = 30 * time.Second
+
+// AIOAuthExchange swaps the pasted authorization code for tokens (admin).
+// Audited; tokens are sealed before storage and never echoed.
+func (h *Handlers) AIOAuthExchange(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	var req aiOAuthExchangeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), oauthExchangeTimeout)
+	defer cancel()
+	if err := h.AI.OAuthExchange(ctx, req.Code, req.Verifier, req.State); errors.Is(err, ai.ErrInvalidConfig) {
+		writeError(w, http.StatusBadRequest, "invalid_code")
+		return
+	} else if err != nil {
+		if h.Logger != nil {
+			h.Logger.Warn("ai oauth exchange failed", "error", err)
+		}
+		writeError(w, http.StatusBadGateway, "oauth_exchange_failed")
+		return
+	}
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = activity.ActionAIConfig
+		e.TargetType = ptr(activity.TargetAI)
+		e.Detail = map[string]string{"provider": ai.ProviderClaudeOAuth, "event": "oauth_connect"}
+	}
+	writeJSON(w, http.StatusOK, h.AI.Config(r.Context()))
+}
+
+// AIOAuthDisconnect clears the stored Claude OAuth tokens (admin). Audited.
+func (h *Handlers) AIOAuthDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if err := h.AI.OAuthDisconnect(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "save_failed")
+		return
+	}
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = activity.ActionAIConfig
+		e.TargetType = ptr(activity.TargetAI)
+		e.Detail = map[string]string{"provider": ai.ProviderClaudeOAuth, "event": "oauth_disconnect"}
+	}
+	writeJSON(w, http.StatusOK, h.AI.Config(r.Context()))
+}
+
 type aiAskRequest struct {
 	Task    string `json:"task"`
 	Prompt  string `json:"prompt"`

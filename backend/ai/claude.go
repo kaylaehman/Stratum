@@ -18,14 +18,17 @@ const claudeAPIVersion = "2023-06-01"
 // DefaultClaudeModel is used when no model is configured.
 const DefaultClaudeModel = "claude-sonnet-4-6"
 
-// Claude talks to the Anthropic Messages API with an API key.
+// Claude talks to the Anthropic Messages API. It authenticates with either an
+// API key (x-api-key) or an OAuth bearer token (Authorization: Bearer + the
+// anthropic-beta oauth header) — exactly one is set.
 type Claude struct {
-	apiKey string
+	apiKey string // x-api-key mode
+	bearer string // OAuth mode (Claude subscription token)
 	model  string
 	http   *http.Client
 }
 
-// NewClaude builds a Claude provider. model defaults to DefaultClaudeModel.
+// NewClaude builds an API-key Claude provider. model defaults to DefaultClaudeModel.
 func NewClaude(apiKey, model string, hc *http.Client) *Claude {
 	if model == "" {
 		model = DefaultClaudeModel
@@ -33,7 +36,21 @@ func NewClaude(apiKey, model string, hc *http.Client) *Claude {
 	return &Claude{apiKey: apiKey, model: model, http: hc}
 }
 
-func (c *Claude) Kind() string { return ProviderClaude }
+// NewClaudeOAuth builds a Claude provider authenticated with an OAuth bearer
+// token (the "claude.ai -p" method) rather than an API key.
+func NewClaudeOAuth(bearer, model string, hc *http.Client) *Claude {
+	if model == "" {
+		model = DefaultClaudeModel
+	}
+	return &Claude{bearer: bearer, model: model, http: hc}
+}
+
+func (c *Claude) Kind() string {
+	if c.bearer != "" {
+		return ProviderClaudeOAuth
+	}
+	return ProviderClaude
+}
 
 type claudeMessage struct {
 	Role    string `json:"role"`
@@ -78,8 +95,14 @@ func (c *Claude) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 		return AskResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", claudeAPIVersion)
+	if c.bearer != "" {
+		// OAuth (subscription) token: Bearer auth + the required beta opt-in.
+		httpReq.Header.Set("Authorization", "Bearer "+c.bearer)
+		httpReq.Header.Set("anthropic-beta", oauthBetaHeader)
+	} else {
+		httpReq.Header.Set("x-api-key", c.apiKey)
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {

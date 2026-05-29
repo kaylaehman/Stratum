@@ -366,7 +366,12 @@ type AIConfig struct {
 	OllamaModel     string
 	ClaudeModel     string
 	APIKeyEncrypted []byte
-	UpdatedAt       time.Time
+	// Claude OAuth ("-p" method, Feature 31): AES-sealed access/refresh tokens
+	// and the access-token expiry. Empty unless the operator connected via OAuth.
+	OAuthAccessEncrypted  []byte
+	OAuthRefreshEncrypted []byte
+	OAuthExpiresAt        time.Time
+	UpdatedAt             time.Time
 }
 
 // Script is a saved shell script for the script runner (Feature 27).
