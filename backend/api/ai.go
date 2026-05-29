@@ -250,7 +250,12 @@ func (h *Handlers) AIAsk(w http.ResponseWriter, r *http.Request) {
 		if h.Logger != nil {
 			h.Logger.Warn("ai ask failed", "error", err)
 		}
-		writeError(w, http.StatusBadGateway, "ai_request_failed")
+		// Surface the provider's (already host/secret-free) message so an operator
+		// can see WHY a request failed instead of a generic "error occurred".
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":  "ai_request_failed",
+			"detail": err.Error(),
+		})
 		return
 	}
 
