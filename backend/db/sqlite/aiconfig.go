@@ -17,10 +17,10 @@ func (s *Store) GetAIConfig(ctx context.Context) (appdb.AIConfig, error) {
 	var updatedAt string
 	var oauthExpires sql.NullString
 	err := s.db.QueryRowContext(ctx,
-		`SELECT provider, ollama_base_url, ollama_model, claude_model, api_key_encrypted,
+		`SELECT provider, ollama_base_url, ollama_model, claude_model, openai_model, gemini_model, api_key_encrypted,
 		        oauth_access_encrypted, oauth_refresh_encrypted, oauth_expires_at, updated_at
 		 FROM ai_config WHERE id = 1`).
-		Scan(&c.Provider, &c.OllamaBaseURL, &c.OllamaModel, &c.ClaudeModel, &key,
+		Scan(&c.Provider, &c.OllamaBaseURL, &c.OllamaModel, &c.ClaudeModel, &c.OpenAIModel, &c.GeminiModel, &key,
 			&oauthAccess, &oauthRefresh, &oauthExpires, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return appdb.AIConfig{}, appdb.ErrNotFound
@@ -45,20 +45,22 @@ func (s *Store) UpsertAIConfig(ctx context.Context, c appdb.AIConfig) error {
 		oauthExpires = tsText(c.OAuthExpiresAt)
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO ai_config (id, provider, ollama_base_url, ollama_model, claude_model, api_key_encrypted,
+		`INSERT INTO ai_config (id, provider, ollama_base_url, ollama_model, claude_model, openai_model, gemini_model, api_key_encrypted,
 		                        oauth_access_encrypted, oauth_refresh_encrypted, oauth_expires_at, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   provider=excluded.provider,
 		   ollama_base_url=excluded.ollama_base_url,
 		   ollama_model=excluded.ollama_model,
 		   claude_model=excluded.claude_model,
+		   openai_model=excluded.openai_model,
+		   gemini_model=excluded.gemini_model,
 		   api_key_encrypted=excluded.api_key_encrypted,
 		   oauth_access_encrypted=excluded.oauth_access_encrypted,
 		   oauth_refresh_encrypted=excluded.oauth_refresh_encrypted,
 		   oauth_expires_at=excluded.oauth_expires_at,
 		   updated_at=excluded.updated_at`,
-		c.Provider, c.OllamaBaseURL, c.OllamaModel, c.ClaudeModel, c.APIKeyEncrypted,
+		c.Provider, c.OllamaBaseURL, c.OllamaModel, c.ClaudeModel, c.OpenAIModel, c.GeminiModel, c.APIKeyEncrypted,
 		c.OAuthAccessEncrypted, c.OAuthRefreshEncrypted, oauthExpires, tsText(time.Now()))
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert ai_config: %w", err)

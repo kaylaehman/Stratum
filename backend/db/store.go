@@ -365,6 +365,8 @@ type AIConfig struct {
 	OllamaBaseURL   string
 	OllamaModel     string
 	ClaudeModel     string
+	OpenAIModel     string
+	GeminiModel     string
 	APIKeyEncrypted []byte
 	// Claude OAuth ("-p" method, Feature 31): AES-sealed access/refresh tokens
 	// and the access-token expiry. Empty unless the operator connected via OAuth.
