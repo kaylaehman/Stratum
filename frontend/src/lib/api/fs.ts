@@ -28,6 +28,34 @@ export function useDir(nodeId: string, path: string) {
   })
 }
 
+// ---- Container filesystem (read-only: docker exec listing + archive read) ----
+
+export function containerDirKey(containerId: string, path: string) {
+  return ['container-fs', containerId, path] as const
+}
+
+export function useContainerDir(containerId: string, path: string) {
+  return useQuery({
+    queryKey: containerDirKey(containerId, path),
+    queryFn: () =>
+      apiFetch<FsDirResponse>(
+        `/api/containers/${encodeURIComponent(containerId)}/fs?path=${encodeURIComponent(path)}`,
+      ),
+    enabled: Boolean(containerId && path),
+    retry: false,
+  })
+}
+
+export async function readContainerFile(
+  containerId: string,
+  path: string,
+): Promise<{ content: string; tooLarge: boolean }> {
+  const body = await apiFetch<FsFileResponse>(
+    `/api/containers/${encodeURIComponent(containerId)}/fs/file?path=${encodeURIComponent(path)}`,
+  )
+  return { content: body.content ?? '', tooLarge: body.too_large }
+}
+
 // ---- Read file (returns content + captured Last-Modified) ----
 
 export interface ReadFileResult {
