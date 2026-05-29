@@ -15,7 +15,8 @@ func TestFeatureFlags(t *testing.T) {
 	viewerTok := loginAs(t, c, srv.URL, "viewer")
 
 	// Any authed user can read the catalog.
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/features", viewerTok, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/features", viewerTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var body struct {
 		Features []struct {
 			Key     string `json:"key"`

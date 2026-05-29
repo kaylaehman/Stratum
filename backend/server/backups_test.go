@@ -9,7 +9,8 @@ import (
 func TestBackupsListEmpty(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/backups", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/backups", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /api/backups = %d, want 200", resp.StatusCode)
@@ -29,9 +30,10 @@ func TestStartBackupValidation(t *testing.T) {
 	// Create a docker-capable node so we get past the capability gate to the
 	// volume/dest validation. (Test nodes have no docker → 409, which also
 	// proves the gate.) Unknown node => 404.
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/nope/backups", token, map[string]string{
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/nope/backups", token, map[string]string{
 		"volume": "data", "dest_dir": "/mnt/backups",
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("backup on unknown node = %d, want 404", resp.StatusCode)

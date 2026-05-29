@@ -134,7 +134,8 @@ func TestRBACUserManagement(t *testing.T) {
 			ID, Username, Role string
 		} `json:"users"`
 	}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/users", adminTok, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/users", adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	json.NewDecoder(resp.Body).Decode(&list)
 	resp.Body.Close()
 	if len(list.Users) != 2 {
@@ -188,7 +189,8 @@ func TestRBACUserManagement(t *testing.T) {
 func TestRBACSessionsList(t *testing.T) {
 	srv, adminTok := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/sessions", adminTok, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/sessions", adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var body struct {
 		Sessions []struct {
 			ID      string

@@ -62,6 +62,7 @@ type PreviewResult struct {
 	DockerVersion     string            `json:"docker_version,omitempty"`
 	ProxmoxVersion    string            `json:"proxmox_version,omitempty"`
 	ProbeErrors       map[string]string `json:"probe_errors,omitempty"`
+	ProbeHints        map[string]string `json:"probe_hints,omitempty"`
 }
 
 // NodeView is the API representation of a node — never carries secrets.
@@ -122,6 +123,7 @@ func toPreview(r discovery.Result) PreviewResult {
 		DockerVersion:     r.DockerVersion,
 		ProxmoxVersion:    r.ProxmoxVersion,
 		ProbeErrors:       r.PerProbeError,
+		ProbeHints:        r.PerProbeHint,
 	}
 }
 

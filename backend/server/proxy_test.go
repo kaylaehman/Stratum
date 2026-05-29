@@ -21,7 +21,8 @@ func TestProxyEndpointAdminGate(t *testing.T) {
 	}
 
 	// Admin: unknown node has no containers -> no proxy detected, catalog present.
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/x/proxy", adminTok, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/x/proxy", adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var st struct {
 		Detected  string `json:"detected"`
 		Supported []struct {
@@ -41,9 +42,10 @@ func TestProxyEndpointAdminGate(t *testing.T) {
 	var node struct {
 		ID string `json:"id"`
 	}
-	resp2, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
+	resp2, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
 		"name": "bare", "host": "10.0.0.9", "ssh_port": 22, "credentials": map[string]string{"method": "ssh_key"},
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	json.NewDecoder(resp2.Body).Decode(&node)
 	resp2.Body.Close()
 	cfgURL := srv.URL + "/api/nodes/" + node.ID + "/proxy/config"

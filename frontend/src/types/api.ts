@@ -159,6 +159,7 @@ export interface PreviewResult {
   docker_version?: string
   proxmox_version?: string
   probe_errors?: Record<string, string>
+  probe_hints?: Record<string, string>
 }
 
 export interface NodesListResponse {

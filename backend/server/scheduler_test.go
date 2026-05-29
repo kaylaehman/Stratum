@@ -14,7 +14,8 @@ func TestSetCronValidation(t *testing.T) {
 		{"user": "root; rm -rf /", "content": "x"},
 		{"content": "x"}, // missing user
 	} {
-		resp, _ := c.Do(authReq(t, http.MethodPut, srv.URL+"/api/nodes/n1/cron", token, body))
+		resp, err := c.Do(authReq(t, http.MethodPut, srv.URL+"/api/nodes/n1/cron", token, body))
+		if err != nil { t.Fatalf("request: %v", err) }
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("set cron %v = %d, want 400", body, resp.StatusCode)

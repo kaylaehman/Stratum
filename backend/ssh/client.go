@@ -88,13 +88,21 @@ func Detect(ctx context.Context, host string, port int, creds Credentials, pinne
 		if hostKeyMismatch {
 			return Detection{}, HostKey{}, fmt.Errorf("%w (dial %s)", ErrHostKeyMismatch, addr)
 		}
-		return Detection{}, HostKey{}, fmt.Errorf("ssh: dial %s: %w", addr, err)
+		// Host-key callback fires DURING the handshake, before auth runs.
+		// So if auth fails (or any post-handshake step), capturedHostKey is
+		// still populated — return it so the wizard can show the fingerprint
+		// and the user can verify the host while fixing credentials.
+		return Detection{}, capturedHostKey, fmt.Errorf("ssh: dial %s: %w", addr, err)
 	}
 	defer client.Close()
 
 	output, err := runSession(ctx, client)
 	if err != nil {
-		return Detection{}, HostKey{}, fmt.Errorf("ssh: run detection: %w", err)
+		// The session was established and the host-key callback already fired,
+		// so preserve capturedHostKey (the wizard can still show the
+		// fingerprint). Use a distinct marker so the sanitizer categorizes this
+		// as ssh_detect_failed rather than the TCP-layer ssh_unreachable.
+		return Detection{}, capturedHostKey, fmt.Errorf("ssh: detection session failed: %w", err)
 	}
 
 	return parseDetection(output), capturedHostKey, nil
@@ -195,12 +203,28 @@ func runSession(ctx context.Context, client *ssh.Client) (string, error) {
 		_ = session.Signal(ssh.SIGKILL)
 		return "", ctx.Err()
 	case err := <-done:
-		if err != nil {
+		if isFatalRunErr(err) {
 			return "", fmt.Errorf("session run: %w", err)
 		}
+		// A non-zero exit is NOT fatal here: the detection command is a chain
+		// of `test`/`command -v` probes whose final element legitimately exits
+		// non-zero on hosts lacking the probed path (e.g. `test -d /etc/pve` on
+		// any non-Proxmox host). The signal is the parsed stdout, so keep it.
 	}
 
 	return buf.String(), nil
+}
+
+// isFatalRunErr reports whether a detection-command error should abort the
+// probe. A non-zero command *exit status* (*ssh.ExitError) is non-fatal — the
+// command ran and its stdout is what we parse. Anything else (session open
+// refused, transport drop, signal) is fatal.
+func isFatalRunErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var exitErr *ssh.ExitError
+	return !errors.As(err, &exitErr)
 }
 
 // parseDetection parses the raw output of the detection command.

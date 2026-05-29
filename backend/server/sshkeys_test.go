@@ -14,7 +14,8 @@ func TestSSHKeyDeleteValidation(t *testing.T) {
 		{"fingerprint": "SHA256:x", "path": "/etc/passwd"}, // bad path
 		{"fingerprint": "SHA256:x"}, // no path
 	} {
-		resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/n1/sshkeys/delete", token, body))
+		resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/n1/sshkeys/delete", token, body))
+		if err != nil { t.Fatalf("request: %v", err) }
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("delete %v = %d, want 400", body, resp.StatusCode)

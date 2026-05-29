@@ -51,7 +51,8 @@ func TestWOLConfigAndWake(t *testing.T) {
 	if set.StatusCode != http.StatusNoContent {
 		t.Fatalf("set wol = %d, want 204", set.StatusCode)
 	}
-	get, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/"+created.ID+"/wol", token, nil))
+	get, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/nodes/"+created.ID+"/wol", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer get.Body.Close()
 	var cfg struct {
 		MAC       string `json:"mac"`

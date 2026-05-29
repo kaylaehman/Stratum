@@ -18,9 +18,10 @@ func TestSSOConfigCRUD(t *testing.T) {
 	var node struct {
 		ID string `json:"id"`
 	}
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", adminTok, map[string]any{
 		"name": "ssonode", "host": "10.0.0.6", "ssh_port": 22, "credentials": map[string]string{"method": "ssh_key"},
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	json.NewDecoder(resp.Body).Decode(&node)
 	resp.Body.Close()
 
@@ -41,11 +42,12 @@ func TestSSOConfigCRUD(t *testing.T) {
 		ID              string `json:"id"`
 		HasClientSecret bool   `json:"has_client_secret"`
 	}
-	resp2, _ := c.Do(authReq(t, http.MethodPut, srv.URL+"/api/sso", adminTok, map[string]any{
+	resp2, err := c.Do(authReq(t, http.MethodPut, srv.URL+"/api/sso", adminTok, map[string]any{
 		"node_id": node.ID, "container_name": "grafana", "enabled": true, "method": "oidc",
 		"provider_url": "https://auth.lan", "client_id": "stratum", "client_secret": "super-secret",
 		"allowed_groups": []string{"homelab"}, "session_duration_secs": 3600,
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("upsert = %d, want 200", resp2.StatusCode)
 	}
@@ -64,10 +66,11 @@ func TestSSOConfigCRUD(t *testing.T) {
 	}
 
 	// Second upsert WITHOUT a client_secret keeps the stored one.
-	resp3, _ := c.Do(authReq(t, http.MethodPut, srv.URL+"/api/sso", adminTok, map[string]any{
+	resp3, err := c.Do(authReq(t, http.MethodPut, srv.URL+"/api/sso", adminTok, map[string]any{
 		"node_id": node.ID, "container_name": "grafana", "enabled": false, "method": "oidc",
 		"provider_url": "https://auth.lan", "client_id": "stratum",
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	json.NewDecoder(resp3.Body).Decode(&raw)
 	resp3.Body.Close()
 	if raw["has_client_secret"] != true {
@@ -75,7 +78,8 @@ func TestSSOConfigCRUD(t *testing.T) {
 	}
 
 	// List shows exactly one config.
-	resp4, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/sso", adminTok, nil))
+	resp4, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/sso", adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var list struct {
 		Configs []map[string]any `json:"configs"`
 	}

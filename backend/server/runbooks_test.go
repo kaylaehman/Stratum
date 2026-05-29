@@ -28,13 +28,14 @@ func TestRunbooksCRUD(t *testing.T) {
 		Steps            []string `json:"steps"`
 		RequiresApproval bool     `json:"requires_approval"`
 	}
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/runbooks", adminTok, map[string]any{
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/runbooks", adminTok, map[string]any{
 		"name":               "Jellyfin permission reset",
 		"description":        "Fix /config bind-mount UID mismatch",
 		"trigger_conditions": []string{"jellyfin permission error in logs"},
 		"steps":              []string{"check bind mount UIDs", "compare container UID", "chown if mismatch"},
 		"requires_approval":  true,
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create = %d, want 201", resp.StatusCode)
 	}

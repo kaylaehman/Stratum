@@ -205,10 +205,11 @@ func TestNodeCreateRequiresHostKeyAndHidesSecret(t *testing.T) {
 	c := &http.Client{}
 
 	// SSH creds but no accepted_host_key -> 400 host_key_required.
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", token, map[string]any{
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes", token, map[string]any{
 		"name": "ssh-host", "host": "127.0.0.1", "ssh_port": 22,
 		"credentials": map[string]string{"method": "ssh_password", "ssh_user": "root", "ssh_password": "LEAKME-PASSWORD"},
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -222,10 +223,11 @@ func TestNodeCreateRequiresHostKeyAndHidesSecret(t *testing.T) {
 func TestProbePreviewInsecureDockerRequiresAck(t *testing.T) {
 	srv, token := newNodeTestServer(t)
 	c := &http.Client{}
-	resp, _ := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/probe-preview", token, map[string]any{
+	resp, err := c.Do(authReq(t, http.MethodPost, srv.URL+"/api/nodes/probe-preview", token, map[string]any{
 		"host": "10.0.0.5", "docker_endpoint": "tcp://10.0.0.5:2375",
 		"credentials": map[string]string{},
 	}))
+	if err != nil { t.Fatalf("request: %v", err) }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (insecure docker needs ack)", resp.StatusCode)

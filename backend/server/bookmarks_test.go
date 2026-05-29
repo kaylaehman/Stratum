@@ -11,7 +11,8 @@ func TestBookmarksLifecycle(t *testing.T) {
 	c := &http.Client{}
 
 	// Empty initially.
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/bookmarks", token, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/bookmarks", token, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var list struct {
 		Bookmarks []map[string]any `json:"bookmarks"`
 	}

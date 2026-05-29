@@ -61,6 +61,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           version: "1.70.0"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: lint
         working-directory: proto
         run: buf lint

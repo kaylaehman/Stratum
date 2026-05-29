@@ -26,7 +26,8 @@ func TestChatConfigAdminGate(t *testing.T) {
 	}
 
 	// GET reports has_token but never the token itself.
-	resp, _ := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/chat/config", adminTok, nil))
+	resp, err := c.Do(authReq(t, http.MethodGet, srv.URL+"/api/chat/config", adminTok, nil))
+	if err != nil { t.Fatalf("request: %v", err) }
 	var body map[string]any
 	json.NewDecoder(resp.Body).Decode(&body)
 	resp.Body.Close()
