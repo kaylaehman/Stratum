@@ -1550,6 +1550,8 @@ export interface SetDnsConfigRequest {
 
 // Skills library (container-troubleshooting skills browser)
 
+export type SkillSource = 'builtin' | 'custom'
+
 export interface SkillSummary {
   id: string
   name: string
@@ -1559,6 +1561,8 @@ export interface SkillSummary {
   image_patterns: string[]
   port_hints: number[]
   issue_count: number
+  source: SkillSource
+  editable: boolean
 }
 
 export interface SkillStep {
@@ -1586,9 +1590,32 @@ export interface SkillDetail {
   image_patterns: string[]
   port_hints: number[]
   common_issues: SkillIssue[]
+  source: SkillSource
+  editable: boolean
 }
 
 export interface SkillsResponse {
   skills: SkillSummary[]
+}
+
+export interface SkillRaw {
+  id: string
+  yaml: string
+  source: string
+  editable: boolean
+}
+
+export interface SkillGenerateRequest {
+  container_id?: string
+  image?: string
+  notes?: string
+}
+
+export interface SkillGenerateResult {
+  yaml: string
+  image: string
+  valid: boolean
+  parse_error: string
+  provider: string
 }
 
