@@ -228,6 +228,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/containers/{id}/stop", d.Handlers.StopContainer)
 			audited.Post("/containers/{id}/restart", d.Handlers.RestartContainer)
 			audited.Post("/nodes/{id}/vms/{vmid}/{action}", d.Handlers.VMPowerAction)
+			audited.Post("/nodes/{id}/power/{action}", d.Handlers.NodePowerAction)
 			audited.Post("/containers/bulk", d.Handlers.BulkContainers)
 			audited.Put("/nodes/{id}/wol", d.Handlers.SetWOL)
 			audited.Post("/nodes/{id}/wake", d.Handlers.WakeNode)

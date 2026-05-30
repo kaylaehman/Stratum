@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Play, Square, RotateCw, PowerOff, Loader, BookmarkPlus, BookmarkCheck } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Play, Square, RotateCw, PowerOff, Loader, BookmarkPlus, BookmarkCheck, AlertTriangle } from 'lucide-react'
 import { WakeOnLan } from '../components/nodes/WakeOnLan'
 import { SSHKeys } from '../components/nodes/SSHKeys'
 import { Scheduler } from '../components/nodes/Scheduler'
@@ -26,6 +26,8 @@ import { useTree } from '../lib/api/tree'
 import { useContainerLifecycle } from '../lib/api/containers'
 import { useVMPowerAction } from '../lib/api/vms'
 import type { VMAction } from '../lib/api/vms'
+import { useNodePowerAction } from '../lib/api/nodepower'
+import type { NodePowerAction } from '../types/api'
 import { useAddBookmark } from '../lib/api/bookmarks'
 import { useNodeGuestLinks } from '../hooks/useNodeGuestLinks'
 import { useCan } from '../lib/roles'
@@ -230,6 +232,229 @@ function VMLifecycleControls({ nodeId, vmid, status }: VMLifecycleControlsProps)
         </span>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// NodePowerControls — admin-only Proxmox host shutdown / reboot
+// ---------------------------------------------------------------------------
+
+interface NodePowerConfirmModal {
+  action: NodePowerAction
+  nodeName: string
+  onConfirm: () => void
+  onCancel: () => void
+  isPending: boolean
+}
+
+function NodePowerConfirmModal({ action, nodeName, onConfirm, onCancel, isPending }: NodePowerConfirmModal) {
+  const [typed, setTyped] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const confirmed = typed === nodeName
+
+  const isShutdown = action === 'shutdown'
+  const title = isShutdown ? 'Shut down host' : 'Reboot host'
+  const warning = isShutdown
+    ? 'This will power off the physical Proxmox host. Every VM, LXC container, and service running on it will go offline immediately.'
+    : 'This will reboot the physical Proxmox host. Every VM, LXC container, and service running on it will go offline until the host completes its reboot.'
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--status-error)',
+          borderRadius: '4px',
+          padding: '24px',
+          maxWidth: '440px',
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={18} style={{ color: 'var(--status-error)', flexShrink: 0 }} />
+          <span
+            className="font-mono text-sm font-semibold"
+            style={{ color: 'var(--status-error)' }}
+          >
+            {title}
+          </span>
+        </div>
+
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          {warning}
+        </p>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Type the node name <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{nodeName}</span> to confirm:
+          </label>
+          <input
+            ref={inputRef}
+            type="text"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && confirmed) onConfirm() }}
+            placeholder={nodeName}
+            className="font-mono text-xs px-2.5 py-1.5"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: `1px solid ${confirmed ? 'var(--status-error)' : 'var(--border-default)'}`,
+              color: 'var(--text-primary)',
+              borderRadius: '3px',
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            className="font-mono text-xs px-3 py-1.5"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-muted)',
+              borderRadius: '3px',
+              cursor: isPending ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={!confirmed || isPending}
+            className="font-mono text-xs px-3 py-1.5 flex items-center gap-1.5"
+            style={{
+              background: confirmed ? 'rgba(232,64,64,0.15)' : 'var(--bg-elevated)',
+              border: `1px solid ${confirmed ? 'var(--status-error)' : 'var(--border-subtle)'}`,
+              color: confirmed ? 'var(--status-error)' : 'var(--text-muted)',
+              borderRadius: '3px',
+              cursor: !confirmed || isPending ? 'not-allowed' : 'pointer',
+              opacity: !confirmed ? 0.5 : 1,
+              transition: 'all 0.15s',
+            }}
+          >
+            {isPending ? <Loader size={12} className="animate-spin" /> : null}
+            {title}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface NodePowerControlsProps {
+  nodeId: string
+  nodeName: string
+}
+
+function NodePowerControls({ nodeId, nodeName }: NodePowerControlsProps) {
+  const { isAdmin } = useCan()
+  const { mutate, isPending, isSuccess, error, reset } = useNodePowerAction()
+  const [pendingAction, setPendingAction] = useState<NodePowerAction | null>(null)
+
+  // Admin-only: non-admins see nothing.
+  if (!isAdmin) return null
+
+  function handleConfirm() {
+    if (!pendingAction) return
+    mutate(
+      { nodeId, action: pendingAction },
+      { onSettled: () => setPendingAction(null) },
+    )
+  }
+
+  const errorMsg = error
+    ? (error as { body?: { error?: string } }).body?.error === 'proxmox_unreachable'
+      ? 'Action failed — Proxmox unreachable'
+      : (error as { body?: { error?: string } }).body?.error === 'proxmox_node_name_unknown'
+        ? 'Action failed — could not resolve Proxmox node name'
+        : 'Action failed'
+    : null
+
+  return (
+    <>
+      <div className="flex flex-col gap-1.5 mt-2 pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Host power (admin)</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => { reset(); setPendingAction('reboot') }}
+            className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: isPending ? 'var(--text-muted)' : 'var(--text-secondary)',
+              borderRadius: '3px',
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              opacity: isPending ? 0.5 : 1,
+            }}
+          >
+            <RotateCw size={12} />
+            Reboot host
+          </button>
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => { reset(); setPendingAction('shutdown') }}
+            className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: isPending ? 'var(--text-muted)' : 'var(--text-secondary)',
+              borderRadius: '3px',
+              cursor: isPending ? 'not-allowed' : 'pointer',
+              opacity: isPending ? 0.5 : 1,
+            }}
+          >
+            <PowerOff size={12} />
+            Shut down host
+          </button>
+        </div>
+        {isSuccess && (
+          <span className="font-mono text-xs" style={{ color: 'var(--status-ok)' }}>
+            Task started — host is responding to the command.
+          </span>
+        )}
+        {errorMsg && (
+          <span className="font-mono text-xs" style={{ color: 'var(--status-error)' }}>
+            {errorMsg}
+          </span>
+        )}
+      </div>
+
+      {pendingAction && (
+        <NodePowerConfirmModal
+          action={pendingAction}
+          nodeName={nodeName}
+          onConfirm={handleConfirm}
+          onCancel={() => setPendingAction(null)}
+          isPending={isPending}
+        />
+      )}
+    </>
   )
 }
 
@@ -564,6 +789,9 @@ function DetailPane() {
             <Row label="Status" value={node.status} mono />
             <Row label="OS type" value={node.status} mono />
             <HostPanelsInCard nodeId={selection.nodeId} />
+            {node.type === 'proxmox' && (
+              <NodePowerControls nodeId={node.id} nodeName={node.name} />
+            )}
           </div>
         )}
 

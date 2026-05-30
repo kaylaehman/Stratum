@@ -389,6 +389,43 @@ func (c *Client) LxcList(ctx context.Context, node string) ([]Guest, error) {
 	return guestsFromResponse(resp.Data, "lxc")
 }
 
+// NodePowerAction sends a power-state change to the Proxmox host node itself.
+// action must be "reboot" or "shutdown". The Proxmox API path is:
+//
+//	POST /api2/json/nodes/{pveNode}/status
+//
+// with the form body parameter `command=<action>`.
+// On success it returns the Proxmox task UPID string.
+func (c *Client) NodePowerAction(ctx context.Context, pveNode, action string) (string, error) {
+	url := c.endpoint + "/api2/json/nodes/" + pveNode + "/status"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url,
+		strings.NewReader("command="+action))
+	if err != nil {
+		return "", fmt.Errorf("proxmox: build node power request: %w", err)
+	}
+	req.Header.Set("Authorization", "PVEAPIToken="+c.tokenID+"="+c.secret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("proxmox: node power request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("proxmox: node power action returned status %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Data string `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("proxmox: decode node power action response: %w", err)
+	}
+	return body.Data, nil
+}
+
 // GuestPowerAction sends a power-state change to a Proxmox QEMU VM or LXC
 // container. kind must be "qemu" or "lxc"; action must be one of
 // "start" | "stop" | "shutdown" | "reboot". The Proxmox API path is:

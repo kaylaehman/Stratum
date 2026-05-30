@@ -44,6 +44,9 @@ const (
 	ActionVMShutdown = "vm.shutdown"
 	ActionVMReboot   = "vm.reboot"
 
+	ActionNodeShutdown = "node.shutdown"
+	ActionNodeReboot   = "node.reboot"
+
 	ActionWebhookCreate = "webhook.create"
 	ActionWebhookUpdate = "webhook.update"
 	ActionWebhookDelete = "webhook.delete"
@@ -146,6 +149,8 @@ var actionCatalog = []ActionInfo{
 	{ActionNodeProbe, "Host re-probed", "node", TargetNode},
 	{ActionNodeWake, "Wake-on-LAN sent", "node", TargetNode},
 	{ActionNodeWOLSet, "Wake-on-LAN configured", "node", TargetNode},
+	{ActionNodeShutdown, "Proxmox host shutdown", "node", TargetNode},
+	{ActionNodeReboot, "Proxmox host rebooted", "node", TargetNode},
 
 	{ActionFSWrite, "File written", "fs", TargetFile},
 	{ActionFSUpload, "File uploaded", "fs", TargetFile},
