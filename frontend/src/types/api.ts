@@ -854,9 +854,30 @@ export interface Webhook {
   enabled: boolean
 }
 
+/** One optional configuration field for a trigger (e.g. threshold, duration). */
+export interface TriggerConfigField {
+  key: string
+  label: string
+  type: 'number' | 'string' | 'select'
+  default: string
+  options?: string[]
+}
+
+/** Full metadata for one registered trigger (from the server-side registry). */
+export interface TriggerDef {
+  key: string
+  label: string
+  description: string
+  config_schema?: TriggerConfigField[]
+  requires_capability?: string
+}
+
 export interface WebhooksResponse {
   webhooks: Webhook[]
+  /** Flat list of trigger keys (backwards-compat). */
   available_triggers: string[]
+  /** Full trigger definitions including label, description, config schema. */
+  trigger_defs: TriggerDef[]
 }
 
 export interface WebhookRequest {

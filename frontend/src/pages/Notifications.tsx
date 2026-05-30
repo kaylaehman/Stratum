@@ -19,22 +19,19 @@ import {
   useDeleteWebhook,
   useTestWebhook,
 } from '../lib/api/webhooks'
-import type { Webhook, WebhookProvider, WebhookRequest } from '../types/api'
+import type { Webhook, WebhookProvider, WebhookRequest, TriggerDef } from '../types/api'
 
-// ---- Trigger label map ----
+// ---- Trigger helpers ----
 
-const TRIGGER_LABELS: Record<string, string> = {
-  'port.new': 'New exposed port',
-  'container.crash': 'Container crash',
-  'cve.critical': 'Critical CVE found',
-  'sshkey.added': 'SSH key added',
-  'file.change': 'File change detected',
-  'agent.disconnect': 'Agent disconnected',
-  'cpu.threshold': 'CPU threshold exceeded',
+/** Build a label/description lookup from TriggerDef array (server-driven). */
+function buildTriggerIndex(defs: TriggerDef[]): Map<string, TriggerDef> {
+  const m = new Map<string, TriggerDef>()
+  for (const d of defs) m.set(d.key, d)
+  return m
 }
 
-function triggerLabel(key: string): string {
-  return TRIGGER_LABELS[key] ?? key
+function triggerLabel(key: string, index: Map<string, TriggerDef>): string {
+  return index.get(key)?.label ?? key
 }
 
 // ---- Provider badge ----
@@ -217,7 +214,7 @@ interface FormState {
 
 interface WebhookFormProps {
   initial: FormState
-  availableTriggers: string[]
+  triggerDefs: TriggerDef[]
   onSubmit: (data: FormState) => void
   onClose: () => void
   isPending: boolean
@@ -227,7 +224,7 @@ interface WebhookFormProps {
 
 function WebhookForm({
   initial,
-  availableTriggers,
+  triggerDefs,
   onSubmit,
   onClose,
   isPending,
@@ -380,7 +377,7 @@ function WebhookForm({
             </div>
           </div>
 
-          {/* Triggers */}
+          {/* Triggers — rendered from server registry (adds automatically as new triggers register) */}
           <div className="flex flex-col gap-2">
             <span
               className="text-xs uppercase tracking-wider font-mono"
@@ -388,24 +385,88 @@ function WebhookForm({
             >
               Triggers
             </span>
-            <div className="flex flex-col gap-1">
-              {availableTriggers.map((key) => (
-                <label
-                  key={key}
-                  className="flex items-center gap-2 cursor-pointer"
-                  style={{ fontSize: '12px', color: 'var(--text-secondary)' }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.triggers.includes(key)}
-                    onChange={() => toggleTrigger(key)}
-                    style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
-                  />
-                  <span className="font-mono" style={{ color: 'var(--text-muted)', minWidth: '140px' }}>
-                    {key}
-                  </span>
-                  <span>{triggerLabel(key)}</span>
-                </label>
+            <div className="flex flex-col gap-2">
+              {triggerDefs.map((def) => (
+                <div key={def.key}>
+                  <label
+                    className="flex items-start gap-2 cursor-pointer"
+                    style={{ fontSize: '12px', color: 'var(--text-secondary)' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.triggers.includes(def.key)}
+                      onChange={() => toggleTrigger(def.key)}
+                      style={{ accentColor: 'var(--accent)', cursor: 'pointer', marginTop: '2px', flexShrink: 0 }}
+                    />
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                          {def.key}
+                        </span>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{def.label}</span>
+                        {def.requires_capability && (
+                          <span
+                            className="font-mono"
+                            style={{
+                              fontSize: '10px',
+                              padding: '1px 5px',
+                              background: 'var(--bg-surface)',
+                              border: '1px solid var(--border-subtle)',
+                              color: 'var(--text-muted)',
+                              borderRadius: '3px',
+                            }}
+                          >
+                            requires: {def.requires_capability}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{def.description}</span>
+                      {/* Config schema inputs — only shown when trigger is enabled */}
+                      {form.triggers.includes(def.key) && def.config_schema && def.config_schema.length > 0 && (
+                        <div className="flex flex-col gap-1 mt-1 pl-1" style={{ borderLeft: '2px solid var(--border-subtle)' }}>
+                          {def.config_schema.map((field) => (
+                            <div key={field.key} className="flex items-center gap-2">
+                              <span style={{ color: 'var(--text-muted)', fontSize: '11px', minWidth: '120px' }}>
+                                {field.label}
+                              </span>
+                              {field.type === 'select' ? (
+                                <select
+                                  defaultValue={field.default}
+                                  style={{
+                                    background: 'var(--bg-surface)',
+                                    border: '1px solid var(--border-default)',
+                                    borderRadius: '3px',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '11px',
+                                    padding: '2px 6px',
+                                  }}
+                                >
+                                  {(field.options ?? []).map((opt) => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type={field.type === 'number' ? 'number' : 'text'}
+                                  defaultValue={field.default}
+                                  style={{
+                                    background: 'var(--bg-surface)',
+                                    border: '1px solid var(--border-default)',
+                                    borderRadius: '3px',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '11px',
+                                    padding: '2px 6px',
+                                    width: '80px',
+                                  }}
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                </div>
               ))}
             </div>
           </div>
@@ -500,6 +561,7 @@ function TestBadge({ status }: TestBadgeProps) {
 
 interface WebhookRowProps {
   webhook: Webhook
+  triggerIndex: Map<string, TriggerDef>
   onEdit: () => void
   onDelete: () => void
   testStatus: TestStatus
@@ -510,6 +572,7 @@ interface WebhookRowProps {
 
 function WebhookRow({
   webhook,
+  triggerIndex,
   onEdit,
   onDelete,
   testStatus,
@@ -594,7 +657,7 @@ function WebhookRow({
       {webhook.triggers.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pl-10">
           {webhook.triggers.map((t) => (
-            <TriggerChip key={t} label={triggerLabel(t)} />
+            <TriggerChip key={t} label={triggerLabel(t, triggerIndex)} />
           ))}
         </div>
       )}
@@ -625,6 +688,10 @@ export default function Notifications() {
   const [deleteTarget, setDeleteTarget] = useState<Webhook | null>(null)
   const [testStatuses, setTestStatuses] = useState<Record<string, TestStatus>>({})
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
+
+  // Build a lookup index from the server-driven trigger registry.
+  const triggerDefs = data?.trigger_defs ?? []
+  const triggerIndex = buildTriggerIndex(triggerDefs)
 
   function setTestStatus(id: string, s: TestStatus) {
     setTestStatuses((prev) => ({ ...prev, [id]: s }))
@@ -790,6 +857,7 @@ export default function Notifications() {
               <WebhookRow
                 key={wh.id}
                 webhook={wh}
+                triggerIndex={triggerIndex}
                 testStatus={testStatuses[wh.id] ?? 'idle'}
                 onTest={() => handleTest(wh)}
                 onEdit={() => setEditTarget(wh)}
@@ -807,7 +875,7 @@ export default function Notifications() {
         <WebhookForm
           title="Add Webhook"
           initial={EMPTY_FORM}
-          availableTriggers={data?.available_triggers ?? []}
+          triggerDefs={triggerDefs}
           isPending={creating}
           serverError={serverErrMsg(createErr)}
           onClose={() => setShowCreate(false)}
@@ -830,7 +898,7 @@ export default function Notifications() {
             triggers: editTarget.triggers,
             enabled: editTarget.enabled,
           }}
-          availableTriggers={data?.available_triggers ?? []}
+          triggerDefs={triggerDefs}
           isPending={updating}
           serverError={serverErrMsg(updateErr)}
           onClose={() => setEditTarget(null)}

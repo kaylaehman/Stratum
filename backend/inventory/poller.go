@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"sync"
@@ -12,6 +13,16 @@ import (
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
+)
+
+// NotifyFunc is called when a container OOM/health event is detected.
+// Signature matches the SetNotify pattern used across services.
+type NotifyFunc func(ctx context.Context, trigger, title, text string)
+
+// trigger key constants — kept local to avoid importing the webhooks package.
+const (
+	triggerContainerOOM       = "container.oom"
+	triggerContainerUnhealthy = "container.unhealthy"
 )
 
 // DefaultInterval is the base poll interval per node.
@@ -43,6 +54,7 @@ type Poller struct {
 	logger   *slog.Logger
 	interval time.Duration
 	reach    ReachabilityFunc
+	notify   NotifyFunc // may be nil; OOM/health notifications are best-effort
 
 	// enumContainers enumerates a node's containers from a Docker client. It is a
 	// field (defaulting to enumDocker) only so tests can inject a fake lister and
@@ -56,6 +68,10 @@ type Poller struct {
 // SetReachability installs the SSH/probe-based reachability fallback. Without
 // it, a node is reachable only if its Docker or Proxmox enumeration succeeds.
 func (p *Poller) SetReachability(f ReachabilityFunc) { p.reach = f }
+
+// SetNotify wires a notification callback fired on container OOM-kill or
+// unhealthy-healthcheck transitions. If nil, those notifications are skipped.
+func (p *Poller) SetNotify(fn NotifyFunc) { p.notify = fn }
 
 // NewPoller constructs a Poller.
 func NewPoller(store db.Store, conn *nodeconn.Manager, h *hub.Hub, logger *slog.Logger) *Poller {
@@ -74,12 +90,38 @@ func NewPoller(store db.Store, conn *nodeconn.Manager, h *hub.Hub, logger *slog.
 
 // defaultEnumContainers enumerates and reconciles a node's containers via the
 // real Docker client. It is the production value of Poller.enumContainers.
+// It also fires OOM-kill and unhealthy-healthcheck notifications via p.notify.
 func (p *Poller) defaultEnumContainers(ctx context.Context, cl containerLister, nodeID string) ([]Delta, error) {
-	cs, err := enumDocker(ctx, cl, nodeID)
-	if err != nil {
-		return nil, err
+	infos, rawErr := enumDockerRaw(ctx, cl)
+	if rawErr != nil {
+		return nil, rawErr
 	}
+	p.checkContainerAlerts(ctx, nodeID, infos)
+	cs := rawToDBContainers(infos, nodeID)
 	return reconcileContainers(ctx, p.store, nodeID, cs)
+}
+
+// checkContainerAlerts fires OOM and unhealthy notifications for containers
+// that are in a problematic state. The per-(webhook,trigger) rate window in the
+// dispatcher prevents alert floods on persistent failures.
+func (p *Poller) checkContainerAlerts(ctx context.Context, nodeID string, infos []containerInfo) {
+	if p.notify == nil {
+		return
+	}
+	for _, c := range infos {
+		if c.State == "dead" {
+			p.notify(ctx, triggerContainerOOM,
+				"Container OOM-killed",
+				fmt.Sprintf("Container %q on node %s was OOM-killed (state: dead)", c.Name, nodeID),
+			)
+		}
+		if c.HealthStatus == "unhealthy" {
+			p.notify(ctx, triggerContainerUnhealthy,
+				"Container healthcheck unhealthy",
+				fmt.Sprintf("Container %q on node %s healthcheck is unhealthy", c.Name, nodeID),
+			)
+		}
+	}
 }
 
 // CurrentSeq returns the latest broadcast seq for a node (for GET /api/tree).

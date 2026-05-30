@@ -32,6 +32,10 @@ type ContainerInfo struct {
 	ImageID        string // local content-addressable image ID (sha256:...), NOT a repo digest
 	State          string // "running" | "exited" | "paused" | "restarting" | "dead" | "created"
 	ComposeProject string // label "com.docker.compose.project" (or "")
+
+	// HealthStatus is "healthy" | "unhealthy" | "starting" | "" (none/unknown).
+	// Parsed from the human-readable Status field in the Docker list summary.
+	HealthStatus string
 }
 
 // ContainerEvent is a lifecycle event for one container.
@@ -55,6 +59,23 @@ func mapSummary(s container.Summary) ContainerInfo {
 		ImageID:        s.ImageID,
 		State:          s.State,
 		ComposeProject: s.Labels["com.docker.compose.project"],
+		HealthStatus:   parseHealthStatus(s.Status),
+	}
+}
+
+// parseHealthStatus extracts the health status from the Docker container
+// summary Status string (e.g. "Up 2 hours (unhealthy)" → "unhealthy").
+// Returns "" when no health information is present.
+func parseHealthStatus(status string) string {
+	switch {
+	case strings.Contains(status, "(unhealthy)"):
+		return "unhealthy"
+	case strings.Contains(status, "(healthy)"):
+		return "healthy"
+	case strings.Contains(status, "(health: starting)"):
+		return "starting"
+	default:
+		return ""
 	}
 }
 

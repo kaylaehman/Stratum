@@ -2,6 +2,11 @@
 // (Feature 26). It formats a provider-appropriate JSON payload, rate-limits per
 // (webhook, trigger) pair, and fans out to every enabled webhook subscribed to
 // a trigger. Event sources call Notify; the settings UI calls Test.
+//
+// Trigger definitions live in triggers.go and registry.go. External packages
+// extend the trigger set by calling Register (see registry.go for the API).
+// The ListWebhooks handler reads Registered() so every registered trigger
+// surfaces in the settings UI automatically.
 package webhooks
 
 import (
@@ -47,23 +52,6 @@ func ValidateURL(provider, rawURL string) error {
 		}
 	}
 	return ErrInvalidURL
-}
-
-// Trigger keys. Event sources reference these; webhooks subscribe to them.
-const (
-	TriggerPortNew         = "port.new"
-	TriggerContainerCrash  = "container.crash"
-	TriggerCVECritical     = "cve.critical"
-	TriggerSSHKeyAdded     = "sshkey.added"
-	TriggerFileChange      = "file.change"
-	TriggerAgentDisconnect = "agent.disconnect"
-	TriggerCPUThreshold    = "cpu.threshold"
-)
-
-// AllTriggers is the catalog the settings UI offers.
-var AllTriggers = []string{
-	TriggerPortNew, TriggerContainerCrash, TriggerCVECritical, TriggerSSHKeyAdded,
-	TriggerFileChange, TriggerAgentDisconnect, TriggerCPUThreshold,
 }
 
 // rateWindow caps each (webhook,trigger) to one message per window.

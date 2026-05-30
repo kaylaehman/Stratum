@@ -43,7 +43,11 @@ func (h *Handlers) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	for i, c := range rows {
 		out[i] = toWebhookView(c)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"webhooks": out, "available_triggers": webhooks.AllTriggers})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"webhooks":           out,
+		"available_triggers": webhooks.AllTriggerKeys(),
+		"trigger_defs":       webhooks.Registered(),
+	})
 }
 
 type webhookBody struct {
