@@ -103,6 +103,7 @@ export interface NodeView {
   status: NodeStatus
   last_error?: string
   last_seen?: string
+  docker_endpoint?: string
   created_at: string
   updated_at: string
 }
@@ -136,6 +137,22 @@ export interface CreateNodeRequest {
 
 export interface RenameNodeRequest {
   name: string
+}
+
+/**
+ * PUT /api/nodes/{id} — partial node update. All fields optional; only the
+ * provided fields are changed. Used for both rename (name) and Docker config
+ * (docker_endpoint + docker TLS creds). Sending docker_endpoint as an empty
+ * string clears the configured endpoint.
+ */
+export interface UpdateNodeRequest {
+  name?: string
+  docker_endpoint?: string
+  credentials?: Pick<
+    NodeCredentials,
+    'docker_tls_ca' | 'docker_tls_cert' | 'docker_tls_key'
+  >
+  ack_insecure_docker?: boolean
 }
 
 export interface ProbePreviewRequest {

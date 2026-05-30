@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Server, Box, Terminal, Plus, RefreshCw, Pencil, Trash2, Check, X, Loader } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { AddNodeWizard } from '../components/nodes/AddNodeWizard'
+import { EditDockerModal } from '../components/nodes/EditDockerModal'
 import { useNodes, useDeleteNode, useRenameNode, useReprobeNode } from '../lib/api/nodes'
 import { ApiError } from '../lib/api'
 import type { NodeView, NodeType, NodeStatus, Capabilities } from '../types/api'
@@ -190,7 +191,7 @@ function DeleteConfirm({ nodeId, onDone }: { nodeId: string; onDone: () => void 
 
 // ---- row actions ----
 
-function RowActions({ node }: { node: NodeView }) {
+function RowActions({ node, onEditDocker }: { node: NodeView; onEditDocker: () => void }) {
   const [mode, setMode] = useState<'idle' | 'rename' | 'delete'>('idle')
   const reprobe = useReprobeNode()
 
@@ -209,6 +210,9 @@ function RowActions({ node }: { node: NodeView }) {
         onClick={() => void reprobe.mutateAsync(node.id)}
       >
         <RefreshCw size={12} />
+      </ActionButton>
+      <ActionButton label="Docker config" onClick={onEditDocker}>
+        <Box size={12} />
       </ActionButton>
       <ActionButton label="Rename" onClick={() => setMode('rename')}>
         <Pencil size={12} />
@@ -269,7 +273,7 @@ function formatLastSeen(ts?: string): string {
 
 // ---- node row ----
 
-function NodeRow({ node }: { node: NodeView }) {
+function NodeRow({ node, onEditDocker }: { node: NodeView; onEditDocker: (node: NodeView) => void }) {
   return (
     <tr
       style={{
@@ -331,7 +335,7 @@ function NodeRow({ node }: { node: NodeView }) {
 
       {/* Actions */}
       <td className="px-3 py-2 align-middle">
-        <RowActions node={node} />
+        <RowActions node={node} onEditDocker={() => onEditDocker(node)} />
       </td>
     </tr>
   )
@@ -342,6 +346,7 @@ function NodeRow({ node }: { node: NodeView }) {
 export default function Nodes() {
   const { data: nodes, isLoading, isError, error } = useNodes()
   const [showWizard, setShowWizard] = useState(false)
+  const [editDockerNode, setEditDockerNode] = useState<NodeView | null>(null)
 
   return (
     <AppShell>
@@ -470,7 +475,7 @@ export default function Nodes() {
               </thead>
               <tbody>
                 {nodes.map((node) => (
-                  <NodeRow key={node.id} node={node} />
+                  <NodeRow key={node.id} node={node} onEditDocker={setEditDockerNode} />
                 ))}
               </tbody>
             </table>
@@ -479,6 +484,9 @@ export default function Nodes() {
       </div>
 
       {showWizard && <AddNodeWizard onClose={() => setShowWizard(false)} />}
+      {editDockerNode && (
+        <EditDockerModal node={editDockerNode} onClose={() => setEditDockerNode(null)} />
+      )}
     </AppShell>
   )
 }

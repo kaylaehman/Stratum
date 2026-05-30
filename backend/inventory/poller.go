@@ -44,6 +44,11 @@ type Poller struct {
 	interval time.Duration
 	reach    ReachabilityFunc
 
+	// enumContainers enumerates a node's containers from a Docker client. It is a
+	// field (defaulting to enumDocker) only so tests can inject a fake lister and
+	// prove Docker enumeration runs independent of the SSH/reachability result.
+	enumContainers func(ctx context.Context, cl containerLister, nodeID string) ([]Delta, error)
+
 	mu       sync.Mutex
 	inflight map[string]bool
 }
@@ -54,7 +59,7 @@ func (p *Poller) SetReachability(f ReachabilityFunc) { p.reach = f }
 
 // NewPoller constructs a Poller.
 func NewPoller(store db.Store, conn *nodeconn.Manager, h *hub.Hub, logger *slog.Logger) *Poller {
-	return &Poller{
+	p := &Poller{
 		store:    store,
 		conn:     conn,
 		hub:      h,
@@ -63,6 +68,18 @@ func NewPoller(store db.Store, conn *nodeconn.Manager, h *hub.Hub, logger *slog.
 		interval: DefaultInterval,
 		inflight: map[string]bool{},
 	}
+	p.enumContainers = p.defaultEnumContainers
+	return p
+}
+
+// defaultEnumContainers enumerates and reconciles a node's containers via the
+// real Docker client. It is the production value of Poller.enumContainers.
+func (p *Poller) defaultEnumContainers(ctx context.Context, cl containerLister, nodeID string) ([]Delta, error) {
+	cs, err := enumDocker(ctx, cl, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	return reconcileContainers(ctx, p.store, nodeID, cs)
 }
 
 // CurrentSeq returns the latest broadcast seq for a node (for GET /api/tree).
@@ -119,12 +136,19 @@ func (p *Poller) pollNode(ctx context.Context, n db.Node) {
 	var deltas []Delta
 	reachable := false
 
+	// Docker enumeration runs purely off the Docker endpoint and is INDEPENDENT
+	// of the SSH probe: a node whose SSH dial fails but whose Docker endpoint is
+	// healthy still enumerates containers here and is marked reachable below.
+	enum := p.enumContainers
+	if enum == nil {
+		enum = p.defaultEnumContainers
+	}
 	if caps.Docker && clients.Docker != nil {
-		if cs, err := enumDocker(ctx, clients.Docker, n.ID); err == nil {
+		if d, err := enum(ctx, clients.Docker, n.ID); err == nil {
 			reachable = true
-			if d, err := reconcileContainers(ctx, p.store, n.ID, cs); err == nil {
-				deltas = append(deltas, d...)
-			}
+			deltas = append(deltas, d...)
+		} else {
+			p.logger.Warn("inventory: docker enumeration failed", "node", n.ID, "error", err)
 		}
 	}
 	if caps.Proxmox && env.ProxmoxAuthStatus == "confirmed" && clients.Proxmox != nil {

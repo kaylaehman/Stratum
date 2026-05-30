@@ -107,8 +107,15 @@ func enumProxmoxAllMembers(ctx context.Context, cl *proxmox.Client, nodeID strin
 	return out, nil
 }
 
+// containerLister is the slice of the Docker client the enumerator depends on.
+// Declaring it here (rather than taking *docker.Client) lets the poller inject a
+// fake in tests — proving Docker enumeration runs independent of the SSH result.
+type containerLister interface {
+	ContainerList(ctx context.Context) ([]docker.ContainerInfo, error)
+}
+
 // enumDocker enumerates all containers (running and stopped) on a node.
-func enumDocker(ctx context.Context, cl *docker.Client, nodeID string) ([]db.Container, error) {
+func enumDocker(ctx context.Context, cl containerLister, nodeID string) ([]db.Container, error) {
 	cs, err := cl.ContainerList(ctx)
 	if err != nil {
 		return nil, err
