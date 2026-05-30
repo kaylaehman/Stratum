@@ -188,7 +188,7 @@ export function StepUpModal() {
             <p
               style={{
                 marginTop: '8px',
-                fontSize: '11px',
+                fontSize: '12px',
                 fontFamily: 'var(--font-mono, monospace)',
                 color: 'var(--status-error)',
               }}
@@ -215,7 +215,7 @@ export function StepUpModal() {
                 border: '1px solid var(--border-default)',
                 borderRadius: '3px',
                 padding: '6px 14px',
-                fontSize: '11px',
+                fontSize: '12px',
                 fontFamily: 'var(--font-mono, monospace)',
                 color: 'var(--text-secondary)',
                 cursor: loading ? 'not-allowed' : 'pointer',
@@ -235,7 +235,7 @@ export function StepUpModal() {
                 border: 'none',
                 borderRadius: '3px',
                 padding: '6px 14px',
-                fontSize: '11px',
+                fontSize: '12px',
                 fontFamily: 'var(--font-mono, monospace)',
                 color: '#fff',
                 cursor:

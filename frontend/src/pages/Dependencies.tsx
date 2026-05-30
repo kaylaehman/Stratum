@@ -91,7 +91,7 @@ function Legend() {
     >
       <div className="flex items-center gap-1.5 w-full mb-0.5">
         <Info size={10} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-        <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+        <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
           Legend
         </span>
       </div>
@@ -107,7 +107,7 @@ function Legend() {
               flexShrink: 0,
             }}
           />
-          <span className="text-xs" style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>
+          <span className="text-xs" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
             {item.label}
           </span>
         </div>
@@ -122,7 +122,7 @@ function Legend() {
               strokeDasharray={item.dash ? '4 3' : undefined}
             />
           </svg>
-          <span className="text-xs" style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>
+          <span className="text-xs" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
             {item.label}
           </span>
         </div>
@@ -163,7 +163,7 @@ function DetailPanel({ node, allNodes, edges }: DetailPanelProps) {
           className="font-mono uppercase text-xs"
           style={{
             color: 'var(--text-muted)',
-            fontSize: '9px',
+            fontSize: '12px',
             letterSpacing: '0.06em',
             background: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
@@ -192,7 +192,7 @@ function DetailPanel({ node, allNodes, edges }: DetailPanelProps) {
           )}
           {netIds.length > 0 && (
             <div>
-              <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+              <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                 Networks ({netIds.length})
               </div>
               {connectedLabels(netIds).map((l) => (
@@ -204,7 +204,7 @@ function DetailPanel({ node, allNodes, edges }: DetailPanelProps) {
           )}
           {volIds.length > 0 && (
             <div>
-              <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+              <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                 Volumes ({volIds.length})
               </div>
               {connectedLabels(volIds).map((l) => (
@@ -228,7 +228,7 @@ function DetailPanel({ node, allNodes, edges }: DetailPanelProps) {
           {node.driver && <Row label="Driver" value={node.driver} />}
           {ctrIds.length > 0 && (
             <div>
-              <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+              <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                 Containers ({ctrIds.length})
               </div>
               {connectedLabels(ctrIds).map((l) => (
@@ -251,7 +251,7 @@ function DetailPanel({ node, allNodes, edges }: DetailPanelProps) {
       <div className="px-2.5 py-2" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {ctrIds.length > 0 && (
           <div>
-            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
               Containers ({ctrIds.length})
             </div>
             {connectedLabels(ctrIds).map((l) => (
@@ -272,7 +272,7 @@ function DetailPanel({ node, allNodes, edges }: DetailPanelProps) {
 function Row({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+      <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
         {label}
       </span>
       <span className="font-mono text-xs" style={{ color: accent ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -506,7 +506,7 @@ export default function Dependencies() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+      <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
         {label}
       </div>
       <div className="font-mono text-sm" style={{ color: 'var(--text-primary)' }}>

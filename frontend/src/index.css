@@ -27,7 +27,7 @@
   --status-info: #4a9eff;
   --status-muted: #4a5268;
 
-  font-size: 13px;
+  font-size: 16px;
 }
 
 html,
@@ -35,7 +35,7 @@ body {
   background-color: var(--bg-base);
   color: var(--text-primary);
   font-family: 'DM Sans', sans-serif;
-  font-size: 13px;
+  font-size: 1rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

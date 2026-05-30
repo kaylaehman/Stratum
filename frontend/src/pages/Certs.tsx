@@ -116,7 +116,7 @@ interface DetailPanelProps {
 function DetailPanel({ cert }: DetailPanelProps) {
   const cellMuted: React.CSSProperties = {
     color: 'var(--text-muted)',
-    fontSize: '11px',
+    fontSize: '12px',
     paddingRight: '12px',
     paddingBottom: '4px',
     whiteSpace: 'nowrap',
@@ -124,7 +124,7 @@ function DetailPanel({ cert }: DetailPanelProps) {
   }
   const cellVal: React.CSSProperties = {
     color: 'var(--text-secondary)',
-    fontSize: '11px',
+    fontSize: '12px',
     fontFamily: 'monospace',
     paddingBottom: '4px',
     wordBreak: 'break-all',
@@ -178,7 +178,7 @@ function DetailPanel({ cert }: DetailPanelProps) {
                         border: '1px solid var(--border-subtle)',
                         borderRadius: '3px',
                         color: 'var(--text-secondary)',
-                        fontSize: '10px',
+                        fontSize: '12px',
                       }}
                     >
                       {san}

@@ -269,7 +269,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           {isFetching && (
             <span
               style={{
-                fontSize: '10px',
+                fontSize: '12px',
                 color: 'var(--text-muted)',
                 fontFamily: 'monospace',
                 letterSpacing: '0.05em',
@@ -280,7 +280,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           )}
           <span
             style={{
-              fontSize: '10px',
+              fontSize: '12px',
               color: 'var(--text-muted)',
               fontFamily: 'monospace',
               display: 'flex',
@@ -350,7 +350,7 @@ function GroupLabel({ label }: { label: string }) {
     <div
       style={{
         padding: '6px 14px 3px',
-        fontSize: '10px',
+        fontSize: '12px',
         fontFamily: 'monospace',
         letterSpacing: '0.08em',
         color: 'var(--text-muted)',
@@ -400,7 +400,7 @@ function HitRow({ hit, active, onMouseEnter, onClick }: HitRowProps) {
         </div>
         <div
           style={{
-            fontSize: '11px',
+            fontSize: '12px',
             color: 'var(--text-muted)',
             fontFamily: 'monospace',
             overflow: 'hidden',

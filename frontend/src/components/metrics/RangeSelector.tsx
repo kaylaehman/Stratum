@@ -37,7 +37,7 @@ export function RangeSelector({ value, onChange }: RangeSelectorProps) {
               border: 'none',
               borderRight: i < RANGES.length - 1 ? '1px solid var(--border-default)' : 'none',
               cursor: 'pointer',
-              fontSize: '10px',
+              fontSize: '12px',
               transition: 'background-color 0.1s, color 0.1s',
             }}
           >

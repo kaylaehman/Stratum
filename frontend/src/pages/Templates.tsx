@@ -62,7 +62,7 @@ function TagChip({ label }: { label: string }) {
         border: '1px solid var(--accent-dim)',
         color: 'var(--accent)',
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
       }}
     >
       {label}

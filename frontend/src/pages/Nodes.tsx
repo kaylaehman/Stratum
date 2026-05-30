@@ -45,7 +45,7 @@ const CAP_KEYS = ['proxmox', 'docker', 'agent', 'systemd', 'cron'] as const
 
 function CapChips({ caps }: { caps: Capabilities }) {
   const active = CAP_KEYS.filter((k) => caps[k])
-  if (active.length === 0) return <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>none</span>
+  if (active.length === 0) return <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>none</span>
   return (
     <div className="flex flex-wrap gap-1">
       {active.map((k) => (
@@ -57,7 +57,7 @@ function CapChips({ caps }: { caps: Capabilities }) {
             border: '1px solid var(--accent-dim)',
             color: 'var(--accent)',
             borderRadius: '3px',
-            fontSize: '11px',
+            fontSize: '12px',
           }}
         >
           {k}

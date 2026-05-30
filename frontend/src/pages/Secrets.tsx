@@ -580,7 +580,7 @@ function GroupCard({ group }: GroupCardProps) {
               border: '1px solid var(--border-default)',
               color: 'var(--text-muted)',
               borderRadius: '3px',
-              fontSize: '10px',
+              fontSize: '12px',
             }}
           >
             {group.secrets.length} {group.secrets.length === 1 ? 'secret' : 'secrets'}

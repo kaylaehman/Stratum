@@ -138,7 +138,7 @@ function SnapshotRow({ snapshot, containerId, containerName }: SnapshotRowProps)
                 border: `1px solid ${snapshot.reason === 'manual' ? 'var(--border-subtle)' : 'rgba(64,120,200,0.3)'}`,
                 color: snapshot.reason === 'manual' ? 'var(--text-muted)' : 'var(--accent)',
                 borderRadius: '3px',
-                fontSize: '9px',
+                fontSize: '12px',
               }}
             >
               {snapshot.reason}

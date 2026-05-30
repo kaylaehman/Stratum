@@ -43,7 +43,7 @@ function StatusChip({ status }: { status: UpdateStatus }) {
           background: 'rgba(240,160,32,0.12)',
           border: '1px solid rgba(240,160,32,0.4)',
           borderRadius: '3px',
-          fontSize: '10px',
+          fontSize: '12px',
           whiteSpace: 'nowrap',
         }}
       >
@@ -62,7 +62,7 @@ function StatusChip({ status }: { status: UpdateStatus }) {
           background: 'rgba(64,200,120,0.1)',
           border: '1px solid rgba(64,200,120,0.3)',
           borderRadius: '3px',
-          fontSize: '10px',
+          fontSize: '12px',
           whiteSpace: 'nowrap',
         }}
       >
@@ -80,7 +80,7 @@ function StatusChip({ status }: { status: UpdateStatus }) {
         background: 'transparent',
         border: '1px solid var(--border-subtle)',
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
         whiteSpace: 'nowrap',
       }}
     >
@@ -215,7 +215,7 @@ function UpdateRow({ update, containerName, nodeName, isAdmin }: UpdateRowProps)
                 background: 'rgba(64,200,120,0.1)',
                 border: '1px solid rgba(64,200,120,0.3)',
                 borderRadius: '3px',
-                fontSize: '10px',
+                fontSize: '12px',
                 whiteSpace: 'nowrap',
               }}
             >

@@ -54,7 +54,7 @@ function FlagTypeBadge({ type }: { type: string }) {
         border: '1px solid rgba(232,64,64,0.35)',
         color: 'var(--status-error)',
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
       }}
     >
       {type}
@@ -82,7 +82,7 @@ function FlagRow({ flag, onAcknowledge, isPending }: FlagRowProps) {
         {flag.key && (
           <span
             className="font-mono text-xs"
-            style={{ color: 'var(--text-secondary)', fontSize: '10px' }}
+            style={{ color: 'var(--text-secondary)', fontSize: '12px' }}
           >
             {flag.key}
           </span>
@@ -217,7 +217,7 @@ function PortRow({ port, nodes }: PortRowProps) {
         style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}
       >
         {containerName}
-        <span className="ml-1" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+        <span className="ml-1" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
           ({nodeName})
         </span>
       </td>

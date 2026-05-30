@@ -41,7 +41,7 @@ export function ActivityDetail({ entry }: ActivityDetailProps) {
     padding: '4px 8px',
     verticalAlign: 'top',
     borderBottom: '1px solid var(--border-subtle)',
-    fontSize: '11px',
+    fontSize: '12px',
   }
 
   if (isDiffDetail(entry.detail)) {

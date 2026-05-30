@@ -161,7 +161,7 @@ function LegendRow({ entries }: LegendRowProps) {
             {e.label}
           </span>
           {e.last !== undefined && (
-            <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+            <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
               last: {e.last}
             </span>
           )}
@@ -358,7 +358,7 @@ export default function Metrics() {
                     >
                       <Download size={10} />
                       {containerName(id)}
-                      <span style={{ color: 'var(--text-muted)', fontSize: '9px' }}>CSV</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>CSV</span>
                     </button>
                   ))}
                 </div>
@@ -427,7 +427,7 @@ export default function Metrics() {
                   {memLimitSeries.length > 0 && (
                     <div
                       className="text-xs mt-1.5"
-                      style={{ color: 'var(--text-muted)', fontSize: '9px' }}
+                      style={{ color: 'var(--text-muted)', fontSize: '12px' }}
                     >
                       Dashed lines indicate memory limit per container.
                     </div>
@@ -453,7 +453,7 @@ export default function Metrics() {
                   />
                   <div
                     className="text-xs mt-1.5"
-                    style={{ color: 'var(--text-muted)', fontSize: '9px' }}
+                    style={{ color: 'var(--text-muted)', fontSize: '12px' }}
                   >
                     Rate computed from consecutive sample deltas (bytes/sec). Counter resets on container restart are clamped to 0.
                   </div>

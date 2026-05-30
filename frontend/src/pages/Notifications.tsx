@@ -50,7 +50,7 @@ function ProviderBadge({ provider }: { provider: WebhookProvider }) {
         border: `1px solid ${color}`,
         color,
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
       }}
     >
       {provider}
@@ -69,7 +69,7 @@ function TriggerChip({ label }: { label: string }) {
         border: '1px solid var(--accent-glow)',
         color: 'var(--accent)',
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
       }}
     >
       {label}
@@ -481,7 +481,7 @@ function TestBadge({ status }: TestBadgeProps) {
     return (
       <span
         className="font-mono text-xs flex items-center gap-1"
-        style={{ color: 'var(--status-ok, #40c878)', fontSize: '10px' }}
+        style={{ color: 'var(--status-ok, #40c878)', fontSize: '12px' }}
       >
         <Check size={10} /> Sent
       </span>
@@ -489,7 +489,7 @@ function TestBadge({ status }: TestBadgeProps) {
   return (
     <span
       className="font-mono text-xs flex items-center gap-1"
-      style={{ color: 'var(--status-error)', fontSize: '10px' }}
+      style={{ color: 'var(--status-error)', fontSize: '12px' }}
     >
       <X size={10} /> Delivery failed
     </span>
