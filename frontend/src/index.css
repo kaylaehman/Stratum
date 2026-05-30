@@ -70,6 +70,16 @@ pre,
   background: var(--text-muted);
 }
 
+/* Resource-tree resize handle: invisible until hovered/dragged. */
+.tree-resize-handle {
+  background: transparent;
+  transition: background 0.12s;
+}
+.tree-resize-handle:hover,
+.tree-resize-handle:active {
+  background: var(--accent-dim);
+}
+
 /* Markdown rendering for the AI assistant chat (react-markdown + GFM).
    Compact, dark-theme styling scoped to .assistant-md. */
 .assistant-md {
