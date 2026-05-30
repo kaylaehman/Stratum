@@ -5,10 +5,20 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
+	"time"
 
 	dockerclient "github.com/docker/docker/client"
 )
+
+// dialTimeout is the TCP dial deadline for remote Docker endpoints.
+const dialTimeout = 10 * time.Second
+
+// responseHeaderTimeout is the maximum time to wait for the daemon to send
+// the first response byte after the request is sent. Prevents a slow/stuck
+// daemon from holding open a connection indefinitely on simple reads.
+const responseHeaderTimeout = 30 * time.Second
 
 // TLS holds optional PEM material for a remote tcp+tls endpoint.
 type TLS struct {
@@ -42,10 +52,11 @@ func New(endpoint string, tlsCfg *TLS) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("docker: build TLS config: %w", err)
 		}
-		httpClient := &http.Client{
-			Transport: &http.Transport{TLSClientConfig: tc},
-		}
-		opts = append(opts, dockerclient.WithHTTPClient(httpClient))
+		opts = append(opts, dockerclient.WithHTTPClient(newHTTPClient(tc)))
+	} else if endpoint != "" {
+		// Non-TLS remote TCP endpoint: still apply transport timeouts so a
+		// slow/hung homelab daemon doesn't hold connections open forever.
+		opts = append(opts, dockerclient.WithHTTPClient(newHTTPClient(nil)))
 	}
 
 	cli, err := dockerclient.NewClientWithOpts(opts...)
@@ -53,6 +64,33 @@ func New(endpoint string, tlsCfg *TLS) (*Client, error) {
 		return nil, fmt.Errorf("docker: new client: %w", err)
 	}
 	return &Client{cli: cli}, nil
+}
+
+// newHTTPClient builds an *http.Client with explicit dial and response-header
+// timeouts. tc may be nil for plain-TCP (non-TLS) remote endpoints. These
+// timeouts are per-request transport guards — they do NOT replace the
+// per-operation context deadline; rather they bound a hang at the TCP/TLS layer
+// before the application context can fire (e.g. a half-open TCP connection that
+// never triggers a RST). For long-running streaming calls (logs, events) the
+// caller passes a context with no deadline and the stream is bounded by the
+// client's own cancellation — ResponseHeaderTimeout does not cut those because
+// the header arrives immediately and the body streams afterward.
+func newHTTPClient(tc *tls.Config) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   dialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSClientConfig:       tc,
+			ResponseHeaderTimeout: responseHeaderTimeout,
+			// Allow enough idle connections so concurrent poll + ad-hoc handler
+			// calls don't race on a single connection.
+			MaxIdleConns:        10,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
 }
 
 // buildTLSConfig constructs a *tls.Config from PEM strings. Each of CA and the
