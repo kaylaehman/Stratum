@@ -1589,6 +1589,17 @@ export interface VMPowerActionResponse {
   upid: string
 }
 
+// Proxmox host (node) power control types
+
+/** Actions accepted by POST /api/nodes/{id}/power/{action}.
+ *  No "start" — a powered-off physical host cannot be started via its own API. */
+export type NodePowerAction = 'shutdown' | 'reboot'
+
+/** Response from a host power-action — carries the Proxmox task UPID. */
+export interface NodePowerActionResponse {
+  upid: string
+}
+
 // Skills library (container-troubleshooting skills browser)
 
 export type SkillSource = 'builtin' | 'custom'
