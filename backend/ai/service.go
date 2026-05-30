@@ -2,8 +2,10 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -362,6 +364,69 @@ func (s *Service) claudeKey(cfg db.AIConfig) (string, error) {
 		return string(pt), nil
 	}
 	return s.envClaudeKey, nil
+}
+
+// OllamaModelsResponse is the list of installed Ollama model names.
+type OllamaModelsResponse struct {
+	Models []string `json:"models"`
+}
+
+// ollamaTagsResponse matches the Ollama /api/tags JSON shape.
+type ollamaTagsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+// ollamaModelsTimeout bounds the /api/tags probe (Ollama should respond quickly).
+const ollamaModelsTimeout = 10 * time.Second
+
+// OllamaModels fetches the list of installed model names from the Ollama server
+// at baseURL. If baseURL is empty it falls back to the saved config's base URL.
+// Returns ErrNotConfigured when no URL is available.
+func (s *Service) OllamaModels(ctx context.Context, baseURL string) (OllamaModelsResponse, error) {
+	if baseURL == "" {
+		cfg, _ := s.store.GetAIConfig(ctx)
+		baseURL = cfg.OllamaBaseURL
+	}
+	if baseURL == "" {
+		baseURL = s.envOllamaURL
+	}
+	if baseURL == "" {
+		return OllamaModelsResponse{}, ErrNotConfigured
+	}
+	if err := validateHTTPURL(baseURL); err != nil {
+		return OllamaModelsResponse{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, ollamaModelsTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(baseURL, "/")+"/api/tags", nil)
+	if err != nil {
+		return OllamaModelsResponse{}, fmt.Errorf("ollama models: build request: %w", err)
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return OllamaModelsResponse{}, fmt.Errorf("ollama models: request: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return OllamaModelsResponse{}, fmt.Errorf("ollama models: status %d", resp.StatusCode)
+	}
+	var tags ollamaTagsResponse
+	if err := json.Unmarshal(raw, &tags); err != nil {
+		return OllamaModelsResponse{}, fmt.Errorf("ollama models: decode: %w", err)
+	}
+	names := make([]string, 0, len(tags.Models))
+	for _, m := range tags.Models {
+		if m.Name != "" {
+			names = append(names, m.Name)
+		}
+	}
+	return OllamaModelsResponse{Models: names}, nil
 }
 
 // validateHTTPURL ensures a base URL is a well-formed http(s) URL with a host.

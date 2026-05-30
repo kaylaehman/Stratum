@@ -6,6 +6,7 @@ import type {
   AIAskRequest,
   AIAskResponse,
   AIOAuthStartResponse,
+  OllamaModelsResponse,
 } from '../../types/api'
 
 const AI_CONFIG_KEY = ['ai', 'config'] as const
@@ -63,5 +64,19 @@ export function useAIOAuthDisconnect() {
   return useMutation<AIConfig, unknown, void>({
     mutationFn: () => apiPost<AIConfig>('/api/ai/oauth/disconnect', null),
     onSuccess: (data) => qc.setQueryData(AI_CONFIG_KEY, data),
+  })
+}
+
+// Fetch installed Ollama model names; base_url is passed so the UI can probe a
+// URL the user just typed but hasn't saved yet.
+export function useOllamaModels(baseUrl: string | null) {
+  return useQuery<OllamaModelsResponse>({
+    queryKey: ['ai', 'ollama', 'models', baseUrl],
+    queryFn: () => {
+      const qs = baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : ''
+      return apiGet<OllamaModelsResponse>(`/api/ai/ollama/models${qs}`)
+    },
+    enabled: false, // only fetched on demand via refetch()
+    retry: false,
   })
 }

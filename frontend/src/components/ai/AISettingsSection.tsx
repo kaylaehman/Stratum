@@ -7,6 +7,7 @@ import {
   useAIOAuthExchange,
   useAIOAuthDisconnect,
   useAIOAuthSetToken,
+  useOllamaModels,
 } from '../../lib/api/ai'
 import { ApiError } from '../../lib/api'
 import type { AIProvider } from '../../types/api'
@@ -212,6 +213,18 @@ export function AISettingsSection() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
+  // Ollama model picker
+  const ollamaModelsQuery = useOllamaModels(provider === 'ollama' ? ollamaUrl || null : null)
+  const [ollamaModelsError, setOllamaModelsError] = useState<string | null>(null)
+
+  async function loadOllamaModels() {
+    setOllamaModelsError(null)
+    const result = await ollamaModelsQuery.refetch()
+    if (result.isError) {
+      setOllamaModelsError('Could not reach Ollama server. Check the base URL.')
+    }
+  }
+
   // Sync form from fetched config
   useEffect(() => {
     if (!config) return
@@ -345,20 +358,70 @@ export function AISettingsSection() {
                 <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
                   Base URL
                 </label>
-                <input
-                  type="url"
-                  value={ollamaUrl}
-                  onChange={e => setOllamaUrl(e.target.value)}
-                  onFocus={() => setFocusField('ollamaUrl')}
-                  onBlur={() => setFocusField(null)}
-                  placeholder="http://localhost:11434"
-                  style={inputStyle(focusField === 'ollamaUrl')}
-                />
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <input
+                    type="url"
+                    value={ollamaUrl}
+                    onChange={e => {
+                      setOllamaUrl(e.target.value)
+                      setOllamaModelsError(null)
+                    }}
+                    onFocus={() => setFocusField('ollamaUrl')}
+                    onBlur={() => setFocusField(null)}
+                    placeholder="http://localhost:11434"
+                    style={{ ...inputStyle(focusField === 'ollamaUrl'), flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    disabled={ollamaModelsQuery.isFetching || !ollamaUrl.trim()}
+                    onClick={() => void loadOllamaModels()}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      background: 'var(--bg-elevated)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '3px',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.7rem',
+                      padding: '6px 10px',
+                      cursor: ollamaModelsQuery.isFetching || !ollamaUrl.trim() ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      fontFamily: 'monospace',
+                      opacity: !ollamaUrl.trim() ? 0.5 : 1,
+                    }}
+                  >
+                    {ollamaModelsQuery.isFetching && <Loader size={11} className="animate-spin" />}
+                    Load models
+                  </button>
+                </div>
+                {ollamaModelsError && (
+                  <p className="text-xs" style={{ color: 'var(--status-error)', margin: '2px 0 0' }}>
+                    {ollamaModelsError}
+                  </p>
+                )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
                   Model
                 </label>
+                {ollamaModelsQuery.data && ollamaModelsQuery.data.models.length > 0 ? (
+                  <>
+                    <select
+                      value={ollamaModel}
+                      onChange={e => setOllamaModel(e.target.value)}
+                      style={{ ...inputStyle(false), cursor: 'pointer' }}
+                    >
+                      <option value="">— pick a model —</option>
+                      {ollamaModelsQuery.data.models.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                      Models installed on the Ollama server. Type a name below to use one not yet pulled.
+                    </p>
+                  </>
+                ) : null}
                 <input
                   type="text"
                   value={ollamaModel}
