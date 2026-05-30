@@ -27,6 +27,7 @@ import Scripts from './pages/Scripts'
 import Backups from './pages/Backups'
 import Settings from './pages/Settings'
 import Certs from './pages/Certs'
+import Skills from './pages/Skills'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -197,6 +198,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Certs />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/skills"
+          element={
+            <AuthGuard>
+              <Skills />
             </AuthGuard>
           }
         />

@@ -32,6 +32,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
+	"github.com/kaylaehman/stratum/backend/skills"
 	"github.com/kaylaehman/stratum/backend/sso"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
@@ -73,6 +74,7 @@ type Handlers struct {
 	Chat           *chatbot.Service
 	FileWatch      *filewatch.Service
 	SSO            *sso.Service
+	Skills         *skills.Library
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

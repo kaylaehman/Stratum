@@ -24,6 +24,7 @@ import {
   Terminal,
   Archive,
   ShieldCheck,
+  Wrench,
 } from 'lucide-react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
@@ -52,6 +53,7 @@ const navItems: NavItem[] = [
   { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
   { icon: <ArrowUpCircle size={14} />, label: 'Updates', to: '/updates' },
   { icon: <LayoutTemplate size={14} />, label: 'Templates', to: '/templates' },
+  { icon: <Wrench size={14} />, label: 'Skills', to: '/skills' },
   { icon: <ShieldCheck size={14} />, label: 'Certificates', to: '/certs', adminOnly: true },
   { icon: <KeyRound size={14} />, label: 'Secrets', to: '/secrets', adminOnly: true },
   { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },

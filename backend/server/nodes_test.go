@@ -42,6 +42,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
+	"github.com/kaylaehman/stratum/backend/skills"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
@@ -114,6 +115,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Chat:           chatbot.New(store, cipher, nil, func(context.Context) bool { return true }),
 		FileWatch:      filewatch.New(store, filesSvc.Exec),
 		SSO:            sso.New(store, cipher),
+		Skills:         mustLoadSkills(t),
 		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		StartedAt:      time.Now(),
 		PreviewLimiter: rate.NewLimiter(rate.Every(time.Millisecond), 100),
@@ -132,6 +134,19 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		t.Fatal("no token")
 	}
 	return srv, login.AccessToken
+}
+
+// mustLoadSkills loads the real skill library from the repo's assets/skills so
+// the /api/skills routes serve actual data in tests. The dir is resolved
+// relative to this package (backend/server). Loading is graceful, so a missing
+// dir simply yields an empty library.
+func mustLoadSkills(t *testing.T) *skills.Library {
+	t.Helper()
+	lib, err := skills.Load(filepath.Join("..", "..", "assets", "skills"))
+	if err != nil {
+		t.Fatalf("load skills: %v", err)
+	}
+	return lib
 }
 
 func authReq(t *testing.T, method, url, token string, body any) *http.Request {

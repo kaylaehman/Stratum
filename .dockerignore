@@ -10,4 +10,6 @@
 data/
 docs/
 assets/
+# …but the skill library is COPYed into the backend image (see backend/Dockerfile).
+!assets/skills
 *.log

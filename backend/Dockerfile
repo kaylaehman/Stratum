@@ -11,6 +11,9 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/stratum .
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/stratum /stratum
+# Container-troubleshooting skill library (reference data). Build context is the
+# repo root, so assets/skills is available; SKILLS_DIR defaults to /app/skills.
+COPY assets/skills /app/skills
 # /data holds the SQLite DB + agent CA; mount a volume here.
 VOLUME ["/data"]
 EXPOSE 8080

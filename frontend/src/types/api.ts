@@ -1548,3 +1548,47 @@ export interface SetDnsConfigRequest {
   token?: string
 }
 
+// Skills library (container-troubleshooting skills browser)
+
+export interface SkillSummary {
+  id: string
+  name: string
+  category: string
+  description: string
+  docs_url: string
+  image_patterns: string[]
+  port_hints: number[]
+  issue_count: number
+}
+
+export interface SkillStep {
+  id: string
+  description: string
+  type: string
+  command: string
+  requires_approval: boolean
+}
+
+export interface SkillIssue {
+  id: string
+  name: string
+  symptoms: string[]
+  steps: SkillStep[]
+}
+
+export interface SkillDetail {
+  id: string
+  name: string
+  version: string
+  category: string
+  description: string
+  docs_url: string
+  image_patterns: string[]
+  port_hints: number[]
+  common_issues: SkillIssue[]
+}
+
+export interface SkillsResponse {
+  skills: SkillSummary[]
+}
+
