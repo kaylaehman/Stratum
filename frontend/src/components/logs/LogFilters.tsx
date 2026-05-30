@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { Search, X } from 'lucide-react'
 import { useLogsStore } from '../../store/logs'
 
 export function LogFilters() {
@@ -16,6 +18,11 @@ export function LogFilters() {
     } else {
       setRegexError(null)
     }
+  }
+
+  function handleClear() {
+    setFilterQuery('')
+    setRegexError(null)
   }
 
   function handleRegexToggle() {
@@ -39,6 +46,20 @@ export function LogFilters() {
     <div className="flex items-center gap-2 flex-wrap">
       {/* Text filter */}
       <div className="flex items-center gap-0">
+        {/* Search icon prefix */}
+        <span
+          className="flex items-center justify-center shrink-0 px-1.5"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: `1px solid ${regexError ? 'var(--status-error)' : 'var(--border-default)'}`,
+            borderRight: 'none',
+            borderRadius: '3px 0 0 3px',
+            height: '26px',
+            color: 'var(--text-muted)',
+          }}
+        >
+          <Search size={11} />
+        </span>
         <input
           type="text"
           placeholder={filter.isRegex ? 'Filter regex…' : 'Filter text…'}
@@ -48,23 +69,44 @@ export function LogFilters() {
           style={{
             background: 'var(--bg-elevated)',
             border: `1px solid ${regexError ? 'var(--status-error)' : 'var(--border-default)'}`,
+            borderLeft: 'none',
             borderRight: 'none',
             color: 'var(--text-primary)',
-            borderRadius: '3px 0 0 3px',
             outline: 'none',
             width: '180px',
           }}
         />
+        {/* Clear button — only visible when there's a query */}
+        {filter.query && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="flex items-center justify-center shrink-0 px-1.5"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: `1px solid ${regexError ? 'var(--status-error)' : 'var(--border-default)'}`,
+              borderRight: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              height: '26px',
+            }}
+            title="Clear filter"
+            aria-label="Clear search filter"
+          >
+            <X size={11} />
+          </button>
+        )}
         <button
           type="button"
           onClick={handleRegexToggle}
           className="px-2 py-1 text-xs font-mono shrink-0"
           style={{
             background: filter.isRegex ? 'var(--accent-glow)' : 'var(--bg-elevated)',
-            border: `1px solid ${filter.isRegex ? 'var(--accent-dim)' : 'var(--border-default)'}`,
+            border: `1px solid ${filter.isRegex ? 'var(--accent-dim)' : regexError ? 'var(--status-error)' : 'var(--border-default)'}`,
             color: filter.isRegex ? 'var(--accent)' : 'var(--text-muted)',
             borderRadius: '0 3px 3px 0',
             cursor: 'pointer',
+            height: '26px',
           }}
           title={filter.isRegex ? 'Regex mode (click to switch to substring)' : 'Substring mode (click to switch to regex)'}
         >
@@ -109,6 +151,3 @@ export function LogFilters() {
     </div>
   )
 }
-
-// Need useState for the regex error local state
-import { useState } from 'react'
