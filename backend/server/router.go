@@ -115,9 +115,11 @@ func NewRouter(d *Deps) http.Handler {
 			// Global search (read-only).
 			r.Get("/search", d.Handlers.Search)
 
-			// Container-troubleshooting skill library (read-only reference data).
+			// Container-troubleshooting skill library (read reference data;
+			// user-authored skills are created/edited via the audited group below).
 			r.Get("/skills", d.Handlers.ListSkills)
 			r.Get("/skills/{id}", d.Handlers.GetSkill)
+			r.Get("/skills/{id}/raw", d.Handlers.GetSkillRaw)
 
 			// AI assistant config (admin gate in handler; set/ask are audited below).
 			r.Get("/ai/config", d.Handlers.AIConfigGet)
@@ -270,6 +272,10 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/runbooks", d.Handlers.CreateRunbook)
 			audited.Put("/runbooks/{id}", d.Handlers.UpdateRunbook)
 			audited.Delete("/runbooks/{id}", d.Handlers.DeleteRunbook)
+			audited.Post("/skills", d.Handlers.CreateSkill)
+			audited.Post("/skills/generate", d.Handlers.GenerateSkill)
+			audited.Put("/skills/{id}", d.Handlers.UpdateSkill)
+			audited.Delete("/skills/{id}", d.Handlers.DeleteSkill)
 			audited.Post("/me/2fa/setup", d.Handlers.TwoFASetup)
 			audited.Post("/me/2fa/enable", d.Handlers.TwoFAEnable)
 			audited.Post("/me/2fa/disable", d.Handlers.TwoFADisable)

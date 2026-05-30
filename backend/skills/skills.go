@@ -51,6 +51,12 @@ type CommonIssue struct {
 	Steps             []Step             `yaml:"steps" json:"steps"`
 }
 
+// Source distinguishes the read-only shipped library from user-authored skills.
+const (
+	SourceBuiltin = "builtin"
+	SourceCustom  = "custom"
+)
+
 // Skill is one parsed skill YAML file.
 type Skill struct {
 	ID             string         `yaml:"id" json:"id"`
@@ -61,6 +67,40 @@ type Skill struct {
 	DocsURL        string         `yaml:"docs_url" json:"docs_url"`
 	ContainerMatch ContainerMatch `yaml:"container_match" json:"container_match"`
 	CommonIssues   []CommonIssue  `yaml:"common_issues" json:"common_issues"`
+
+	// Source is "builtin" (shipped, read-only) or "custom" (user-authored,
+	// editable). It is set by the loader, not parsed from the YAML.
+	Source string `yaml:"-" json:"source"`
+}
+
+// Parse decodes a single skill from YAML and validates the minimum fields a
+// usable skill needs (an id and a name). The returned skill's Source is left
+// empty for the caller to set. It is the validation entry point for
+// user-authored skills.
+func Parse(data []byte) (Skill, error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return Skill{}, fmt.Errorf("skills: empty document")
+	}
+	var s Skill
+	if err := yaml.Unmarshal(data, &s); err != nil {
+		return Skill{}, fmt.Errorf("skills: invalid YAML: %w", err)
+	}
+	s.ID = strings.TrimSpace(s.ID)
+	if s.ID == "" {
+		return Skill{}, fmt.Errorf("skills: missing required field: id")
+	}
+	if strings.TrimSpace(s.Name) == "" {
+		return Skill{}, fmt.Errorf("skills: missing required field: name")
+	}
+	s.Source = ""
+	return s, nil
+}
+
+// Marshal renders a skill back to YAML (used to seed the editor when cloning a
+// built-in skill into a new custom one). The synthetic Source field is excluded
+// via its yaml:"-" tag.
+func Marshal(s Skill) ([]byte, error) {
+	return yaml.Marshal(s)
 }
 
 // Library is an in-memory, read-only index of loaded skills.
@@ -125,6 +165,7 @@ func Load(dir string) (*Library, error) {
 			slog.Warn("skills: file has no id; skipping", "path", path)
 			return nil
 		}
+		s.Source = SourceBuiltin
 		lib.byID[s.ID] = s
 		return nil
 	})
@@ -179,6 +220,31 @@ func (l *Library) Get(id string) (Skill, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	s, ok := l.byID[id]
+	return s, ok
+}
+
+// Upsert adds or replaces a skill in the live index and reindexes. Used to merge
+// user-authored skills (Source should be SourceCustom) into the library at
+// startup and whenever one is created/edited via the API.
+func (l *Library) Upsert(s Skill) {
+	l.mu.Lock()
+	l.byID[s.ID] = s
+	l.mu.Unlock()
+	l.reindex()
+}
+
+// Remove deletes a skill from the live index, returning the removed skill and
+// whether it existed.
+func (l *Library) Remove(id string) (Skill, bool) {
+	l.mu.Lock()
+	s, ok := l.byID[id]
+	if ok {
+		delete(l.byID, id)
+	}
+	l.mu.Unlock()
+	if ok {
+		l.reindex()
+	}
 	return s, ok
 }
 
