@@ -39,7 +39,12 @@ func (h *Handlers) WebSocket(w http.ResponseWriter, r *http.Request) {
 	// must match Host. Production serves the SPA same-origin; the Vite dev
 	// server proxies /api (incl. /api/ws) to the backend so dev is same-origin
 	// too. Non-browser clients send no Origin and are allowed.
-	c, err := websocket.Accept(w, r, nil)
+	// Echo the "bearer" subprotocol the SPA offered (its second offered value is
+	// the access token the auth middleware already validated) so the browser
+	// handshake completes. Non-browser clients offer no subprotocol — harmless.
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		Subprotocols: []string{middleware.WSBearerSubprotocol},
+	})
 	if err != nil {
 		return
 	}
