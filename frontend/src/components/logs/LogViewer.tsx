@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Pause, Play, Download, Trash2 } from 'lucide-react'
 import { wsManager } from '../../lib/ws'
+import { useTree } from '../../lib/api/tree'
 import { useLogsStore } from '../../store/logs'
 import type { SelectedContainer } from '../../store/logs'
 import type { LogSubscribeRequest, LogSubscribeResponse } from '../../types/api'
@@ -272,6 +273,8 @@ export function LogViewer({ initialContainer }: LogViewerProps) {
   const filteredLines = useFilteredLines()
   const [jumpToLive, setJumpToLive] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const { data: tree } = useTree()
+  const didDefaultSelectRef = useRef(false)
 
   // Ensure ws is connected
   useEffect(() => {
@@ -284,6 +287,26 @@ export function LogViewer({ initialContainer }: LogViewerProps) {
       addContainer(initialContainer)
     }
   }, [initialContainer, addContainer])
+
+  // Default to streaming ALL running containers on first load.
+  // Runs exactly once, after the tree first becomes available, so that
+  // containers the user later removes are not re-added on tree refreshes.
+  useEffect(() => {
+    if (didDefaultSelectRef.current) return
+    if (!tree) return
+    didDefaultSelectRef.current = true
+
+    const running: SelectedContainer[] = tree.nodes.flatMap((node) =>
+      node.containers
+        .filter((c) => c.status === 'running')
+        .map((c) => ({ uuid: c.id, dockerId: c.docker_id, name: c.name })),
+    )
+    // addContainer is idempotent (dedupes by uuid), so an initialContainer
+    // already added above will not be duplicated.
+    for (const c of running) {
+      addContainer(c)
+    }
+  }, [tree, addContainer])
 
   // Show "jump to live" banner when paused and new lines arrive
   useEffect(() => {
