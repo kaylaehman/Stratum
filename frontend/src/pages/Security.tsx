@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ShieldAlert, AlertTriangle, RefreshCw, Check, Network, Loader } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
@@ -8,6 +9,7 @@ import {
   useAcknowledgeFlag,
   useRescan,
 } from '../lib/api/security'
+import { PostureCard } from '../components/security/PostureCard'
 import type {
   FlaggedContainer,
   SecurityFlag,
@@ -354,6 +356,8 @@ export default function Security() {
   const { data: tree } = useTree()
   const nodes = tree?.nodes ?? []
 
+  const [postureNodeId, setPostureNodeId] = useState('')
+
   const { data: privileged, isLoading: privLoading } = usePrivileged(isAdmin)
   const { data: ports, isLoading: portsLoading } = usePorts(isAdmin)
   const { mutate: rescan, isPending: rescanning } = useRescan()
@@ -414,6 +418,48 @@ export default function Security() {
         {/* Content — only when admin and loaded */}
         {isAdmin && !isLoading && (
           <>
+            {/* Section 0: Posture score (per-node) */}
+            <div className="mb-8">
+              <SectionHeader label="Security Posture Score" />
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+                  Node
+                </span>
+                <select
+                  value={postureNodeId}
+                  onChange={(e) => setPostureNodeId(e.target.value)}
+                  className="text-xs px-2 py-1 flex-1"
+                  style={{
+                    backgroundColor: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-default)',
+                    color: 'var(--text-secondary)',
+                    borderRadius: '3px',
+                    maxWidth: '260px',
+                  }}
+                >
+                  <option value="">— select a node —</option>
+                  {nodes.map((n) => (
+                    <option key={n.id} value={n.id}>{n.name}</option>
+                  ))}
+                </select>
+              </div>
+              {postureNodeId ? (
+                <PostureCard nodeId={postureNodeId} />
+              ) : (
+                <div
+                  className="px-3 py-4 text-xs"
+                  style={{
+                    color: 'var(--text-muted)',
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '3px',
+                  }}
+                >
+                  Select a node above to view its posture score.
+                </div>
+              )}
+            </div>
+
             {/* Section 1: Privileged & flagged containers */}
             <div className="mb-8">
               <SectionHeader
