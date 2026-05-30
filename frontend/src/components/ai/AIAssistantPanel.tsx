@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Bot, X, Send, Loader, Settings } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useAsk } from '../../lib/api/ai'
 import { ApiError } from '../../lib/api'
 
@@ -31,40 +33,13 @@ function providerErrorText(err: unknown): string {
   return 'An error occurred. Please try again.'
 }
 
-/** Render assistant text: preserve whitespace, style code blocks. */
+/** Render assistant text as Markdown (GFM), styled for the dark chat panel via
+ *  the `.assistant-md` rules in index.css. */
 function AnswerText({ text }: { text: string }) {
-  // Split on triple-backtick fences for minimal code block support
-  const parts = text.split(/(```[\s\S]*?```)/g)
   return (
-    <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-      {parts.map((part, i) => {
-        if (part.startsWith('```') && part.endsWith('```')) {
-          const inner = part.slice(3, -3).replace(/^[^\n]*\n/, '') // strip language tag
-          return (
-            <code
-              key={i}
-              style={{
-                display: 'block',
-                backgroundColor: 'var(--bg-base)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '3px',
-                padding: '8px',
-                marginTop: '4px',
-                marginBottom: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem',
-                color: 'var(--text-secondary)',
-                whiteSpace: 'pre',
-                overflowX: 'auto',
-              }}
-            >
-              {inner}
-            </code>
-          )
-        }
-        return <span key={i}>{part}</span>
-      })}
-    </span>
+    <div className="assistant-md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
   )
 }
 
