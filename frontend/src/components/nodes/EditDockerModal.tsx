@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { X, AlertTriangle, Loader } from 'lucide-react'
 import { ApiError } from '../../lib/api'
 import { useUpdateNode } from '../../lib/api/nodes'
+import { useTree } from '../../lib/api/tree'
 import { DockerTestConnection } from './DockerTestConnection'
 import type {
   NodeView,
@@ -9,6 +10,29 @@ import type {
   ProbePreviewRequest,
   UpdateNodeRequest,
 } from '../../types/api'
+
+// Sentinel select values for the tri-state guest link (the rest are vmids).
+const LINK_AUTO = 'auto' // linked_vmid = null
+const LINK_NONE = 'none' // linked_vmid = 0
+
+interface GuestOption {
+  vmid: number
+  label: string
+}
+
+/** Map the node's stored linked_vmid to a select value. */
+function initialLinkValue(linkedVmid: number | undefined): string {
+  if (linkedVmid === undefined) return LINK_AUTO
+  if (linkedVmid === 0) return LINK_NONE
+  return String(linkedVmid)
+}
+
+/** Map a select value back to the tri-state linked_vmid wire value. */
+function linkValueToVmid(value: string): number | null {
+  if (value === LINK_AUTO) return null
+  if (value === LINK_NONE) return 0
+  return Number(value)
+}
 
 interface EditDockerModalProps {
   node: NodeView
@@ -115,6 +139,20 @@ function WarnBox({ children }: { children: React.ReactNode }) {
  */
 export function EditDockerModal({ node, onClose }: EditDockerModalProps) {
   const update = useUpdateNode()
+  const { data: tree } = useTree()
+
+  // All Proxmox guests across every node, for the "runs as guest" picker.
+  const guestOptions = useMemo<GuestOption[]>(() => {
+    const opts: GuestOption[] = []
+    for (const n of tree?.nodes ?? []) {
+      for (const vm of n.vms) {
+        opts.push({ vmid: vm.proxmox_vmid, label: `${vm.name} (${vm.proxmox_vmid} on ${n.name})` })
+      }
+    }
+    return opts.sort((a, b) => a.vmid - b.vmid)
+  }, [tree])
+
+  const [linkValue, setLinkValue] = useState(() => initialLinkValue(node.linked_vmid))
 
   const [dockerEndpoint, setDockerEndpoint] = useState(node.docker_endpoint ?? '')
   const [enableTls, setEnableTls] = useState(false)
@@ -176,6 +214,10 @@ export function EditDockerModal({ node, onClose }: EditDockerModalProps) {
     const body: UpdateNodeRequest = {
       docker_endpoint: dockerEndpoint.trim(),
       ...(ackInsecure ? { ack_insecure_docker: true } : {}),
+    }
+    // Persist the guest link only when it changed (tri-state null/0/vmid).
+    if (linkValue !== initialLinkValue(node.linked_vmid)) {
+      body.linked_vmid = linkValueToVmid(linkValue)
     }
     if (enableTls && (tlsCa || tlsCert || tlsKey)) {
       body.credentials = {
@@ -261,6 +303,38 @@ export function EditDockerModal({ node, onClose }: EditDockerModalProps) {
             />
             <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
               Leave blank to clear and fall back to the local socket default.
+            </span>
+          </Field>
+
+          {/* Runs as Proxmox guest — nests this node's containers under a VM/LXC */}
+          <Field
+            label="Runs as Proxmox guest"
+            hint="nest this node's containers under a Proxmox VM/LXC"
+          >
+            <select
+              value={linkValue}
+              onChange={(e) => setLinkValue(e.target.value)}
+              style={{ ...INPUT_STYLE, cursor: 'pointer' }}
+            >
+              <option value={LINK_AUTO}>Auto (match by name)</option>
+              <option value={LINK_NONE}>Not a guest</option>
+              {guestOptions.map((g) => (
+                <option key={g.vmid} value={String(g.vmid)}>
+                  {g.label}
+                </option>
+              ))}
+              {/* Stored vmid whose guest is no longer present — keep it selectable. */}
+              {node.linked_vmid !== undefined &&
+                node.linked_vmid >= 100 &&
+                !guestOptions.some((g) => g.vmid === node.linked_vmid) && (
+                  <option value={String(node.linked_vmid)}>
+                    {`VMID ${node.linked_vmid} (guest not found)`}
+                  </option>
+                )}
+            </select>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Auto links to a guest with the same name. Choose a guest to link
+              explicitly, or "Not a guest" to keep this node at the top level.
             </span>
           </Field>
 

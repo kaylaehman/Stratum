@@ -113,6 +113,84 @@ func TestUpdateConfigPersistsDockerEndpointAndSealsTLS(t *testing.T) {
 	}
 }
 
+// linked_vmid is a nullable tri-state (nil=AUTO, 0=NONE, >=100=explicit VMID).
+// It must round-trip through create (default nil) and edit (set to 0, a vmid,
+// and back to nil) via the non-secret NodeView.
+func TestLinkedVMIDRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	svc, store := newService(t)
+
+	v, err := svc.Create(ctx, nodes.CreateInput{
+		Name:      "docker-services",
+		ConnInput: nodes.ConnInput{Host: "10.0.0.8", SSHPort: 22, Credentials: nodes.NodeCredentials{Method: nodes.MethodSSHKey}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// AUTO by default: absent from the view (nil pointer).
+	if v.LinkedVMID != nil {
+		t.Fatalf("new node LinkedVMID = %v, want nil (AUTO)", *v.LinkedVMID)
+	}
+
+	// Edit -> explicit VMID 101.
+	vmid := 101
+	updated, err := svc.UpdateConfig(ctx, v.ID, nodes.UpdateConfigInput{
+		LinkedVMIDSupplied: true,
+		LinkedVMID:         &vmid,
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig(vmid): %v", err)
+	}
+	if updated.LinkedVMID == nil || *updated.LinkedVMID != 101 {
+		t.Fatalf("LinkedVMID = %v, want 101", updated.LinkedVMID)
+	}
+	if n, _ := store.GetNode(ctx, v.ID); n.LinkedVMID == nil || *n.LinkedVMID != 101 {
+		t.Fatalf("persisted LinkedVMID = %v, want 101", n.LinkedVMID)
+	}
+
+	// Edit -> NONE (0): force-unlinked, distinct from AUTO.
+	none := 0
+	updated, err = svc.UpdateConfig(ctx, v.ID, nodes.UpdateConfigInput{
+		LinkedVMIDSupplied: true,
+		LinkedVMID:         &none,
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig(none): %v", err)
+	}
+	if updated.LinkedVMID == nil || *updated.LinkedVMID != 0 {
+		t.Fatalf("LinkedVMID = %v, want 0 (NONE)", updated.LinkedVMID)
+	}
+
+	// Edit -> back to AUTO (nil).
+	updated, err = svc.UpdateConfig(ctx, v.ID, nodes.UpdateConfigInput{
+		LinkedVMIDSupplied: true,
+		LinkedVMID:         nil,
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig(auto): %v", err)
+	}
+	if updated.LinkedVMID != nil {
+		t.Fatalf("LinkedVMID = %v, want nil (AUTO)", *updated.LinkedVMID)
+	}
+	if n, _ := store.GetNode(ctx, v.ID); n.LinkedVMID != nil {
+		t.Fatalf("persisted LinkedVMID = %v, want nil (AUTO)", *n.LinkedVMID)
+	}
+
+	// Not supplied -> left as-is. Set to 102 first, then a name-only edit.
+	vmid2 := 102
+	if _, err := svc.UpdateConfig(ctx, v.ID, nodes.UpdateConfigInput{LinkedVMIDSupplied: true, LinkedVMID: &vmid2}); err != nil {
+		t.Fatal(err)
+	}
+	name := "renamed"
+	updated, err = svc.UpdateConfig(ctx, v.ID, nodes.UpdateConfigInput{Name: &name})
+	if err != nil {
+		t.Fatalf("UpdateConfig(name only): %v", err)
+	}
+	if updated.LinkedVMID == nil || *updated.LinkedVMID != 102 {
+		t.Fatalf("LinkedVMID after unrelated edit = %v, want 102 (unchanged)", updated.LinkedVMID)
+	}
+}
+
 func TestCreateRequiresAcceptedHostKeyWhenSSHUsed(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := newService(t)

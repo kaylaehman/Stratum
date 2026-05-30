@@ -51,6 +51,9 @@ func TestNodeCRUD(t *testing.T) {
 	if got.ProxmoxTLSInsecure {
 		t.Error("ProxmoxTLSInsecure should default false")
 	}
+	if got.LinkedVMID != nil {
+		t.Errorf("LinkedVMID should default nil (AUTO), got %v", *got.LinkedVMID)
+	}
 	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 		t.Error("timestamps not populated")
 	}
@@ -61,6 +64,8 @@ func TestNodeCRUD(t *testing.T) {
 	ls := time.Now()
 	got.LastSeen = &ls
 	got.ProxmoxTLSInsecure = true
+	vmid := 101
+	got.LinkedVMID = &vmid
 	if err := st.UpdateNode(ctx, got); err != nil {
 		t.Fatalf("UpdateNode: %v", err)
 	}
@@ -73,6 +78,9 @@ func TestNodeCRUD(t *testing.T) {
 	}
 	if !updated.ProxmoxTLSInsecure {
 		t.Error("ProxmoxTLSInsecure update not persisted")
+	}
+	if updated.LinkedVMID == nil || *updated.LinkedVMID != 101 {
+		t.Errorf("LinkedVMID update not persisted: %v", updated.LinkedVMID)
 	}
 
 	// List

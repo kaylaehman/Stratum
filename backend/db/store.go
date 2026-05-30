@@ -92,11 +92,15 @@ type Node struct {
 	ProxmoxEndpoint      string
 	ProxmoxTLSInsecure   bool
 	DockerEndpoint       string
-	Status               string
-	LastError            string
-	LastSeen             *time.Time
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// LinkedVMID manually correlates a standalone Docker node to the Proxmox
+	// guest it runs as. Tri-state: nil = AUTO (match by name), *0 = NONE
+	// (force-unlinked), *>=100 = explicit Proxmox VMID.
+	LinkedVMID *int
+	Status     string
+	LastError  string
+	LastSeen   *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // VM is a Proxmox guest (QEMU VM or LXC container).
