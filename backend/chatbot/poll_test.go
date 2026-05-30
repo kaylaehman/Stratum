@@ -58,6 +58,58 @@ func msg(updateID int, chatID int64, text string) Update {
 	return u
 }
 
+// fakeAI is a stub *ai.Service replacement — we test via dispatch directly
+// rather than constructing a real ai.Service (which needs a DB).
+// We test the nil-aiSvc path (no provider configured) via dispatch.
+func TestDispatchFreeTextNoAI(t *testing.T) {
+	s := &Service{
+		store:  &fakeStore{cfg: db.ChatConfig{AllowedChats: []int64{1}}},
+		logger: nil, // logger is only used by replyAI on error; nil is safe here
+		aiSvc:  nil, // no AI configured
+	}
+	client := &fakeClient{}
+	s.dispatch(context.Background(), client, 1, "what is docker?")
+	if len(client.sent[1]) != 1 {
+		t.Fatalf("expected 1 reply, got %v", client.sent[1])
+	}
+	if !strings.Contains(client.sent[1][0], "not configured") {
+		t.Errorf("expected 'not configured' message, got %q", client.sent[1][0])
+	}
+}
+
+func TestDispatchAskCommandNoAI(t *testing.T) {
+	s := &Service{
+		store:  &fakeStore{cfg: db.ChatConfig{AllowedChats: []int64{1}}},
+		logger: nil,
+		aiSvc:  nil,
+	}
+	client := &fakeClient{}
+	s.dispatch(context.Background(), client, 1, "/ask what is nginx?")
+	if len(client.sent[1]) != 1 {
+		t.Fatalf("expected 1 reply, got %v", client.sent[1])
+	}
+	if !strings.Contains(client.sent[1][0], "not configured") {
+		t.Errorf("expected 'not configured' message, got %q", client.sent[1][0])
+	}
+}
+
+func TestDispatchAskNoQuestion(t *testing.T) {
+	s := &Service{
+		store:  &fakeStore{cfg: db.ChatConfig{AllowedChats: []int64{1}}},
+		logger: nil,
+		aiSvc:  nil,
+	}
+	client := &fakeClient{}
+	// /ask with no question falls through to Handle which returns usage hint.
+	s.dispatch(context.Background(), client, 1, "/ask")
+	if len(client.sent[1]) != 1 {
+		t.Fatalf("expected 1 reply, got %v", client.sent[1])
+	}
+	if !strings.Contains(client.sent[1][0], "Usage") {
+		t.Errorf("expected usage hint, got %q", client.sent[1][0])
+	}
+}
+
 func TestPollOnceAuthorization(t *testing.T) {
 	s := &Service{store: &fakeStore{cfg: db.ChatConfig{AllowedChats: []int64{100}}}}
 	client := &fakeClient{updates: []Update{

@@ -51,6 +51,14 @@ func Handle(ctx context.Context, dp DataProvider, text string) string {
 			return renderSummary(ctx, dp)
 		}
 		return renderContainer(ctx, dp, args[0])
+	case "ask":
+		if len(args) == 0 {
+			return "Usage: /ask <your question>"
+		}
+		// /ask with a question is routed to AI by pollOnce before Handle is
+		// called; this branch handles the edge case of /ask with no question
+		// (already handled above) or if Handle is called directly in tests.
+		return "Usage: /ask <your question>"
 	case "restart", "stop", "start_container", "delete", "rm":
 		return "Mutating commands aren't available from chat yet — use the Stratum UI (they require a 2FA-style confirmation)."
 	default:
@@ -63,7 +71,9 @@ func helpText() string {
 		"/status — summary of nodes and containers\n" +
 		"/status <name> — detail for a container\n" +
 		"/nodes — list connected hosts\n" +
-		"/help — this message"
+		"/ask <question> — ask the AI assistant\n" +
+		"/help — this message\n\n" +
+		"You can also send any free-text message to ask the AI assistant directly."
 }
 
 func renderNodes(ctx context.Context, dp DataProvider) string {

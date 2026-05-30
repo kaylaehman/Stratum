@@ -161,7 +161,7 @@ func run(logger *slog.Logger) error {
 	featureSvc := features.New(store)
 	chatSvc := chatbot.New(store, cipher, logger, func(ctx context.Context) bool {
 		return featureSvc.Enabled(ctx, "feature.chat_integration")
-	})
+	}, aiSvc)
 	certSvc := certs.New(store, filesSvc.Exec, 6*time.Hour)
 	certSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
