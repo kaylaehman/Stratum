@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
 	appdb "github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
 	"github.com/kaylaehman/stratum/backend/nodes"
@@ -24,15 +23,7 @@ func newService(t *testing.T) (*nodes.Service, appdb.Store) {
 	store := sqlite.New(sqldb)
 	t.Cleanup(func() { store.Close() })
 
-	key := make([]byte, crypto.KeySize)
-	for i := range key {
-		key[i] = 0x7
-	}
-	cipher, err := crypto.New(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return nodes.NewService(store, cipher), store
+	return nodes.NewService(store, testCipher(t, 0x7)), store
 }
 
 // A node with no SSH credentials and no endpoints probes instantly (all sub-probes
@@ -68,6 +59,57 @@ func TestCreateNoCredsPersistsAndHidesSecrets(t *testing.T) {
 	// NodeView has no password/key fields). Confirm capabilities round-tripped.
 	if view.ProxmoxAuthStatus != "none" {
 		t.Errorf("ProxmoxAuthStatus = %q, want none", view.ProxmoxAuthStatus)
+	}
+}
+
+// UpdateConfig must persist a Docker endpoint, expose it in the (non-secret)
+// view, seal supplied Docker TLS material into the credentials blob, and never
+// echo the sealed material back.
+func TestUpdateConfigPersistsDockerEndpointAndSealsTLS(t *testing.T) {
+	ctx := context.Background()
+	svc, store := newService(t)
+
+	// Bare node, no SSH creds/endpoints -> probes instantly.
+	v, err := svc.Create(ctx, nodes.CreateInput{
+		Name:      "edit-me",
+		ConnInput: nodes.ConnInput{Host: "10.0.0.7", SSHPort: 22, Credentials: nodes.NodeCredentials{Method: nodes.MethodSSHKey}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.DockerEndpoint != "" {
+		t.Fatalf("new node DockerEndpoint = %q, want empty", v.DockerEndpoint)
+	}
+
+	ep := "tcp://10.0.0.7:2376"
+	updated, err := svc.UpdateConfig(ctx, v.ID, nodes.UpdateConfigInput{
+		DockerEndpoint:    &ep,
+		DockerTLSSupplied: true,
+		DockerTLSCA:       "CA-PEM",
+		DockerTLSCert:     "CERT-PEM",
+		DockerTLSKey:      "KEY-PEM",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	if updated.DockerEndpoint != ep {
+		t.Errorf("view DockerEndpoint = %q, want %q", updated.DockerEndpoint, ep)
+	}
+
+	// docker_endpoint persisted; TLS sealed into the credentials blob (not plain).
+	n, err := store.GetNode(ctx, v.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.DockerEndpoint != ep {
+		t.Errorf("persisted DockerEndpoint = %q, want %q", n.DockerEndpoint, ep)
+	}
+	creds, err := nodes.OpenCredentials(testCipher(t, 0x7), n.CredentialsEncrypted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds.DockerTLSCA != "CA-PEM" || creds.DockerTLSCert != "CERT-PEM" || creds.DockerTLSKey != "KEY-PEM" {
+		t.Errorf("sealed Docker TLS not round-tripped: %+v", creds)
 	}
 }
 

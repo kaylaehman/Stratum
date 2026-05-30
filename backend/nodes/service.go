@@ -75,6 +75,8 @@ type NodeView struct {
 	AuthMethod        string           `json:"auth_method"`
 	OSType            string           `json:"os_type,omitempty"`
 	Capabilities      capabilities.Set `json:"capabilities"`
+	ProxmoxEndpoint   string           `json:"proxmox_endpoint,omitempty"`
+	DockerEndpoint    string           `json:"docker_endpoint,omitempty"`
 	ProxmoxAuthStatus string           `json:"proxmox_auth_status"`
 	Status            string           `json:"status"`
 	LastError         string           `json:"last_error,omitempty"`
@@ -184,6 +186,100 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (NodeView, error) 
 		LastSeen:             lastSeen,
 	}
 	if err := s.store.CreateNode(ctx, n); err != nil {
+		return NodeView{}, err
+	}
+	return toView(n), nil
+}
+
+// UpdateConfigInput carries the editable connection config for an existing node.
+// Only the Docker/Proxmox transport config is editable here — SSH credentials and
+// the pinned host key are not changed by this path. Pointer fields distinguish
+// "not supplied" (leave as-is) from "supplied empty" (clear). Docker TLS PEM
+// material, when any of the three is non-empty, replaces the stored set; when all
+// three are empty AND DockerTLSSupplied is true, the stored TLS material is cleared.
+type UpdateConfigInput struct {
+	Name               *string
+	DockerEndpoint     *string
+	ProxmoxEndpoint    *string
+	ProxmoxTLSInsecure *bool
+
+	DockerTLSSupplied bool
+	DockerTLSCA       string
+	DockerTLSCert     string
+	DockerTLSKey      string
+}
+
+// UpdateConfig edits an existing node's name and Docker/Proxmox transport config,
+// re-seals credentials when Docker TLS material is supplied, re-probes with the
+// new config, and persists the refreshed status. It returns the updated view.
+//
+// It does NOT change SSH credentials or the pinned host key; those stay as stored.
+func (s *Service) UpdateConfig(ctx context.Context, id string, in UpdateConfigInput) (NodeView, error) {
+	n, err := s.store.GetNode(ctx, id)
+	if err != nil {
+		return NodeView{}, err
+	}
+	creds, err := OpenCredentials(s.cipher, n.CredentialsEncrypted)
+	if err != nil {
+		return NodeView{}, err
+	}
+
+	if in.Name != nil {
+		n.Name = *in.Name
+	}
+	if in.DockerEndpoint != nil {
+		n.DockerEndpoint = *in.DockerEndpoint
+	}
+	if in.ProxmoxEndpoint != nil {
+		n.ProxmoxEndpoint = *in.ProxmoxEndpoint
+	}
+	if in.ProxmoxTLSInsecure != nil {
+		n.ProxmoxTLSInsecure = *in.ProxmoxTLSInsecure
+	}
+
+	credsChanged := false
+	if in.DockerTLSSupplied {
+		creds.DockerTLSCA = in.DockerTLSCA
+		creds.DockerTLSCert = in.DockerTLSCert
+		creds.DockerTLSKey = in.DockerTLSKey
+		credsChanged = true
+	}
+	if credsChanged {
+		sealed, serr := creds.Seal(s.cipher)
+		if serr != nil {
+			return NodeView{}, serr
+		}
+		n.CredentialsEncrypted = sealed
+	}
+
+	// Re-probe with the new transport config (pinned to the stored host key) so
+	// status/last_error reflect reality immediately after the edit.
+	probeIn := ConnInput{
+		Host:               n.Host,
+		SSHPort:            n.Port,
+		Credentials:        creds,
+		ProxmoxEndpoint:    n.ProxmoxEndpoint,
+		ProxmoxTLSInsecure: n.ProxmoxTLSInsecure,
+		DockerEndpoint:     n.DockerEndpoint,
+		PinnedHostKey:      n.SSHHostKey,
+	}
+	res := discovery.Probe(ctx, probeIn.target())
+	if res.SSHHostKeyMismatch {
+		n.Status = "error"
+		n.LastError = discovery.ErrCategorySSHHostKey
+		_ = s.store.UpdateNode(ctx, n)
+		return NodeView{}, ErrHostKeyMismatch
+	}
+
+	capsJSON, err := json.Marshal(capsEnvelope{Set: res.Caps, ProxmoxAuthStatus: res.ProxmoxAuthStatus})
+	if err != nil {
+		return NodeView{}, err
+	}
+	n.CapabilitiesJSON = string(capsJSON)
+	n.OSType = res.OSType
+	n.Status, n.LastError, n.LastSeen = deriveStatus(res)
+
+	if err := s.store.UpdateNode(ctx, n); err != nil {
 		return NodeView{}, err
 	}
 	return toView(n), nil
@@ -327,6 +423,8 @@ func toView(n db.Node) NodeView {
 		AuthMethod:        n.AuthMethod,
 		OSType:            n.OSType,
 		Capabilities:      env.Set,
+		ProxmoxEndpoint:   n.ProxmoxEndpoint,
+		DockerEndpoint:    n.DockerEndpoint,
 		ProxmoxAuthStatus: env.ProxmoxAuthStatus,
 		Status:            n.Status,
 		LastError:         n.LastError,

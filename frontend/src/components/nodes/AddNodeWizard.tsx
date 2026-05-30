@@ -3,6 +3,7 @@ import { X, AlertTriangle, Loader } from 'lucide-react'
 import { ApiError } from '../../lib/api'
 import { useCreateNode, useProbePreview } from '../../lib/api/nodes'
 import { ProbeResult, isBlockingProbeError } from './ProbeResult'
+import { DockerTestConnection } from './DockerTestConnection'
 import type { NodeType, CredentialMethod, PreviewResult } from '../../types/api'
 
 interface AddNodeWizardProps {
@@ -540,6 +541,16 @@ export function AddNodeWizard({ onClose }: AddNodeWizardProps) {
                       </label>
                     </div>
                   </>
+                )}
+                {dockerEndpoint && (
+                  <DockerTestConnection
+                    buildBody={() => buildProbeBody()}
+                    disabledReason={
+                      !step2Valid()
+                        ? 'Enter valid SSH credentials above first.'
+                        : undefined
+                    }
+                  />
                 )}
               </div>
             </div>

@@ -63,6 +63,14 @@ func TestSanitizeCategories(t *testing.T) {
 		{"unreachable", "dial tcp 10.0.0.5:22: connect: connection refused", discovery.ErrCategorySSHUnreachable},
 		{"timeout", "context deadline exceeded (i/o timeout)", discovery.ErrCategoryTimeout},
 		{"docker unreachable", "cannot connect to the docker daemon at unix:///var/run/docker.sock", discovery.ErrCategoryDockerUnreachable},
+
+		// Docker TLS config build failures surface before any network I/O. They
+		// must categorize as a TLS/cert problem, NOT docker_unreachable — even
+		// though the error text begins with "docker:".
+		{"docker bad CA PEM", "docker: build TLS config: docker: failed to parse CA PEM", discovery.ErrCategoryTLS},
+		{"docker cert without key", "docker: build TLS config: docker: client cert and key must be supplied together", discovery.ErrCategoryTLS},
+		{"docker client keypair parse", "docker: build TLS config: docker: parse client cert/key: tls: failed to find any PEM data in key input", discovery.ErrCategoryTLS},
+
 		{"unknown", "something totally unexpected happened", discovery.ErrCategoryUnknown},
 	}
 	for _, c := range cases {

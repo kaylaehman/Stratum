@@ -69,16 +69,22 @@ func (b connBody) toConnInput() nodes.ConnInput {
 	}
 }
 
-// insecureDockerUnacked reports whether a plaintext tcp:// Docker endpoint was
-// supplied without TLS material and without explicit acknowledgement. Plaintext
-// 2375 grants unauthenticated root-equivalent control of the host.
 func (b connBody) insecureDockerUnacked() bool {
+	return insecureDockerUnacked(b.DockerEndpoint, b.Credentials.DockerTLSCA, b.Credentials.DockerTLSCert, b.Credentials.DockerTLSKey, b.AckInsecureDocker)
+}
+
+// insecureDockerUnacked reports whether a plaintext tcp://|http:// Docker
+// endpoint was supplied without any TLS material and without explicit
+// acknowledgement. Plaintext 2375 grants unauthenticated root-equivalent control
+// of the host, so we refuse it unless the operator opts in. Shared by the create
+// and update paths.
+func insecureDockerUnacked(endpoint, tlsCA, tlsCert, tlsKey string, ack bool) bool {
 	// Both tcp:// and http:// connect without TLS in the Docker SDK.
-	if !strings.HasPrefix(b.DockerEndpoint, "tcp://") && !strings.HasPrefix(b.DockerEndpoint, "http://") {
+	if !strings.HasPrefix(endpoint, "tcp://") && !strings.HasPrefix(endpoint, "http://") {
 		return false
 	}
-	hasTLS := b.Credentials.DockerTLSCA != "" || b.Credentials.DockerTLSCert != "" || b.Credentials.DockerTLSKey != ""
-	return !hasTLS && !b.AckInsecureDocker
+	hasTLS := tlsCA != "" || tlsCert != "" || tlsKey != ""
+	return !hasTLS && !ack
 }
 
 type createNodeBody struct {
@@ -153,27 +159,73 @@ func (h *Handlers) CreateNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, view)
 }
 
-// RenameNode updates a node's display name.
+// updateNodeBody is the PUT /api/nodes/{id} payload. Every field is a pointer so
+// the handler can distinguish "omitted" (leave as-is) from "supplied" (apply,
+// possibly clearing). Backward compatible: a body of just {"name":"x"} still
+// works as a plain rename. The credentials object carries optional Docker TLS PEM
+// material (docker_tls_ca/cert/key); it is never echoed back.
+type updateNodeBody struct {
+	Name               *string          `json:"name"`
+	DockerEndpoint     *string          `json:"docker_endpoint"`
+	ProxmoxEndpoint    *string          `json:"proxmox_endpoint"`
+	ProxmoxTLSInsecure *bool            `json:"proxmox_tls_insecure"`
+	Credentials        *credentialsBody `json:"credentials"`
+	AckInsecureDocker  bool             `json:"ack_insecure_docker"`
+}
+
+// RenameNode updates an existing node's display name and/or Docker/Proxmox
+// transport config (PUT /api/nodes/{id}). It re-probes with the new config and
+// invalidates the cached transport clients so the next poll uses the edit.
 func (h *Handlers) RenameNode(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	var body struct {
-		Name string `json:"name"`
+	var body updateNodeBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
 	}
-	if err := decodeJSON(r, &body); err != nil || body.Name == "" {
+	// A rename must not blank the name; a config-only edit may omit it entirely.
+	if body.Name != nil && *body.Name == "" {
 		writeError(w, http.StatusBadRequest, "name_required")
 		return
 	}
-	v, err := h.Nodes.Rename(r.Context(), id, body.Name)
-	if errors.Is(err, db.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found")
+
+	in := nodes.UpdateConfigInput{
+		Name:               body.Name,
+		DockerEndpoint:     body.DockerEndpoint,
+		ProxmoxEndpoint:    body.ProxmoxEndpoint,
+		ProxmoxTLSInsecure: body.ProxmoxTLSInsecure,
+	}
+	if body.Credentials != nil {
+		in.DockerTLSSupplied = true
+		in.DockerTLSCA = body.Credentials.DockerTLSCA
+		in.DockerTLSCert = body.Credentials.DockerTLSCert
+		in.DockerTLSKey = body.Credentials.DockerTLSKey
+	}
+
+	// Guard a plaintext tcp:// Docker endpoint supplied without TLS or ack.
+	if body.DockerEndpoint != nil && insecureDockerUnacked(*body.DockerEndpoint, in.DockerTLSCA, in.DockerTLSCert, in.DockerTLSKey, body.AckInsecureDocker) {
+		writeError(w, http.StatusBadRequest, "insecure_docker_endpoint_requires_ack")
 		return
 	}
-	if err != nil {
+
+	v, err := h.Nodes.UpdateConfig(r.Context(), id, in)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	case errors.Is(err, nodes.ErrHostKeyMismatch):
+		writeError(w, http.StatusConflict, "host_key_mismatch")
+		return
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, "update_failed")
 		return
+	}
+	// Drop cached Docker/Proxmox clients so the next poll rebuilds from the edit.
+	if h.Conn != nil {
+		h.Conn.Invalidate(id)
 	}
 	enrichNodeActivity(r, "node.update", id)
 	writeJSON(w, http.StatusOK, v)

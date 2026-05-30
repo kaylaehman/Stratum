@@ -5,6 +5,7 @@ import type {
   NodesListResponse,
   CreateNodeRequest,
   RenameNodeRequest,
+  UpdateNodeRequest,
   ProbePreviewRequest,
   PreviewResult,
 } from '../../types/api'
@@ -47,6 +48,26 @@ export function useRenameNode() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: NODES_KEY })
+    },
+  })
+}
+
+/**
+ * Partial update of an existing node via PUT /api/nodes/{id}. Used for editing
+ * Docker config (docker_endpoint + TLS creds) on an already-registered node.
+ * Mirrors useRenameNode but accepts the full UpdateNodeRequest body.
+ */
+export function useUpdateNode() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateNodeRequest }) =>
+      apiFetch<NodeView>(`/api/nodes/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: NODES_KEY })
+      void qc.invalidateQueries({ queryKey: ['nodes', vars.id] })
     },
   })
 }

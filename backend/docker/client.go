@@ -55,20 +55,37 @@ func New(endpoint string, tlsCfg *TLS) (*Client, error) {
 	return &Client{cli: cli}, nil
 }
 
-// buildTLSConfig constructs a *tls.Config from PEM strings.
+// buildTLSConfig constructs a *tls.Config from PEM strings. Each of CA and the
+// client cert/key pair is independently optional:
+//   - CA only          -> verify the server against a private CA, no client auth
+//                          (server-TLS-only socket proxy).
+//   - cert + key only   -> present a client certificate, verify the server against
+//                          the system roots (mTLS with a publicly-trusted server).
+//   - CA + cert + key   -> full mTLS against a private CA (the dockerd --tlsverify
+//                          default).
+//
+// A cert without its key (or vice versa) is an error. At least one of the three
+// must be set, else the caller should pass tls == nil instead.
 func buildTLSConfig(t *TLS) (*tls.Config, error) {
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM([]byte(t.CA)) {
-		return nil, fmt.Errorf("docker: failed to parse CA PEM")
+	cfg := &tls.Config{}
+	if t.CA != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(t.CA)) {
+			return nil, fmt.Errorf("docker: failed to parse CA PEM")
+		}
+		cfg.RootCAs = pool
 	}
-	cert, err := tls.X509KeyPair([]byte(t.Cert), []byte(t.Key))
-	if err != nil {
-		return nil, fmt.Errorf("docker: parse client cert/key: %w", err)
+	switch {
+	case t.Cert != "" && t.Key != "":
+		cert, err := tls.X509KeyPair([]byte(t.Cert), []byte(t.Key))
+		if err != nil {
+			return nil, fmt.Errorf("docker: parse client cert/key: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	case t.Cert != "" || t.Key != "":
+		return nil, fmt.Errorf("docker: client cert and key must be supplied together")
 	}
-	return &tls.Config{
-		RootCAs:      pool,
-		Certificates: []tls.Certificate{cert},
-	}, nil
+	return cfg, nil
 }
 
 // Ping checks daemon reachability and returns the negotiated API version string.

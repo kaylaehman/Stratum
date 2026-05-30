@@ -92,7 +92,13 @@ func SanitizeProbeError(err error) (category, hint string) {
 		return ErrCategorySSHAuthFailed, hintFor(ErrCategorySSHAuthFailed)
 
 	case strings.Contains(msg, "x509") || strings.Contains(msg, "tls") ||
-		strings.Contains(msg, "certificate"):
+		strings.Contains(msg, "certificate") ||
+		// Docker TLS config build failures (CA PEM won't parse, or a client cert
+		// was supplied without its key). These surface BEFORE any network I/O, so
+		// they must be categorized as a TLS/cert problem rather than falling
+		// through to docker_unreachable on the "docker" substring below.
+		strings.Contains(msg, "ca pem") ||
+		(strings.Contains(msg, "client cert") && strings.Contains(msg, "key")):
 		return ErrCategoryTLS, hintFor(ErrCategoryTLS)
 	case strings.Contains(msg, "401") || strings.Contains(msg, "unauthorized") ||
 		strings.Contains(msg, "authentication failure"):
