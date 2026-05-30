@@ -114,12 +114,18 @@ type containerLister interface {
 	ContainerList(ctx context.Context) ([]docker.ContainerInfo, error)
 }
 
-// enumDocker enumerates all containers (running and stopped) on a node.
-func enumDocker(ctx context.Context, cl containerLister, nodeID string) ([]db.Container, error) {
-	cs, err := cl.ContainerList(ctx)
-	if err != nil {
-		return nil, err
-	}
+// containerInfo is the internal representation used between raw enumeration
+// and DB conversion; it carries the HealthStatus field that ContainerInfo exposes.
+type containerInfo = docker.ContainerInfo
+
+// enumDockerRaw enumerates all containers (running and stopped) and returns
+// the raw docker.ContainerInfo slice (which includes HealthStatus).
+func enumDockerRaw(ctx context.Context, cl containerLister) ([]docker.ContainerInfo, error) {
+	return cl.ContainerList(ctx)
+}
+
+// rawToDBContainers maps []docker.ContainerInfo to []db.Container for a node.
+func rawToDBContainers(cs []docker.ContainerInfo, nodeID string) []db.Container {
 	out := make([]db.Container, 0, len(cs))
 	for _, c := range cs {
 		out = append(out, db.Container{
@@ -132,5 +138,15 @@ func enumDocker(ctx context.Context, cl containerLister, nodeID string) ([]db.Co
 			ComposeProject: c.ComposeProject,
 		})
 	}
-	return out, nil
+	return out
+}
+
+// enumDocker enumerates all containers (running and stopped) on a node.
+// Kept for backward compatibility with existing callers (tests that inject a fake).
+func enumDocker(ctx context.Context, cl containerLister, nodeID string) ([]db.Container, error) {
+	cs, err := enumDockerRaw(ctx, cl)
+	if err != nil {
+		return nil, err
+	}
+	return rawToDBContainers(cs, nodeID), nil
 }

@@ -9,6 +9,7 @@ package updates
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -21,6 +22,13 @@ import (
 
 // ClientProvider yields a docker client for a node.
 type ClientProvider func(ctx context.Context, nodeID string) (*docker.Client, error)
+
+// NotifyFunc is called when a running container's image has an update available.
+// Signature matches the existing SetNotify pattern used across services.
+type NotifyFunc func(ctx context.Context, trigger, title, text string)
+
+// triggerImageUpdateAvail is the webhook trigger key for image-update alerts.
+const triggerImageUpdateAvail = "image.update_available"
 
 // Status values.
 const (
@@ -38,6 +46,7 @@ type Service struct {
 	store    db.Store
 	provider ClientProvider
 	ttl      time.Duration
+	notify   NotifyFunc // may be nil; update notifications are best-effort
 
 	mu     sync.Mutex
 	seeded map[string]time.Time
@@ -49,6 +58,10 @@ type Service struct {
 func New(store db.Store, provider ClientProvider, ttl time.Duration) *Service {
 	return &Service{store: store, provider: provider, ttl: ttl, seeded: map[string]time.Time{}}
 }
+
+// SetNotify wires the notification callback. Called during server startup.
+// If nil, image-update notifications are silently skipped.
+func (s *Service) SetNotify(fn NotifyFunc) { s.notify = fn }
 
 func (s *Service) fresh(nodeID string) bool {
 	s.mu.Lock()
@@ -102,11 +115,19 @@ func (s *Service) checkOne(ctx context.Context, client *docker.Client, c db.Cont
 	defer cancel()
 	local, _ := client.LocalRepoDigest(cctx, c.ImageID)
 	remote, rerr := client.RemoteDigest(cctx, c.Image)
-	status := Classify(local, remote, rerr != nil)
+	newStatus := Classify(local, remote, rerr != nil)
 	_ = s.store.UpsertImageUpdate(ctx, db.ImageUpdateRow{
 		ContainerID: c.ID, NodeID: c.NodeID, Image: c.Image,
-		Status: status, CurrentDigest: local, LatestDigest: remote, CheckedAt: time.Now(),
+		Status: newStatus, CurrentDigest: local, LatestDigest: remote, CheckedAt: time.Now(),
 	})
+	// Fire a notification when an update is detected. The webhook dispatcher's
+	// 5-minute rate window prevents alert floods when EnsureFresh runs frequently.
+	if newStatus == StatusUpdateAvailable && s.notify != nil {
+		s.notify(ctx, triggerImageUpdateAvail,
+			"Image update available",
+			fmt.Sprintf("Container %q (%s) has a newer image available", c.Name, c.Image),
+		)
+	}
 }
 
 // ListAll returns the cached update rows across all nodes.

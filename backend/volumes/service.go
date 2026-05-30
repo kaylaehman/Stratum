@@ -7,6 +7,7 @@ package volumes
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -20,6 +21,13 @@ import (
 
 // ClientProvider yields a docker client for a node.
 type ClientProvider func(ctx context.Context, nodeID string) (*docker.Client, error)
+
+// NotifyFunc is called when a volume crosses its size threshold.
+// Signature matches the existing SetNotify pattern used across services.
+type NotifyFunc func(ctx context.Context, trigger, title, text string)
+
+// triggerVolumeThreshold is the webhook trigger key for volume-size alerts.
+const triggerVolumeThreshold = "volume.threshold"
 
 // Status classifies a volume by reference count.
 const (
@@ -54,7 +62,8 @@ type Service struct {
 	store     db.Store
 	provider  ClientProvider
 	mounts    *mountindex.Index
-	threshold int64 // alert threshold in bytes; 0 disables the flag
+	threshold int64      // alert threshold in bytes; 0 disables the flag
+	notify    NotifyFunc // may be nil; volume threshold notifications are best-effort
 }
 
 // New builds the service. thresholdBytes flags volumes at or above the size; 0
@@ -62,6 +71,10 @@ type Service struct {
 func New(store db.Store, provider ClientProvider, mounts *mountindex.Index, thresholdBytes int64) *Service {
 	return &Service{store: store, provider: provider, mounts: mounts, threshold: thresholdBytes}
 }
+
+// SetNotify wires the notification callback. Called during server startup.
+// If nil, volume-threshold notifications are silently skipped.
+func (s *Service) SetNotify(fn NotifyFunc) { s.notify = fn }
 
 // ListForNode returns the volumes on one node with derived status, attached
 // container names (from the mount index), and the persisted size trend.
@@ -174,7 +187,8 @@ func (s *Service) Remove(ctx context.Context, nodeID, name string) error {
 }
 
 // Sample records one size/refcount reading per volume on a node (called by the
-// daily sampler).
+// daily sampler). Fires a volume.threshold notification for any volume that has
+// crossed the configured threshold.
 func (s *Service) Sample(ctx context.Context, nodeID string) error {
 	client, err := s.provider(ctx, nodeID)
 	if err != nil {
@@ -194,6 +208,16 @@ func (s *Service) Sample(ctx context.Context, nodeID string) error {
 			RefCount:   v.RefCount,
 			SampledAt:  now,
 		})
+		if s.threshold > 0 && v.SizeBytes >= s.threshold && s.notify != nil {
+			s.notify(ctx, triggerVolumeThreshold,
+				"Volume size threshold exceeded",
+				fmt.Sprintf("Volume %q on node %s is %d MB (threshold: %d MB)",
+					v.Name, nodeID,
+					v.SizeBytes>>20,
+					s.threshold>>20,
+				),
+			)
+		}
 	}
 	return nil
 }

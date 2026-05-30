@@ -17,6 +17,10 @@ import (
 	"github.com/kaylaehman/stratum/backend/proxmox"
 )
 
+// triggerBackupFailed is the webhook trigger key fired on backup errors.
+// Defined here (not imported from webhooks) to keep the packages decoupled.
+const triggerBackupFailed = "backup.failed"
+
 // ExecFunc runs a command on a node over SSH (matches fs.Service.Exec).
 type ExecFunc func(ctx context.Context, nodeID, cmd string, args ...string) (string, error)
 
@@ -24,13 +28,21 @@ type ExecFunc func(ctx context.Context, nodeID, cmd string, args ...string) (str
 // node has no Proxmox credentials configured.
 type ProxmoxFunc func(ctx context.Context, nodeID string) (*proxmox.Client, error)
 
+// NotifyFunc is called when a backup job ends in error. The function signature
+// matches webhooks.Dispatcher.Notify. Accepting a function type keeps the
+// backup package independent of the webhooks package and simplifies testing.
+//
+// trigger is always webhooks.TriggerBackupFailed.
+type NotifyFunc func(ctx context.Context, trigger, title, text string)
+
 const backupTimeout = time.Hour
 
 // Service starts and records volume and Proxmox guest backups.
 type Service struct {
 	store   db.Store
 	exec    ExecFunc
-	proxmox ProxmoxFunc // may be nil; guest backup returns error if nil
+	proxmox ProxmoxFunc  // may be nil; guest backup returns error if nil
+	notify  NotifyFunc   // may be nil; notifications are best-effort
 }
 
 // New wires the store + SSH exec. proxmoxFn may be nil in tests that only
@@ -42,6 +54,10 @@ func New(store db.Store, exec ExecFunc) *Service {
 // SetProxmox wires the Proxmox client provider. Called during server startup
 // after the nodeconn.Manager is available.
 func (s *Service) SetProxmox(fn ProxmoxFunc) { s.proxmox = fn }
+
+// SetNotify wires the notification callback. Called during server startup.
+// If nil, backup-failure notifications are silently skipped.
+func (s *Service) SetNotify(fn NotifyFunc) { s.notify = fn }
 
 // StartVolumeBackup validates inputs, records a running backup row, and runs the
 // archive in the background. Returns the backup id immediately.
@@ -74,6 +90,12 @@ func (s *Service) run(nodeID, id, volume, destDir, destPath string) {
 		_ = s.store.UpdateBackup(ctx, db.BackupRow{
 			ID: id, SizeBytes: size, Status: status, Error: errMsg, FinishedAt: &t,
 		})
+		if status == "error" && s.notify != nil {
+			s.notify(ctx, triggerBackupFailed,
+				"Volume backup failed",
+				fmt.Sprintf("Volume %q backup on node %s failed: %s", volume, nodeID, errMsg),
+			)
+		}
 	}
 
 	// docker run mounts the volume read-only + the dest dir, tars into it. All
@@ -141,6 +163,12 @@ func (s *Service) runGuest(nodeID, id string, cl *proxmox.Client, pveNode string
 		_ = s.store.UpdateBackup(ctx, db.BackupRow{
 			ID: id, Status: status, Error: errMsg, FinishedAt: &t,
 		})
+		if status == "error" && s.notify != nil {
+			s.notify(ctx, triggerBackupFailed,
+				"Proxmox guest backup failed",
+				fmt.Sprintf("Backup of VMID %d on node %s (%s) failed: %s", vmid, nodeID, pveNode, errMsg),
+			)
+		}
 	}
 
 	upid, err := cl.VzdumpBackup(ctx, pveNode, vmid, storage)

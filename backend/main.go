@@ -133,16 +133,28 @@ func run(logger *slog.Logger) error {
 	securityScanner.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
 	})
+	poller.SetNotify(func(ctx context.Context, trigger, title, text string) {
+		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+	})
 	volumeSvc := volumes.New(store, volumes.ClientProvider(dockerForNode), mountIdx, volumeAlertBytes())
+	volumeSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
+		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+	})
 	metricsSampler := metrics.NewSampler(store, metrics.ClientProvider(dockerForNode), 15*time.Second, 7*24*time.Hour)
 	topologySvc := topology.New(store, topology.ClientProvider(dockerForNode))
 	depGraphSvc := depgraph.New(store, depgraph.ClientProvider(dockerForNode), mountIdx)
 	updateSvc := updates.New(store, updates.ClientProvider(dockerForNode), 6*time.Hour)
+	updateSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
+		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+	})
 	secretSvc := secrets.New(store, cipher)
 	filesSvc := fs.NewService(store, cipher, uploadMaxBytes())
 	schedulerSvc := scheduler.New(filesSvc.Exec)
 	cveSvc := cve.New(store, cve.ClientProvider(dockerForNode), cve.NewScanner())
 	backupSvc := backup.New(store, filesSvc.Exec)
+	backupSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
+		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+	})
 	backupSvc.SetProxmox(func(ctx context.Context, nodeID string) (*proxmox.Client, error) {
 		clients, err := conn.Get(ctx, nodeID)
 		if err != nil {
