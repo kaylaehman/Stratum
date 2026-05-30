@@ -1121,6 +1121,14 @@ export interface CVEDetailResponse {
   vulns: CVEVuln[]
 }
 
+export interface CVEStatusResponse {
+  available: boolean
+  path: string
+  version: string
+  db_updated_at?: string
+  db_age_days?: number
+}
+
 // Script Runner types (Feature 27)
 
 export interface Script {

@@ -43,6 +43,28 @@ func (h *Handlers) CVEScans(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"available": h.CVE.Available(), "scans": out})
 }
 
+// CVEStatus reports scanner presence + vulnerability-DB freshness so the UI can
+// show "Vulnerability DB N days old" / "ready" instead of "not available" when
+// Trivy is bundled. Admin-gated to match the other CVE endpoints.
+func (h *Handlers) CVEStatus(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	st := h.CVE.Status(r.Context())
+	out := map[string]any{
+		"available": st.Available,
+		"path":      st.Path,
+		"version":   st.Version,
+	}
+	if st.DBUpdatedAt != nil {
+		out["db_updated_at"] = st.DBUpdatedAt.UTC().Format(time.RFC3339)
+	}
+	if st.DBAgeDays != nil {
+		out["db_age_days"] = *st.DBAgeDays
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // CVEDetail returns the vulnerability list for a scanned image digest.
 func (h *Handlers) CVEDetail(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
