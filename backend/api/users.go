@@ -444,3 +444,25 @@ func (h *Handlers) RevokeOwnSession(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// PruneExpiredSessions hard-deletes all expired sessions belonging to the
+// calling user. Useful for housekeeping after many tokens have naturally
+// expired. Audited.
+func (h *Handlers) PruneExpiredSessions(w http.ResponseWriter, r *http.Request) {
+	u, ok := middleware.UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	now := time.Now()
+	if err := h.Store.DeleteExpiredSessionsByUser(r.Context(), u.ID, now); err != nil {
+		writeError(w, http.StatusInternalServerError, "prune_failed")
+		return
+	}
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = "auth.sessions_prune_expired"
+		e.TargetType = ptr(activity.TargetUser)
+		e.TargetID = &u.ID
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

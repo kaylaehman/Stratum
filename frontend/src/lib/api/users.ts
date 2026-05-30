@@ -100,3 +100,13 @@ export function useRevokeSession() {
     },
   })
 }
+
+export function usePruneExpiredSessions() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiDelete<void>('/api/sessions/expired'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: SESSIONS_KEY })
+    },
+  })
+}

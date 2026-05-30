@@ -538,6 +538,7 @@ type Store interface {
 	RevokeSession(ctx context.Context, id string, at time.Time) error
 	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
 	RevokeAllUserSessions(ctx context.Context, userID string, at time.Time) error
+	DeleteExpiredSessionsByUser(ctx context.Context, userID string, now time.Time) error
 
 	// Activity (append-only; no update/delete by design)
 	AppendActivity(ctx context.Context, e ActivityEntry) error

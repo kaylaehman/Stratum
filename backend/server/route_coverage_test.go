@@ -150,6 +150,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"PUT /api/users/{id}":                       true,
 		"DELETE /api/users/{id}":                    true,
 		"DELETE /api/sessions/{id}":                 true,
+		"DELETE /api/sessions/expired":              true,
 		"POST /api/auth/change-password":            true,
 	}
 
