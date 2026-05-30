@@ -3,11 +3,13 @@ package proxy
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/fs"
 )
 
 // httpTimeout bounds a single admin-API call to a proxy tool.
@@ -19,6 +21,7 @@ type Service struct {
 	store  db.Store
 	cipher *crypto.Cipher
 	http   *http.Client
+	files  *fs.Service // optional; enables file-based adapters (e.g. cloudflared)
 }
 
 // New wires the store + secret cipher. The shared http client is injected into
@@ -36,6 +39,10 @@ func New(store db.Store, cipher *crypto.Cipher) *Service {
 	}
 	return &Service{store: store, cipher: cipher, http: hc}
 }
+
+// WithFiles wires a filesystem service so file-based adapters (e.g. cloudflared)
+// can read host config files via SFTP. Call once after New.
+func (s *Service) WithFiles(f *fs.Service) { s.files = f }
 
 // Status is the API view for a node: the detected tool (if any), its
 // capabilities, whether an admin endpoint is configured, the live rules (when
@@ -65,6 +72,8 @@ func (s *Service) detect(ctx context.Context, nodeID string) (Adapter, error) {
 }
 
 // conn builds the admin connection (endpoint + decrypted token) for a node.
+// When a filesystem service is wired, ReadFile is populated so file-based
+// adapters can read host config files.
 func (s *Service) conn(ctx context.Context, nodeID string) (Conn, bool) {
 	cfg, err := s.store.GetProxyConfig(ctx, nodeID)
 	if err != nil {
@@ -74,6 +83,12 @@ func (s *Service) conn(ctx context.Context, nodeID string) (Conn, bool) {
 	if len(cfg.TokenEncrypted) > 0 {
 		if pt, derr := s.cipher.Open(cfg.TokenEncrypted); derr == nil {
 			c.Token = string(pt)
+		}
+	}
+	if s.files != nil {
+		filesSvc := s.files
+		c.ReadFile = func(ctx context.Context, path string) (io.ReadCloser, error) {
+			return filesSvc.Download(ctx, nodeID, path)
 		}
 	}
 	return c, cfg.Endpoint != ""
@@ -92,7 +107,15 @@ func (s *Service) Status(ctx context.Context, nodeID string) (Status, error) {
 	st.Detected = adapter.Name()
 	st.Capabilities = adapter.Capabilities()
 
-	conn, configured := s.conn(ctx, nodeID)
+	conn, endpointConfigured := s.conn(ctx, nodeID)
+	// Enrich conn with bind-mount candidates for file-based adapters.
+	s.enrichMountCandidates(ctx, nodeID, adapter.Name(), &conn)
+
+	// A file-based adapter (e.g. cloudflared) is "configured" when host file
+	// access is available, even without an admin endpoint.
+	fileAccessAvailable := conn.ReadFile != nil
+	configured := endpointConfigured || (isFileBased(adapter) && fileAccessAvailable)
+
 	st.Configured = configured
 	st.Endpoint = conn.Endpoint
 	st.HasToken = conn.Token != ""
@@ -105,9 +128,33 @@ func (s *Service) Status(ctx context.Context, nodeID string) (Status, error) {
 			st.Rules = rules
 		}
 	} else if adapter.Capabilities().List && !configured {
-		st.RuleError = "admin endpoint not configured"
+		if isFileBased(adapter) {
+			st.RuleError = "host file access not available (configure SSH credentials for this node)"
+		} else {
+			st.RuleError = "admin endpoint not configured"
+		}
 	}
 	return st, nil
+}
+
+// isFileBased reports whether an adapter reads its rules from the host
+// filesystem rather than an HTTP admin API.
+func isFileBased(a Adapter) bool {
+	_, ok := a.(*Cloudflared)
+	return ok
+}
+
+// enrichMountCandidates queries bind mounts for file-based adapters and adds
+// host-path config candidates to the conn. No-op for API-based adapters.
+func (s *Service) enrichMountCandidates(ctx context.Context, nodeID, adapterName string, conn *Conn) {
+	if adapterName != "cloudflared" {
+		return
+	}
+	mounts, err := s.store.ListMountsByNode(ctx, nodeID)
+	if err != nil {
+		return
+	}
+	conn.MountCandidates = mountBasedCandidates(mounts)
 }
 
 // SetConfig stores a node's proxy admin endpoint + optional token (sealed).

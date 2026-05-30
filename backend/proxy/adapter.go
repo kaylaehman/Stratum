@@ -5,7 +5,10 @@
 // with no changes to the API, data model, or UI.
 package proxy
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // Capabilities describes what an adapter can do, so the UI can show read-only
 // vs editable affordances.
@@ -58,9 +61,17 @@ type Adapter interface {
 }
 
 // Conn carries everything an adapter needs to reach its tool for one call: the
-// admin/API base URL and an optional auth token. The service builds it from the
-// node's detected config + the secrets vault.
+// admin/API base URL, an optional auth token, and optional host-filesystem
+// access for config-file adapters. The service builds it from the node's
+// detected config + the secrets vault.
 type Conn struct {
 	Endpoint string
 	Token    string
+	// ReadFile reads a file from the node's host filesystem. Nil when host
+	// file access is not available (e.g. no SSH credentials configured).
+	ReadFile func(ctx context.Context, path string) (io.ReadCloser, error)
+	// MountCandidates carries pre-resolved host-side config file paths derived
+	// from the container's bind mounts. Used by file-based adapters
+	// (e.g. cloudflared) to locate their config before falling back to defaults.
+	MountCandidates []string
 }
