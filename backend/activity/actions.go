@@ -73,7 +73,8 @@ const (
 	ActionScriptDelete = "script.delete"
 	ActionScriptRun    = "script.run"
 
-	ActionBackupStart = "backup.start"
+	ActionBackupStart      = "backup.start"
+	ActionBackupGuestStart = "backup.guest_start"
 
 	ActionAIAsk    = "ai.ask"
 	ActionAIConfig = "ai.config"
@@ -201,6 +202,7 @@ var actionCatalog = []ActionInfo{
 	{ActionScriptRun, "Script run", "script", TargetScript},
 
 	{ActionBackupStart, "Backup started", "backup", TargetNode},
+	{ActionBackupGuestStart, "Proxmox guest backup started", "backup", TargetNode},
 
 	{ActionAIAsk, "AI assistant query", "ai", TargetAI},
 	{ActionAIConfig, "AI provider configured", "ai", TargetAI},

@@ -4,9 +4,9 @@ import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
 import { useVolumes } from '../lib/api/volumes'
-import { useBackups, useStartBackup } from '../lib/api/backups'
+import { useBackups, useStartBackup, useStartGuestBackup } from '../lib/api/backups'
 import { ApiError } from '../lib/api'
-import type { Backup, BackupStatus } from '../types/api'
+import type { Backup, BackupStatus, TreeNode, VM } from '../types/api'
 
 // ---- Helpers ----
 
@@ -29,6 +29,9 @@ function errorLabel(body: unknown): string {
     if (code === 'invalid_volume_or_dest') return 'Invalid volume name or destination path.'
     if (code === 'docker_not_available') return 'Docker is not available on this node.'
     if (code === 'node_not_found') return 'Node not found.'
+    if (code === 'vm_not_found') return 'VM not found on this node.'
+    if (code === 'invalid_vmid') return 'Invalid VMID.'
+    if (code === 'backup_failed') return 'Backup failed to start.'
   }
   return 'An unexpected error occurred.'
 }
@@ -103,6 +106,9 @@ function BackupRow({ backup, nodeName }: BackupRowProps) {
       <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
         {nodeName}
       </td>
+      <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '11px' }}>
+        {backup.kind}
+      </td>
       <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
         {backup.target}
       </td>
@@ -125,21 +131,32 @@ function BackupRow({ backup, nodeName }: BackupRowProps) {
   )
 }
 
-// ---- Trigger form ----
+// ---- Docker volume trigger form ----
 
-interface TriggerFormProps {
+interface DockerTriggerProps {
   nodeOptions: Array<{ id: string; name: string }>
   volumeOptions: string[]
   onNodeChange: (id: string) => void
 }
 
-function TriggerForm({ nodeOptions, volumeOptions, onNodeChange }: TriggerFormProps) {
+function DockerTriggerFields({ nodeOptions, volumeOptions, onNodeChange }: DockerTriggerProps) {
   const [selectedNode, setSelectedNode] = useState(nodeOptions[0]?.id ?? '')
   const [volume, setVolume] = useState('')
   const [destDir, setDestDir] = useState('/mnt/backups')
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; msg: string } | null>(null)
 
   const { mutate: startBackup, isPending } = useStartBackup()
+
+  const inputStyle: React.CSSProperties = {
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-default)',
+    color: 'var(--text-primary)',
+    borderRadius: '3px',
+    padding: '5px 8px',
+    fontSize: '12px',
+    fontFamily: 'inherit',
+    width: '100%',
+  }
 
   function handleNodeChange(id: string) {
     setSelectedNode(id)
@@ -159,14 +176,116 @@ function TriggerForm({ nodeOptions, volumeOptions, onNodeChange }: TriggerFormPr
           setFeedback({ kind: 'ok', msg: `Backup started (ID: ${res.backup_id})` })
         },
         onError: (err) => {
-          const msg = err instanceof ApiError
-            ? errorLabel(err.body)
-            : 'Failed to start backup.'
+          const msg = err instanceof ApiError ? errorLabel(err.body) : 'Failed to start backup.'
           setFeedback({ kind: 'error', msg })
         },
       },
     )
   }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="flex flex-wrap gap-3 items-end">
+        <div style={{ minWidth: '160px', flex: '1' }}>
+          <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Node</label>
+          <select value={selectedNode} onChange={(e) => handleNodeChange(e.target.value)} style={inputStyle}>
+            {nodeOptions.length === 0 && <option value="">No Docker nodes available</option>}
+            {nodeOptions.map((n) => (
+              <option key={n.id} value={n.id}>{n.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ minWidth: '160px', flex: '1' }}>
+          <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Volume</label>
+          {volumeOptions.length > 0 ? (
+            <select value={volume} onChange={(e) => setVolume(e.target.value)} style={inputStyle}>
+              <option value="">Select volume…</option>
+              {volumeOptions.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              placeholder="volume name"
+              value={volume}
+              onChange={(e) => setVolume(e.target.value)}
+              style={inputStyle}
+              className="font-mono"
+            />
+          )}
+        </div>
+
+        <div style={{ minWidth: '180px', flex: '2' }}>
+          <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Destination directory</label>
+          <input
+            type="text"
+            value={destDir}
+            onChange={(e) => setDestDir(e.target.value)}
+            style={inputStyle}
+            className="font-mono"
+          />
+        </div>
+
+        <div style={{ flexShrink: 0 }}>
+          <button
+            type="submit"
+            disabled={isPending || !selectedNode || !volume.trim() || !destDir.trim()}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+            style={{
+              backgroundColor: 'var(--accent-glow)',
+              border: '1px solid var(--accent)',
+              color: 'var(--accent)',
+              borderRadius: '3px',
+              cursor: isPending || !selectedNode || !volume.trim() || !destDir.trim() ? 'default' : 'pointer',
+              opacity: isPending || !selectedNode || !volume.trim() || !destDir.trim() ? 0.55 : 1,
+            }}
+          >
+            {isPending
+              ? <><Loader size={11} className="animate-spin" />Starting…</>
+              : <><Play size={11} />Start backup</>
+            }
+          </button>
+        </div>
+      </div>
+
+      {feedback && (
+        <div
+          className="flex items-center gap-2 mt-3 px-2 py-1.5 text-xs"
+          style={{
+            backgroundColor: feedback.kind === 'ok' ? 'rgba(64,200,120,0.08)' : 'rgba(232,64,64,0.08)',
+            border: `1px solid ${feedback.kind === 'ok' ? 'rgba(64,200,120,0.3)' : 'rgba(232,64,64,0.3)'}`,
+            borderRadius: '3px',
+            color: feedback.kind === 'ok' ? 'var(--status-ok, #40c878)' : 'var(--status-error)',
+          }}
+        >
+          {feedback.kind === 'ok'
+            ? <CheckCircle size={11} style={{ flexShrink: 0 }} />
+            : <AlertTriangle size={11} style={{ flexShrink: 0 }} />
+          }
+          {feedback.msg}
+        </div>
+      )}
+    </form>
+  )
+}
+
+// ---- Proxmox vzdump trigger form ----
+
+interface ProxmoxTriggerProps {
+  nodeOptions: Array<{ id: string; name: string; vms: VM[] }>
+}
+
+function ProxmoxTriggerFields({ nodeOptions }: ProxmoxTriggerProps) {
+  const [selectedNode, setSelectedNode] = useState(nodeOptions[0]?.id ?? '')
+  const [selectedVmid, setSelectedVmid] = useState<number | ''>(
+    nodeOptions[0]?.vms[0]?.proxmox_vmid ?? '',
+  )
+  const [storage, setStorage] = useState('local')
+  const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; msg: string } | null>(null)
+
+  const { mutate: startGuestBackup, isPending } = useStartGuestBackup()
 
   const inputStyle: React.CSSProperties = {
     backgroundColor: 'var(--bg-surface)',
@@ -179,131 +298,221 @@ function TriggerForm({ nodeOptions, volumeOptions, onNodeChange }: TriggerFormPr
     width: '100%',
   }
 
+  const selectedNodeObj = nodeOptions.find((n) => n.id === selectedNode)
+  const vms = selectedNodeObj?.vms ?? []
+
+  function handleNodeChange(id: string) {
+    setSelectedNode(id)
+    const node = nodeOptions.find((n) => n.id === id)
+    setSelectedVmid(node?.vms[0]?.proxmox_vmid ?? '')
+    setFeedback(null)
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setFeedback(null)
+    if (!selectedNode || selectedVmid === '') return
+
+    startGuestBackup(
+      { nodeId: selectedNode, vmid: selectedVmid as number, storage: storage.trim() },
+      {
+        onSuccess: (res) => {
+          setFeedback({ kind: 'ok', msg: `Backup started (ID: ${res.backup_id})` })
+        },
+        onError: (err) => {
+          const msg = err instanceof ApiError ? errorLabel(err.body) : 'Failed to start backup.'
+          setFeedback({ kind: 'error', msg })
+        },
+      },
+    )
+  }
+
+  const canSubmit = !isPending && !!selectedNode && selectedVmid !== '' && storage.trim() !== ''
+
   return (
     <form onSubmit={handleSubmit}>
-      <div
-        style={{
-          backgroundColor: 'var(--bg-elevated)',
-          border: '1px solid var(--border-default)',
-          borderRadius: '3px',
-          padding: '16px 20px',
-          marginBottom: '24px',
-        }}
-      >
-        <div className="flex items-center gap-2 mb-4">
-          <Archive size={13} style={{ color: 'var(--text-secondary)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>
-            Trigger Backup
-          </span>
+      <div className="flex flex-wrap gap-3 items-end">
+        <div style={{ minWidth: '160px', flex: '1' }}>
+          <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Node</label>
+          <select value={selectedNode} onChange={(e) => handleNodeChange(e.target.value)} style={inputStyle}>
+            {nodeOptions.length === 0 && <option value="">No Proxmox nodes available</option>}
+            {nodeOptions.map((n) => (
+              <option key={n.id} value={n.id}>{n.name}</option>
+            ))}
+          </select>
         </div>
 
-        <div className="flex flex-wrap gap-3 items-end">
-          {/* Node selector */}
-          <div style={{ minWidth: '160px', flex: '1' }}>
-            <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Node</label>
+        <div style={{ minWidth: '160px', flex: '1' }}>
+          <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>VM / LXC</label>
+          {vms.length > 0 ? (
             <select
-              value={selectedNode}
-              onChange={(e) => handleNodeChange(e.target.value)}
+              value={selectedVmid === '' ? '' : String(selectedVmid)}
+              onChange={(e) => setSelectedVmid(e.target.value === '' ? '' : Number(e.target.value))}
               style={inputStyle}
             >
-              {nodeOptions.length === 0 && (
-                <option value="">No docker nodes available</option>
-              )}
-              {nodeOptions.map((n) => (
-                <option key={n.id} value={n.id}>{n.name}</option>
+              <option value="">Select guest…</option>
+              {vms.map((v) => (
+                <option key={v.proxmox_vmid} value={String(v.proxmox_vmid)}>
+                  {v.name ? `${v.name} (${v.proxmox_vmid})` : String(v.proxmox_vmid)} — {v.kind.toUpperCase()}
+                </option>
               ))}
             </select>
-          </div>
-
-          {/* Volume */}
-          <div style={{ minWidth: '160px', flex: '1' }}>
-            <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Volume</label>
-            {volumeOptions.length > 0 ? (
-              <select
-                value={volume}
-                onChange={(e) => setVolume(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Select volume…</option>
-                {volumeOptions.map((v) => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type="text"
-                placeholder="volume name"
-                value={volume}
-                onChange={(e) => setVolume(e.target.value)}
-                style={inputStyle}
-                className="font-mono"
-              />
-            )}
-          </div>
-
-          {/* Destination directory */}
-          <div style={{ minWidth: '180px', flex: '2' }}>
-            <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Destination directory</label>
-            <input
-              type="text"
-              value={destDir}
-              onChange={(e) => setDestDir(e.target.value)}
-              style={inputStyle}
-              className="font-mono"
-            />
-          </div>
-
-          {/* Submit */}
-          <div style={{ flexShrink: 0 }}>
-            <button
-              type="submit"
-              disabled={isPending || !selectedNode || !volume.trim() || !destDir.trim()}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+          ) : (
+            <div
+              className="text-xs px-2 py-1.5"
               style={{
-                backgroundColor: 'var(--accent-glow)',
-                border: '1px solid var(--accent)',
-                color: 'var(--accent)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: '3px',
-                cursor: isPending || !selectedNode || !volume.trim() || !destDir.trim() ? 'default' : 'pointer',
-                opacity: isPending || !selectedNode || !volume.trim() || !destDir.trim() ? 0.55 : 1,
+                color: 'var(--text-muted)',
+                backgroundColor: 'var(--bg-surface)',
               }}
             >
-              {isPending
-                ? <><Loader size={11} className="animate-spin" />Starting…</>
-                : <><Play size={11} />Start backup</>
-              }
-            </button>
-          </div>
+              No guests enumerated yet
+            </div>
+          )}
         </div>
 
-        {/* Feedback */}
-        {feedback && (
-          <div
-            className="flex items-center gap-2 mt-3 px-2 py-1.5 text-xs"
+        <div style={{ minWidth: '140px', flex: '1' }}>
+          <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Storage</label>
+          <input
+            type="text"
+            placeholder="local"
+            value={storage}
+            onChange={(e) => setStorage(e.target.value)}
+            style={inputStyle}
+            className="font-mono"
+          />
+        </div>
+
+        <div style={{ flexShrink: 0 }}>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5"
             style={{
-              backgroundColor: feedback.kind === 'ok'
-                ? 'rgba(64,200,120,0.08)'
-                : 'rgba(232,64,64,0.08)',
-              border: `1px solid ${feedback.kind === 'ok' ? 'rgba(64,200,120,0.3)' : 'rgba(232,64,64,0.3)'}`,
+              backgroundColor: 'var(--accent-glow)',
+              border: '1px solid var(--accent)',
+              color: 'var(--accent)',
               borderRadius: '3px',
-              color: feedback.kind === 'ok' ? 'var(--status-ok, #40c878)' : 'var(--status-error)',
+              cursor: canSubmit ? 'pointer' : 'default',
+              opacity: canSubmit ? 1 : 0.55,
             }}
           >
-            {feedback.kind === 'ok'
-              ? <CheckCircle size={11} style={{ flexShrink: 0 }} />
-              : <AlertTriangle size={11} style={{ flexShrink: 0 }} />
+            {isPending
+              ? <><Loader size={11} className="animate-spin" />Starting…</>
+              : <><Play size={11} />Start backup</>
             }
-            {feedback.msg}
-          </div>
-        )}
+          </button>
+        </div>
       </div>
+
+      {feedback && (
+        <div
+          className="flex items-center gap-2 mt-3 px-2 py-1.5 text-xs"
+          style={{
+            backgroundColor: feedback.kind === 'ok' ? 'rgba(64,200,120,0.08)' : 'rgba(232,64,64,0.08)',
+            border: `1px solid ${feedback.kind === 'ok' ? 'rgba(64,200,120,0.3)' : 'rgba(232,64,64,0.3)'}`,
+            borderRadius: '3px',
+            color: feedback.kind === 'ok' ? 'var(--status-ok, #40c878)' : 'var(--status-error)',
+          }}
+        >
+          {feedback.kind === 'ok'
+            ? <CheckCircle size={11} style={{ flexShrink: 0 }} />
+            : <AlertTriangle size={11} style={{ flexShrink: 0 }} />
+          }
+          {feedback.msg}
+        </div>
+      )}
     </form>
+  )
+}
+
+// ---- Combined trigger panel ----
+
+type BackupKind = 'docker' | 'proxmox'
+
+interface TriggerPanelProps {
+  dockerNodes: TreeNode[]
+  proxmoxNodes: TreeNode[]
+  volumeOptions: string[]
+  onDockerNodeChange: (id: string) => void
+}
+
+function TriggerPanel({ dockerNodes, proxmoxNodes, volumeOptions, onDockerNodeChange }: TriggerPanelProps) {
+  const hasDocker = dockerNodes.length > 0
+  const hasProxmox = proxmoxNodes.length > 0
+  const defaultKind: BackupKind = hasProxmox ? 'proxmox' : 'docker'
+  const [kind, setKind] = useState<BackupKind>(defaultKind)
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: '4px 10px',
+    fontSize: '11px',
+    fontFamily: 'inherit',
+    border: 'none',
+    borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+    background: 'transparent',
+    color: active ? 'var(--accent)' : 'var(--text-muted)',
+    cursor: 'pointer',
+    fontWeight: active ? 600 : 400,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase' as const,
+  })
+
+  return (
+    <div
+      style={{
+        backgroundColor: 'var(--bg-elevated)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '3px',
+        padding: '16px 20px',
+        marginBottom: '24px',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <Archive size={13} style={{ color: 'var(--text-secondary)' }} />
+        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>
+          Trigger Backup
+        </span>
+      </div>
+
+      {/* Kind tabs — only show if both types are available */}
+      {hasDocker && hasProxmox && (
+        <div className="flex gap-0 mb-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <button style={tabStyle(kind === 'proxmox')} onClick={() => setKind('proxmox')} type="button">
+            Proxmox (vzdump)
+          </button>
+          <button style={tabStyle(kind === 'docker')} onClick={() => setKind('docker')} type="button">
+            Docker volume
+          </button>
+        </div>
+      )}
+
+      {(!hasDocker && !hasProxmox) && (
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          No backup-capable nodes registered.
+        </div>
+      )}
+
+      {(kind === 'docker' || !hasProxmox) && hasDocker && (
+        <DockerTriggerFields
+          nodeOptions={dockerNodes.map((n) => ({ id: n.id, name: n.name }))}
+          volumeOptions={volumeOptions}
+          onNodeChange={onDockerNodeChange}
+        />
+      )}
+
+      {(kind === 'proxmox' || !hasDocker) && hasProxmox && (
+        <ProxmoxTriggerFields
+          nodeOptions={proxmoxNodes.map((n) => ({ id: n.id, name: n.name, vms: n.vms }))}
+        />
+      )}
+    </div>
   )
 }
 
 // ---- Main page ----
 
-const TABLE_COLS = ['Node', 'Volume', 'Status', 'Size', 'Started', 'Finished', 'Destination']
+const TABLE_COLS = ['Node', 'Kind', 'Target', 'Status', 'Size', 'Started', 'Finished', 'Destination']
 
 export default function Backups() {
   const { data: me } = useMe()
@@ -312,6 +521,7 @@ export default function Backups() {
   const { data: tree } = useTree()
   const nodes = tree?.nodes ?? []
   const dockerNodes = nodes.filter((n) => n.capabilities.docker)
+  const proxmoxNodes = nodes.filter((n) => n.capabilities.proxmox && n.proxmox_auth_status === 'confirmed')
 
   const { data: volumesData } = useVolumes()
   const allVolumes = volumesData?.volumes ?? []
@@ -319,11 +529,11 @@ export default function Backups() {
   const { data, isLoading } = useBackups()
   const backups = data?.backups ?? []
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('')
+  const [selectedDockerNodeId, setSelectedDockerNodeId] = useState<string>('')
 
-  const activeNodeId = selectedNodeId || dockerNodes[0]?.id || ''
+  const activeDockerNodeId = selectedDockerNodeId || dockerNodes[0]?.id || ''
   const volumeOptions = allVolumes
-    .filter((v) => v.node_id === activeNodeId)
+    .filter((v) => v.node_id === activeDockerNodeId)
     .map((v) => v.name)
 
   function nodeName(nodeId: string): string {
@@ -368,11 +578,12 @@ export default function Backups() {
           </h1>
         </div>
 
-        {/* Trigger form */}
-        <TriggerForm
-          nodeOptions={dockerNodes.map((n) => ({ id: n.id, name: n.name }))}
+        {/* Trigger panel */}
+        <TriggerPanel
+          dockerNodes={dockerNodes}
+          proxmoxNodes={proxmoxNodes}
           volumeOptions={volumeOptions}
-          onNodeChange={setSelectedNodeId}
+          onDockerNodeChange={setSelectedDockerNodeId}
         />
 
         {/* History header */}

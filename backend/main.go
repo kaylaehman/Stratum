@@ -21,24 +21,25 @@ import (
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
+	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/config"
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/docker"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
 	"github.com/kaylaehman/stratum/backend/logtail"
+	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/proxy"
+	"github.com/kaylaehman/stratum/backend/proxmox"
 	"github.com/kaylaehman/stratum/backend/recreate"
-	"github.com/kaylaehman/stratum/backend/metrics"
-	"github.com/kaylaehman/stratum/backend/depgraph"
-	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/cve"
@@ -142,6 +143,16 @@ func run(logger *slog.Logger) error {
 	schedulerSvc := scheduler.New(filesSvc.Exec)
 	cveSvc := cve.New(store, cve.ClientProvider(dockerForNode), cve.NewScanner())
 	backupSvc := backup.New(store, filesSvc.Exec)
+	backupSvc.SetProxmox(func(ctx context.Context, nodeID string) (*proxmox.Client, error) {
+		clients, err := conn.Get(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		if clients.Proxmox == nil {
+			return nil, fmt.Errorf("node %s has no proxmox client", nodeID)
+		}
+		return clients.Proxmox, nil
+	})
 	twoFASvc := twofa.New(store, cipher)
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
 	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL)

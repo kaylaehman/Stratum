@@ -282,6 +282,92 @@ func guestsFromResponse(items []guestRaw, kind string) ([]Guest, error) {
 	return guests, nil
 }
 
+// vzdumpBody is the request body sent to POST /api2/json/nodes/{node}/vzdump.
+type vzdumpBody struct {
+	VMID     int    `json:"vmid"`
+	Storage  string `json:"storage,omitempty"`
+	Mode     string `json:"mode"`
+	Compress string `json:"compress"`
+}
+
+// vzdumpResponse wraps the UPID (Proxmox task ID) returned by the vzdump endpoint.
+type vzdumpResponse struct {
+	Data string `json:"data"` // UPID string, e.g. "UPID:pve:..."
+}
+
+// taskStatusResponse wraps GET /api2/json/nodes/{node}/tasks/{upid}/status.
+type taskStatusResponse struct {
+	Data struct {
+		Status     string `json:"status"` // "running" | "stopped"
+		ExitStatus string `json:"exitstatus"`
+	} `json:"data"`
+}
+
+// VzdumpBackup triggers a vzdump backup for the given vmid on pveNode, waits
+// for the task to complete, and returns the UPID. storage is the Proxmox
+// storage ID (e.g. "local"); pass "" to let Proxmox use its default.
+// The backup uses mode=snapshot and compress=zstd.
+func (c *Client) VzdumpBackup(ctx context.Context, pveNode string, vmid int, storage string) (string, error) {
+	body := vzdumpBody{VMID: vmid, Storage: storage, Mode: "snapshot", Compress: "zstd"}
+	url := c.endpoint + "/api2/json/nodes/" + pveNode + "/vzdump"
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("proxmox: marshal vzdump body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(b)))
+	if err != nil {
+		return "", fmt.Errorf("proxmox: build vzdump request: %w", err)
+	}
+	req.Header.Set("Authorization", "PVEAPIToken="+c.tokenID+"="+c.secret)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("proxmox: vzdump request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("proxmox: vzdump returned status %d", resp.StatusCode)
+	}
+
+	var vr vzdumpResponse
+	if err := json.NewDecoder(resp.Body).Decode(&vr); err != nil {
+		return "", fmt.Errorf("proxmox: decode vzdump response: %w", err)
+	}
+	return vr.Data, nil
+}
+
+// WaitTask polls the task status endpoint until the task is no longer running
+// or ctx is cancelled. Returns the exit status string ("OK" on success).
+func (c *Client) WaitTask(ctx context.Context, pveNode, upid string) (string, error) {
+	path := "/api2/json/nodes/" + pveNode + "/tasks/" + upid + "/status"
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+		var ts taskStatusResponse
+		if err := c.getJSON(ctx, path, &ts); err != nil {
+			return "", err
+		}
+		if ts.Data.Status != "running" {
+			return ts.Data.ExitStatus, nil
+		}
+		// Brief sleep before the next poll — respects cancellation.
+		t := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return "", ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
 // QemuList lists QEMU VMs on a cluster node via GET /api2/json/nodes/{node}/qemu.
 // Sets Kind="qemu" on each returned Guest.
 func (c *Client) QemuList(ctx context.Context, node string) ([]Guest, error) {
