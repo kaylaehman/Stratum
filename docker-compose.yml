@@ -7,6 +7,10 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      # Default build is the slim image (no Trivy) so redeploys stay fast.
+      # Uncomment to bundle Trivy for zero-config CVE scanning (pulls ~150MB,
+      # slower build). Alternatively set TRIVY_PATH to a host trivy binary.
+      # target: app-trivy
     environment:
       PORT: "8080"
       BASE_URL: ${BASE_URL:-http://localhost:8080}
