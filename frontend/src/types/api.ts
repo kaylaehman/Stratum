@@ -302,6 +302,16 @@ export interface FsDirResponse {
   truncated: boolean
 }
 
+export interface FsSearchHit extends FsEntry {
+  path: string // absolute path of the match
+  rel_dir: string // parent dir relative to the search root ('.' at root)
+}
+
+export interface FsSearchResponse {
+  hits: FsSearchHit[]
+  truncated: boolean
+}
+
 export interface FsFileResponse {
   too_large: boolean
   content?: string

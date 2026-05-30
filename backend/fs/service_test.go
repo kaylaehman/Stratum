@@ -15,15 +15,18 @@ import (
 type fakeProvider struct {
 	files    map[string][]byte
 	modTimes map[string]time.Time
-	symlinks map[string]string // path -> canonical target (for RealPath)
+	symlinks map[string]string  // path -> canonical target (for RealPath)
+	dirs     map[string][]Entry // dir path -> its entries (for List/Search)
 	removed  []string
 }
 
 func newFakeProvider() *fakeProvider {
-	return &fakeProvider{files: map[string][]byte{}, modTimes: map[string]time.Time{}, symlinks: map[string]string{}}
+	return &fakeProvider{files: map[string][]byte{}, modTimes: map[string]time.Time{}, symlinks: map[string]string{}, dirs: map[string][]Entry{}}
 }
 
-func (f *fakeProvider) List(context.Context, string) ([]Entry, bool, error) { return nil, false, nil }
+func (f *fakeProvider) List(_ context.Context, dir string) ([]Entry, bool, error) {
+	return f.dirs[dir], false, nil
+}
 func (f *fakeProvider) Stat(_ context.Context, p string) (Entry, error) {
 	b, ok := f.files[p]
 	if !ok {
@@ -251,5 +254,68 @@ func TestInvalidPathRejected(t *testing.T) {
 	s := newTestService(newFakeProvider(), 0)
 	if err := s.Write(context.Background(), "n1", "relative/path", []byte("x"), nil); !errors.Is(err, ErrInvalidPath) {
 		t.Errorf("relative path err = %v, want ErrInvalidPath", err)
+	}
+}
+
+func TestSearchRecursiveWalk(t *testing.T) {
+	fp := newFakeProvider()
+	fp.dirs["/srv"] = []Entry{
+		{Name: "app", IsDir: true},
+		{Name: "readme.md"},
+		{Name: "notes.txt"},
+	}
+	fp.dirs["/srv/app"] = []Entry{
+		{Name: "config.yaml"},
+		{Name: "sub", IsDir: true},
+		{Name: "extlink", IsDir: true, IsSymlink: true}, // symlinked dir: must not be descended
+	}
+	fp.dirs["/srv/app/sub"] = []Entry{
+		{Name: "config.json"},
+	}
+	// If the symlinked dir were followed, this would surface as a spurious hit.
+	fp.dirs["/srv/app/extlink"] = []Entry{
+		{Name: "config.LEAKED"},
+	}
+	svc := newTestService(fp, 0)
+
+	// Case-insensitive substring match across the subtree.
+	hits, truncated, err := svc.Search(context.Background(), "n1", "/srv", "CONFIG")
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if truncated {
+		t.Errorf("unexpected truncation on a small tree")
+	}
+	got := map[string]string{}
+	for _, h := range hits {
+		got[h.Name] = h.RelDir
+	}
+	if len(hits) != 2 {
+		t.Fatalf("want 2 hits, got %d: %+v", len(hits), got)
+	}
+	if got["config.yaml"] != "app" {
+		t.Errorf("config.yaml rel_dir = %q, want %q", got["config.yaml"], "app")
+	}
+	if got["config.json"] != "app/sub" {
+		t.Errorf("config.json rel_dir = %q, want %q", got["config.json"], "app/sub")
+	}
+	if _, leaked := got["config.LEAKED"]; leaked {
+		t.Error("search descended into a symlinked directory")
+	}
+
+	// A match in the root directory itself reports rel_dir ".".
+	rootHits, _, err := svc.Search(context.Background(), "n1", "/srv", "readme")
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(rootHits) != 1 || rootHits[0].RelDir != "." || rootHits[0].Path != "/srv/readme.md" {
+		t.Errorf("root match = %+v, want one hit rel_dir='.' path='/srv/readme.md'", rootHits)
+	}
+}
+
+func TestSearchEmptyQueryRejected(t *testing.T) {
+	svc := newTestService(newFakeProvider(), 0)
+	if _, _, err := svc.Search(context.Background(), "n1", "/srv", "   "); !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("blank query err = %v, want ErrInvalidPath", err)
 	}
 }
