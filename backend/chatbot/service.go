@@ -2,9 +2,13 @@ package chatbot
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
 )
@@ -16,12 +20,14 @@ type Service struct {
 	cipher  *crypto.Cipher
 	logger  *slog.Logger
 	enabled func(context.Context) bool // feature-flag gate
+	aiSvc   *ai.Service                // optional; nil → "configure AI in Settings"
 }
 
 // New wires the service. enabled reports whether the chat_integration feature
-// flag is on (the poller is a no-op when it's off).
-func New(store db.Store, cipher *crypto.Cipher, logger *slog.Logger, enabled func(context.Context) bool) *Service {
-	return &Service{store: store, cipher: cipher, logger: logger, enabled: enabled}
+// flag is on (the poller is a no-op when it's off). aiSvc may be nil when AI
+// is not wired; the bot will respond with a friendly prompt to configure it.
+func New(store db.Store, cipher *crypto.Cipher, logger *slog.Logger, enabled func(context.Context) bool, aiSvc *ai.Service) *Service {
+	return &Service{store: store, cipher: cipher, logger: logger, enabled: enabled, aiSvc: aiSvc}
 }
 
 // ConfigView is the non-secret config for the UI.
@@ -141,10 +147,110 @@ func (s *Service) pollOnce(ctx context.Context, client Client, offset int) int {
 			_ = client.SendMessage(ctx, chatID, "This chat isn't authorized. Add its chat ID in Stratum → Settings → Chat.")
 			continue
 		}
-		reply := Handle(ctx, &storeProvider{store: s.store}, u.Message.Text)
-		_ = client.SendMessage(ctx, chatID, reply)
+		s.dispatch(ctx, client, chatID, u.Message.Text)
 	}
 	return offset
+}
+
+// dispatch routes a single authorized message: slash commands go to Handle;
+// free-text (and /ask <question>) go to the AI service.
+func (s *Service) dispatch(ctx context.Context, client Client, chatID int64, text string) {
+	if aiQuestion, isAI := extractAIQuestion(text); isAI {
+		s.replyAI(ctx, client, chatID, aiQuestion)
+		return
+	}
+	reply := Handle(ctx, &storeProvider{store: s.store}, text)
+	_ = client.SendMessage(ctx, chatID, reply)
+}
+
+// extractAIQuestion returns (question, true) when the message should be routed
+// to AI: either it is free-text (doesn't start with "/") or it is the /ask
+// command. For all other slash commands it returns ("", false).
+func extractAIQuestion(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(trimmed, "/") {
+		return trimmed, true
+	}
+	// /ask[@botname] <question>
+	lower := strings.ToLower(trimmed)
+	cmd := strings.Fields(lower)[0]
+	// strip optional @botname suffix
+	if i := strings.Index(cmd, "@"); i >= 0 {
+		cmd = cmd[:i]
+	}
+	if cmd == "/ask" {
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			return "", false // /ask with no question → fall through to Handle
+		}
+		return strings.Join(fields[1:], " "), true
+	}
+	return "", false
+}
+
+// replyAI calls the AI service and sends one or more messages (Telegram caps at
+// 4096 chars per message). When AI is unconfigured or returns an error the user
+// gets a friendly plain-text reply — the bot loop never crashes.
+func (s *Service) replyAI(ctx context.Context, client Client, chatID int64, question string) {
+	if s.aiSvc == nil {
+		_ = client.SendMessage(ctx, chatID, "AI is not configured. Open Stratum → Settings → AI Assistant to set up a provider.")
+		return
+	}
+	resp, _, err := s.aiSvc.Ask(ctx, "", question, "")
+	if err != nil {
+		if errors.Is(err, ai.ErrNotConfigured) {
+			_ = client.SendMessage(ctx, chatID, "AI is not configured. Open Stratum → Settings → AI Assistant to set up a provider.")
+			return
+		}
+		s.logger.Warn("chatbot: AI ask failed", "err", err)
+		_ = client.SendMessage(ctx, chatID, "Sorry, the AI provider returned an error. Please try again later.")
+		return
+	}
+	for _, chunk := range splitMessage(resp.Answer) {
+		_ = client.SendMessage(ctx, chatID, chunk)
+	}
+}
+
+// telegramMaxLen is Telegram's documented per-message character limit.
+const telegramMaxLen = 4096
+
+// splitMessage splits text into chunks of at most telegramMaxLen runes,
+// breaking on newlines where possible to keep chunks readable.
+func splitMessage(text string) []string {
+	if text == "" {
+		return []string{"(no response)"}
+	}
+	if len([]rune(text)) <= telegramMaxLen {
+		return []string{text}
+	}
+	var chunks []string
+	for len(text) > 0 {
+		if len([]rune(text)) <= telegramMaxLen {
+			chunks = append(chunks, text)
+			break
+		}
+		// Find a newline near the limit to break cleanly.
+		cut := runeIndex(text, telegramMaxLen)
+		if nl := strings.LastIndex(text[:cut], "\n"); nl > telegramMaxLen/2 {
+			cut = nl + 1
+		}
+		chunks = append(chunks, text[:cut])
+		text = text[cut:]
+	}
+	return chunks
+}
+
+// runeIndex returns the byte index after the n-th rune (or len(s) if shorter).
+func runeIndex(s string, n int) int {
+	i := 0
+	for count := 0; count < n && i < len(s); count++ {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+	}
+	return i
 }
 
 // storeProvider adapts db.Store to the command DataProvider.

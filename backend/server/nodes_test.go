@@ -112,7 +112,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 		Proxy:          proxy.New(store, cipher),
 		DNS:            dnspkg.New(store, cipher),
 		Features:       features.New(store),
-		Chat:           chatbot.New(store, cipher, nil, func(context.Context) bool { return true }),
+		Chat:           chatbot.New(store, cipher, nil, func(context.Context) bool { return true }, nil),
 		FileWatch:      filewatch.New(store, filesSvc.Exec),
 		SSO:            sso.New(store, cipher),
 		Skills:         mustLoadSkills(t),
