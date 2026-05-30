@@ -32,6 +32,7 @@ import Assistant from './pages/Assistant'
 import TerminalPage from './pages/Terminal'
 import Infrastructure from './pages/Infrastructure'
 import Stacks from './pages/Stacks'
+import Incidents from './pages/Incidents'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -130,6 +131,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Stacks />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/incidents"
+          element={
+            <AuthGuard>
+              <Incidents />
             </AuthGuard>
           }
         />

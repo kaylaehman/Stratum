@@ -167,6 +167,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/webhooks", d.Handlers.ListWebhooks)
 			r.Post("/webhooks/{id}/test", d.Handlers.TestWebhook)
 
+			// Incident timeline (read-only; merges activity, containers, metrics, file events).
+			r.Get("/incidents/timeline", d.Handlers.IncidentTimeline)
+
 			// Image update detection (read-only; cross-node).
 			r.Get("/updates", d.Handlers.Updates)
 

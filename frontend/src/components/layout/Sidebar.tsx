@@ -30,6 +30,7 @@ import {
   SquareTerminal,
   Network as NetworkIcon,
   Layers,
+  AlertCircle,
 } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
@@ -87,6 +88,7 @@ const navItems: NavEntry[] = [
   { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
   { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
   { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
+  { icon: <AlertCircle size={14} />, label: 'Incidents', to: '/incidents' },
   { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications', adminOnly: true },
   { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },
 ]
