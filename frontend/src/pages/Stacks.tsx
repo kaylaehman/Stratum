@@ -125,6 +125,10 @@ function StackCard({ stack, defaultOpen = false }: StackCardProps) {
         border: '1px solid var(--border-subtle)',
         borderRadius: '3px',
         overflow: 'hidden',
+        // Keep natural height: the parent is a constrained flex column and these
+        // cards set overflow:hidden, which zeroes their auto min-height — without
+        // this they shrink and clip ("squished") instead of letting the list scroll.
+        flexShrink: 0,
       }}
     >
       {/* Header row */}
