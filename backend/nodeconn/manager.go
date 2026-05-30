@@ -7,6 +7,7 @@ package nodeconn
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/kaylaehman/stratum/backend/capabilities"
@@ -60,14 +61,27 @@ func (m *Manager) Get(ctx context.Context, nodeID string) (*Clients, error) {
 	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
 
 	cl := &Clients{Node: node}
-	if caps.Docker {
+	// Build a Docker client only when the node carries an explicit Docker
+	// endpoint. docker.New("") falls back to the LOCAL Docker socket (the
+	// Stratum backend's own daemon) — if we did that for a remote node whose
+	// Docker is only reachable over SSH (Docker detected via the SSH probe, no
+	// TCP/TLS endpoint stored), the poller would enumerate Stratum's own
+	// containers and attribute them to the remote node. Refuse instead: the node
+	// still reports reachable via the SSH fallback, just with no containers,
+	// which is correct until Docker-over-SSH transport is wired up.
+	if caps.Docker && node.DockerEndpoint != "" {
 		var tls *docker.TLS
 		if creds.DockerTLSCA != "" || creds.DockerTLSCert != "" || creds.DockerTLSKey != "" {
 			tls = &docker.TLS{CA: creds.DockerTLSCA, Cert: creds.DockerTLSCert, Key: creds.DockerTLSKey}
 		}
 		if dc, derr := docker.New(node.DockerEndpoint, tls); derr == nil {
 			cl.Docker = dc
+		} else {
+			slog.Warn("nodeconn: docker client build failed", "node", nodeID, "error", derr)
 		}
+	} else if caps.Docker {
+		slog.Info("nodeconn: node has Docker capability but no Docker endpoint; containers will not be enumerated (Docker-over-SSH transport not yet supported)",
+			"node", nodeID)
 	}
 	if caps.Proxmox && node.ProxmoxEndpoint != "" && creds.ProxmoxTokenID != "" {
 		cl.Proxmox = proxmox.New(node.ProxmoxEndpoint, creds.ProxmoxTokenID, creds.ProxmoxSecret, node.ProxmoxTLSInsecure)

@@ -183,6 +183,45 @@ func (c *Client) Nodes(ctx context.Context) ([]ClusterNode, error) {
 	return nodes, nil
 }
 
+// clusterStatusRaw is the raw JSON shape of a single item in the
+// /cluster/status response. The response mixes a "cluster" item (type
+// "cluster") with one "node" item per member (type "node"); the member that
+// the API request was served by carries local == 1.
+type clusterStatusRaw struct {
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Local int    `json:"local"`
+}
+
+// clusterStatusResponse wraps the top-level data array from
+// GET /api2/json/cluster/status.
+type clusterStatusResponse struct {
+	Data []clusterStatusRaw `json:"data"`
+}
+
+// LocalNodeName returns the name of the cluster member that this Proxmox API
+// endpoint is served by — i.e. the single member this Stratum node represents.
+//
+// It reads GET /api2/json/cluster/status and returns the name of the entry with
+// type == "node" and local == 1. This works for both clustered hosts (where the
+// response lists every member plus a "cluster" entry) and standalone PVE hosts
+// (where the response lists the one node, still flagged local == 1).
+//
+// If no local node entry can be determined, it returns an error so the caller
+// can fall back to its previous behavior and log the ambiguity.
+func (c *Client) LocalNodeName(ctx context.Context) (string, error) {
+	var resp clusterStatusResponse
+	if err := c.getJSON(ctx, "/api2/json/cluster/status", &resp); err != nil {
+		return "", err
+	}
+	for _, item := range resp.Data {
+		if item.Type == "node" && item.Local == 1 {
+			return item.Name, nil
+		}
+	}
+	return "", fmt.Errorf("proxmox: no local node found in cluster status")
+}
+
 // Guest is a Proxmox QEMU VM or LXC container as listed by the API.
 type Guest struct {
 	VMID   int    // Proxmox vmid
