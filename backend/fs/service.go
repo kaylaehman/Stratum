@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/nodes"
@@ -93,6 +95,26 @@ func (s *Service) Exec(ctx context.Context, nodeID, cmd string, args ...string) 
 	}
 	defer client.Close()
 	return appssh.Run(ctx, client, cmd, args...)
+}
+
+// DialSSH opens a raw SSH client to a node for streaming sessions. The
+// interactive terminal needs a PTY/shell rather than the one-shot Exec or the
+// SFTP helpers, so it dials directly; the caller must Close the returned client.
+func (s *Service) DialSSH(ctx context.Context, nodeID string) (*ssh.Client, error) {
+	node, err := s.store.GetNode(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	creds, err := nodes.OpenCredentials(s.cipher, node.CredentialsEncrypted)
+	if err != nil {
+		return nil, err
+	}
+	return appssh.Dial(ctx, node.Host, node.Port, appssh.Credentials{
+		User:          creds.SSHUser,
+		Password:      creds.SSHPassword,
+		PrivateKeyPEM: creds.SSHPrivateKey,
+		Passphrase:    creds.SSHPassphrase,
+	}, node.SSHHostKey)
 }
 
 // StatEntry returns a single file's Entry (owner/group resolved) for SP4's

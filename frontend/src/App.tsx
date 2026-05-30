@@ -29,6 +29,7 @@ import Settings from './pages/Settings'
 import Certs from './pages/Certs'
 import Skills from './pages/Skills'
 import Assistant from './pages/Assistant'
+import TerminalPage from './pages/Terminal'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -215,6 +216,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Assistant />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/terminal"
+          element={
+            <AuthGuard>
+              <TerminalPage />
             </AuthGuard>
           }
         />
