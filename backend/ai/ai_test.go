@@ -41,8 +41,29 @@ func TestOllamaAsk(t *testing.T) {
 	if !strings.Contains(gotBody, `"stream":false`) || !strings.Contains(gotBody, `"model":"llama3"`) {
 		t.Errorf("body missing fields: %s", gotBody)
 	}
+	if !strings.Contains(gotBody, `"think":false`) {
+		t.Errorf("body missing think:false (reasoning-model fix): %s", gotBody)
+	}
 	if resp.Answer != "hello there" || resp.OutputTokens != 5 {
 		t.Errorf("resp = %+v", resp)
+	}
+}
+
+// Reasoning models (e.g. glm-4.7-flash) may return their answer in the
+// message.thinking field with an empty message.content. The provider must fall
+// back to the thinking text rather than returning a blank answer.
+func TestOllamaAskFallsBackToThinking(t *testing.T) {
+	hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return jsonResp(200, `{"message":{"role":"assistant","content":"  ","thinking":"the real answer"},"prompt_eval_count":4,"eval_count":9}`), nil
+	})}
+	o := NewOllama("http://ollama.local:11434", "glm-4.7-flash", hc)
+
+	resp, err := o.Ask(context.Background(), AskRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if resp.Answer != "the real answer" {
+		t.Errorf("Answer = %q, want %q (thinking fallback)", resp.Answer, "the real answer")
 	}
 }
 
