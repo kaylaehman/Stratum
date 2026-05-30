@@ -1,4 +1,4 @@
-import { Server, Monitor, Box, Terminal, Folder } from 'lucide-react'
+import { Server, Monitor, Box, Terminal, Folder, Layers } from 'lucide-react'
 import type { NodeType, VMKind } from '../../types/api'
 
 interface IconProps {
@@ -33,4 +33,9 @@ export function ContainerIcon({ ...props }: IconProps) {
 export function FolderIcon({ ...props }: IconProps) {
   const size = props.size ?? 13
   return <Folder size={size} strokeWidth={1.5} style={{ color: props.color ?? 'var(--text-muted)' }} />
+}
+
+export function StackIcon({ ...props }: IconProps) {
+  const size = props.size ?? 13
+  return <Layers size={size} strokeWidth={1.5} style={{ color: props.color ?? 'var(--status-info)' }} />
 }
