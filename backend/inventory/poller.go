@@ -26,6 +26,13 @@ type CycleMessage struct {
 	Deltas []Delta `json:"deltas"`
 }
 
+// ReachabilityFunc probes a node's reachability (typically an SSH+Docker+Proxmox
+// probe with the pinned host key) and returns whether it's reachable plus a
+// sanitized error category when it isn't. Injected so the poller can confirm
+// SSH-reachable nodes without the inventory package depending on the SSH/probe
+// stack directly.
+type ReachabilityFunc func(ctx context.Context, n db.Node) (reachable bool, lastErr string)
+
 // Poller refreshes inventory for every node on an interval and broadcasts
 // deltas over the hub. One poll per node runs at a time (skip-if-busy).
 type Poller struct {
@@ -35,10 +42,15 @@ type Poller struct {
 	seq      *seqRegistry
 	logger   *slog.Logger
 	interval time.Duration
+	reach    ReachabilityFunc
 
 	mu       sync.Mutex
 	inflight map[string]bool
 }
+
+// SetReachability installs the SSH/probe-based reachability fallback. Without
+// it, a node is reachable only if its Docker or Proxmox enumeration succeeds.
+func (p *Poller) SetReachability(f ReachabilityFunc) { p.reach = f }
 
 // NewPoller constructs a Poller.
 func NewPoller(store db.Store, conn *nodeconn.Manager, h *hub.Hub, logger *slog.Logger) *Poller {
@@ -124,7 +136,20 @@ func (p *Poller) pollNode(ctx context.Context, n db.Node) {
 		}
 	}
 
-	p.updateNodeStatus(ctx, n, reachable)
+	// Reachability fallback: Docker/Proxmox enumeration doesn't cover SSH-only
+	// nodes (nor a node whose Docker/Proxmox transport is down while SSH is up).
+	// Probe SSH so those nodes are correctly "ok", and record why when they're
+	// not — without this they sat "unreachable" with an empty last_error.
+	var lastErr string
+	if !reachable && p.reach != nil {
+		if ok, le := p.reach(ctx, n); ok {
+			reachable = true
+		} else {
+			lastErr = le
+		}
+	}
+
+	p.updateNodeStatus(ctx, n, reachable, lastErr)
 
 	seq := p.seq.next(n.ID)
 	for i := range deltas {
@@ -136,17 +161,22 @@ func (p *Poller) pollNode(ctx context.Context, n db.Node) {
 	}
 }
 
-func (p *Poller) updateNodeStatus(ctx context.Context, n db.Node, reachable bool) {
+func (p *Poller) updateNodeStatus(ctx context.Context, n db.Node, reachable bool, lastErr string) {
 	newStatus := "unreachable"
+	newLastErr := lastErr
 	if reachable {
 		newStatus = "ok"
+		newLastErr = ""
 		now := time.Now()
 		n.LastSeen = &now
 	}
-	if n.Status == newStatus && !reachable {
-		return // avoid a write storm on a persistently-down node
+	// Avoid a write storm on a persistently-down node, but still write if the
+	// recorded error category changed (so last_error reflects the live reason).
+	if n.Status == newStatus && n.LastError == newLastErr && !reachable {
+		return
 	}
 	n.Status = newStatus
+	n.LastError = newLastErr
 	if err := p.store.UpdateNode(ctx, n); err != nil {
 		p.logger.Warn("inventory: update node status", "node", n.ID, "error", err)
 	}

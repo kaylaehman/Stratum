@@ -95,7 +95,12 @@ func run(logger *slog.Logger) error {
 	jwt := auth.NewJWT(cfg.JWTSecret, accessTokenTTL)
 	h := hub.New()
 	conn := nodeconn.NewManager(store, cipher)
+	nodesSvc := nodes.NewService(store, cipher)
 	poller := inventory.NewPoller(store, conn, h, logger)
+	// Let the poller confirm SSH reachability (with the pinned host key) so
+	// SSH-only nodes — and nodes whose Docker/Proxmox transport is down but SSH
+	// is up — are marked "ok" instead of permanently "unreachable".
+	poller.SetReachability(nodesSvc.ProbeReachability)
 	containerUsers := permissions.NewContainerCache(func(ctx context.Context, nodeID, containerID, p string) ([]byte, error) {
 		clients, err := conn.Get(ctx, nodeID)
 		if err != nil {
@@ -160,7 +165,7 @@ func run(logger *slog.Logger) error {
 		Activity:       activity.NewStore(store),
 		JWT:            jwt,
 		Hub:            h,
-		Nodes:          nodes.NewService(store, cipher),
+		Nodes:          nodesSvc,
 		Poller:         poller,
 		Files:          filesSvc,
 		Conn:           conn,
