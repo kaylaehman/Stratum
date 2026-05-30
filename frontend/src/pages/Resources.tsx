@@ -25,6 +25,7 @@ import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
 import { useContainerLifecycle } from '../lib/api/containers'
 import { useAddBookmark } from '../lib/api/bookmarks'
+import { useNodeGuestLinks } from '../hooks/useNodeGuestLinks'
 import { useCan } from '../lib/roles'
 import type { TreeSelection, ContainerStatus } from '../types/api'
 import type { ContainerAction } from '../lib/api/containers'
@@ -336,9 +337,45 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
   )
 }
 
+/**
+ * The set of host-level panels shown for a managed Linux host. Rendered for a
+ * `node` selection and also for a Proxmox guest that is linked to a standalone
+ * Docker node — in that case `nodeId` is the LINKED node's id so every panel
+ * (SSH keys, cron/timers, reverse-proxy, DNS, file-watch) queries the real
+ * reachable host rather than the unreachable guest.
+ *
+ * `inCard` renders the panels that belong inside the summary card (alongside
+ * the host/VM fields); `below` renders the wider panels shown beneath the card.
+ */
+function HostPanelsInCard({ nodeId }: { nodeId: string }) {
+  return (
+    <>
+      <WakeOnLan nodeId={nodeId} />
+      <SSHKeys nodeId={nodeId} />
+      <Scheduler nodeId={nodeId} />
+      <ReverseProxyPanel nodeId={nodeId} />
+      <DnsPanel nodeId={nodeId} />
+      <FileWatchPanel nodeId={nodeId} />
+    </>
+  )
+}
+
+function HostPanelsBelow({ nodeId }: { nodeId: string }) {
+  return (
+    <>
+      <SharedMountsView nodeId={nodeId} />
+      <ReverseMountPanel nodeId={nodeId} />
+      <MemoryPanel scope="node" scopeId={nodeId} />
+    </>
+  )
+}
+
 function DetailPane() {
   const { selection } = useTreeStore()
   const { data } = useTree()
+  // Reuse the same guest↔node correlation as the resource tree so a selected
+  // Proxmox guest can resolve to its linked standalone host.
+  const correlation = useNodeGuestLinks(data?.nodes ?? [])
 
   if (!selection) {
     return (
@@ -381,6 +418,21 @@ function DetailPane() {
 
   const node = data?.nodes.find((n) => n.id === selection.nodeId)
 
+  // For a VM selection, resolve the selected guest and the standalone Docker
+  // node (if any) linked to it. When linked, the guest borrows that node's full
+  // host detail; the panels then target `linkedNodeId` so they reach the real
+  // host instead of the unreachable guest.
+  const vm =
+    selection.kind === 'vm' ? node?.vms.find((v) => v.id === selection.vmId) : undefined
+  const linkedNode = vm ? correlation.linkedNodeByVmid.get(vm.proxmox_vmid) : undefined
+  const linkedNodeId = linkedNode?.id
+
+  // The id whose host panels we render: the node itself, or a linked guest's host.
+  const hostNodeId =
+    selection.kind === 'node'
+      ? selection.nodeId
+      : linkedNodeId
+
   return (
     <div className="flex-1 overflow-auto p-5 flex flex-col gap-4">
       <div
@@ -406,38 +458,52 @@ function DetailPane() {
             <Row label="Type" value={node.type} mono />
             <Row label="Status" value={node.status} mono />
             <Row label="OS type" value={node.status} mono />
-            <WakeOnLan nodeId={selection.nodeId} />
-            <SSHKeys nodeId={selection.nodeId} />
-            <Scheduler nodeId={selection.nodeId} />
-            <ReverseProxyPanel nodeId={selection.nodeId} />
-            <DnsPanel nodeId={selection.nodeId} />
-            <FileWatchPanel nodeId={selection.nodeId} />
+            <HostPanelsInCard nodeId={selection.nodeId} />
           </div>
         )}
 
-        {selection.kind === 'vm' && node && (() => {
-          const vm = node.vms.find((v) => v.id === selection.vmId)
-          if (!vm) return <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Not found.</span>
-          return (
-            <div className="flex flex-col gap-2">
-              <Row label="Name" value={vm.name} mono />
-              <Row label="Kind" value={vm.kind.toUpperCase()} mono />
-              <Row label="VMID" value={String(vm.proxmox_vmid)} mono />
-              <Row label="Node" value={vm.proxmox_node} mono />
-              <Row label="Status" value={vm.status} mono />
-              {vm.os_type && <Row label="OS type" value={vm.os_type} mono />}
-            </div>
-          )
-        })()}
+        {selection.kind === 'vm' && !vm && (
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Not found.</span>
+        )}
+
+        {selection.kind === 'vm' && vm && (
+          <div className="flex flex-col gap-2">
+            {/* Guest summary — shown whether or not a host is linked, so it's
+                always clear which guest is selected. */}
+            <Row label="Name" value={vm.name} mono />
+            <Row label="Kind" value={vm.kind.toUpperCase()} mono />
+            <Row label="VMID" value={String(vm.proxmox_vmid)} mono />
+            <Row label="Node" value={vm.proxmox_node} mono />
+            <Row label="Status" value={vm.status} mono />
+            {vm.os_type && <Row label="OS type" value={vm.os_type} mono />}
+            {linkedNode ? (
+              <>
+                <div
+                  className="flex items-baseline gap-3 mt-1 pt-2"
+                  style={{ borderTop: '1px solid var(--border-subtle)' }}
+                >
+                  <span className="text-xs w-28 shrink-0" style={{ color: 'var(--text-muted)' }}>
+                    Linked host
+                  </span>
+                  <span className="text-xs font-mono truncate" style={{ color: 'var(--accent)' }} title={linkedNode.host}>
+                    {linkedNode.name}
+                  </span>
+                </div>
+                {/* Full host detail, sourced from the linked standalone node. */}
+                <HostPanelsInCard nodeId={linkedNode.id} />
+              </>
+            ) : (
+              <p className="text-xs mt-1 pt-2" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border-subtle)' }}>
+                No managed host is linked to this guest, so no host-level detail
+                is available. Link a standalone Docker node to this guest to manage it here.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
-      {selection.kind === 'node' && (
-        <>
-          <SharedMountsView nodeId={selection.nodeId} />
-          <ReverseMountPanel nodeId={selection.nodeId} />
-          <MemoryPanel scope="node" scopeId={selection.nodeId} />
-        </>
-      )}
+      {/* Wider host panels — for a node, or a linked guest's host. */}
+      {hostNodeId && <HostPanelsBelow nodeId={hostNodeId} />}
     </div>
   )
 }
