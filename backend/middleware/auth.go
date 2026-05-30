@@ -57,8 +57,25 @@ func bearerToken(r *http.Request) string {
 	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
 		return strings.TrimSpace(h[len(prefix):])
 	}
+	// WebSocket fallback: a browser cannot set the Authorization header on a
+	// WebSocket handshake, so the SPA passes the access token as the second
+	// WebSocket subprotocol — new WebSocket(url, ["bearer", "<token>"]) — which
+	// arrives here as "Sec-WebSocket-Protocol: bearer, <token>". JWT characters
+	// (base64url + '.') are all valid subprotocol token characters.
+	if proto := r.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
+		parts := strings.Split(proto, ",")
+		if len(parts) >= 2 && strings.EqualFold(strings.TrimSpace(parts[0]), WSBearerSubprotocol) {
+			return strings.TrimSpace(parts[1])
+		}
+	}
 	return ""
 }
+
+// WSBearerSubprotocol is the first WebSocket subprotocol the SPA offers; the
+// second offered value carries the access token. The handler that upgrades the
+// connection must echo this subprotocol back (AcceptOptions.Subprotocols) so the
+// browser handshake completes.
+const WSBearerSubprotocol = "bearer"
 
 func writeUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")

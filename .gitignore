@@ -101,3 +101,6 @@ skills-lock.json
 docs/superpowers/specs/
 **/superpowers/specs/
 
+
+# Agent worktrees (live, per-session; never commit)
+.claude/worktrees/

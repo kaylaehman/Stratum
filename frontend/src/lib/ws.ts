@@ -1,3 +1,5 @@
+import { useAuthStore } from '../store/auth'
+
 type Callback = (data: unknown) => void
 
 interface Subscription {
@@ -24,16 +26,22 @@ class WebSocketManager {
     }
   }
 
-  // token reserved for future use (e.g. query-param auth or subprotocol header)
   connect(token?: string): void {
-    void token
     if (this.socket && this.socket.readyState === WebSocket.OPEN) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${window.location.host}/api/ws`
 
+    // A browser cannot set the Authorization header on a WS handshake, so the
+    // access token rides as the second WebSocket subprotocol; the backend auth
+    // middleware reads it from Sec-WebSocket-Protocol. Falls back to the auth
+    // store when no token is passed (e.g. the reconnect timer).
+    const authToken = token ?? useAuthStore.getState().accessToken
+
     try {
-      this.socket = new WebSocket(url)
+      this.socket = authToken
+        ? new WebSocket(url, ['bearer', authToken])
+        : new WebSocket(url)
 
       this.socket.onopen = () => {
         if (this.reconnectTimer) {
