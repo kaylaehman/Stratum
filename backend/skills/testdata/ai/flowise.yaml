@@ -1,0 +1,31 @@
+id: flowise
+name: Flowise LLM Orchestrator
+version: "1.0"
+container_match:
+  image_patterns:
+    - "flowiseai/flowise"
+  port_hints: [3000]
+category: ai
+description: Drag-and-drop visual builder for LLM workflows
+docs_url: https://hub.docker.com/r/flowiseai/flowise
+
+common_issues:
+  - id: auth-login-failed
+    name: Cannot log in
+    symptoms:
+      - "Login fails with error"
+      - "Username or password incorrect"
+    trigger_conditions:
+      - log_pattern: "authentication.*failed"
+    steps:
+      - id: step-1
+        description: Check if Flowise backend is running
+        type: check
+        command: "docker exec {container_name} curl -s http://localhost:3000/health"
+        expected_output: "ok"
+        on_fail: step-2
+      - id: step-2
+        description: Restart Flowise
+        type: fix
+        command: "docker restart {container_name}"
+        requires_approval: true

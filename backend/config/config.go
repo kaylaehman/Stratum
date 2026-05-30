@@ -32,6 +32,11 @@ type Config struct {
 	AgentCACertPath string
 	AgentCAKeyPath  string
 
+	// SkillsDir is the directory holding the container-troubleshooting skill
+	// library (assets/skills/**.yaml). Defaults to /app/skills, where the Docker
+	// image COPYs the library; for local/dev it simply loads nothing if absent.
+	SkillsDir string
+
 	// Optional, unused in SP0.
 	TrivyPath      string
 	AnthropicKey   string
@@ -54,6 +59,12 @@ func Load() (*Config, error) {
 		OllamaBaseURL:   os.Getenv("OLLAMA_BASE_URL"),
 		AdminUser:       os.Getenv("STRATUM_ADMIN_USER"),
 		AdminPassword:   os.Getenv("STRATUM_ADMIN_PASSWORD"),
+		SkillsDir:       os.Getenv("SKILLS_DIR"),
+	}
+
+	// SKILLS_DIR defaults to the image's library path; missing dir loads nothing.
+	if cfg.SkillsDir == "" {
+		cfg.SkillsDir = "/app/skills"
 	}
 
 	// PORT (default 8080).

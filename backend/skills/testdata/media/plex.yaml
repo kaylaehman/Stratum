@@ -1,0 +1,22 @@
+id: plex
+name: Plex Media Server
+version: "2.0"
+container_match:
+  image_patterns:
+    - "linuxserver/plex"
+    - "plexinc/pms-docker"
+  port_hints: [32400]
+category: media
+description: Stream your media library
+docs_url: https://hub.docker.com/r/linuxserver/plex
+
+common_issues:
+  - id: claim-token-expired
+    name: Claim token expired
+    symptoms:
+      - "Server not claimed"
+    steps:
+      - id: step-1
+        description: Regenerate claim token
+        type: inform
+        command: ""

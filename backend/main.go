@@ -50,6 +50,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
+	"github.com/kaylaehman/stratum/backend/skills"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
@@ -160,6 +161,14 @@ func run(logger *slog.Logger) error {
 	})
 	ssoSvc := sso.New(store, cipher)
 
+	// Container-troubleshooting skill library (reference data). Graceful: a
+	// missing/empty SKILLS_DIR yields an empty library, not a startup failure.
+	skillLib, err := skills.Load(cfg.SkillsDir)
+	if err != nil {
+		return err
+	}
+	logger.Info("skills library loaded", "count", skillLib.Len(), "dir", cfg.SkillsDir)
+
 	handlers := &api.Handlers{
 		Store:          store,
 		Activity:       activity.NewStore(store),
@@ -192,6 +201,7 @@ func run(logger *slog.Logger) error {
 		Chat:           chatSvc,
 		FileWatch:      fileWatchSvc,
 		SSO:            ssoSvc,
+		Skills:         skillLib,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),

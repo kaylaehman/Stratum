@@ -115,6 +115,10 @@ func NewRouter(d *Deps) http.Handler {
 			// Global search (read-only).
 			r.Get("/search", d.Handlers.Search)
 
+			// Container-troubleshooting skill library (read-only reference data).
+			r.Get("/skills", d.Handlers.ListSkills)
+			r.Get("/skills/{id}", d.Handlers.GetSkill)
+
 			// AI assistant config (admin gate in handler; set/ask are audited below).
 			r.Get("/ai/config", d.Handlers.AIConfigGet)
 			r.Get("/ai/oauth/start", d.Handlers.AIOAuthStart)

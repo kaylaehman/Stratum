@@ -210,6 +210,70 @@ func (h *Handlers) runbookContext(r *http.Request) string {
 	return "Saved runbooks the operator maintains (suggest one when its trigger matches):\n" + strings.Join(lines, "\n")
 }
 
+// skillContextMaxSkills caps how many matched skills are injected (the top N in
+// the library's deterministic order) so the prompt stays compact.
+const skillContextMaxSkills = 2
+
+// skillContextMaxIssues caps how many common issues per skill are injected.
+const skillContextMaxIssues = 3
+
+// skillContextMaxSteps caps how many fix-step lines per issue are injected.
+const skillContextMaxSteps = 4
+
+// skillContext builds a compact troubleshooting block from the skill library when
+// the request is scoped to a container: it resolves the container's image, matches
+// skills by image substring, and emits the top matched skill(s) with each common
+// issue's name, symptoms, and the (bounded) fix-step descriptions/commands. Returns
+// "" when there is no container scope, no resolvable image, or no match — in which
+// case nothing is injected.
+func (h *Handlers) skillContext(r *http.Request, scope, scopeID string) string {
+	if h.Skills == nil || scope != "container" || scopeID == "" {
+		return ""
+	}
+	ctr, err := h.Store.GetContainer(r.Context(), scopeID)
+	if err != nil || ctr.Image == "" {
+		return ""
+	}
+	matched := h.Skills.MatchByImage(ctr.Image)
+	if len(matched) == 0 {
+		return ""
+	}
+	if len(matched) > skillContextMaxSkills {
+		matched = matched[:skillContextMaxSkills]
+	}
+
+	var b strings.Builder
+	b.WriteString("Relevant troubleshooting skills for this container's image (" + ctr.Image + "):")
+	for _, s := range matched {
+		b.WriteString("\n\n## " + s.Name)
+		if s.Description != "" {
+			b.WriteString(" — " + s.Description)
+		}
+		issues := s.CommonIssues
+		if len(issues) > skillContextMaxIssues {
+			issues = issues[:skillContextMaxIssues]
+		}
+		for _, iss := range issues {
+			b.WriteString("\n- Issue: " + iss.Name)
+			if len(iss.Symptoms) > 0 {
+				b.WriteString("\n  Symptoms: " + strings.Join(iss.Symptoms, "; "))
+			}
+			steps := iss.Steps
+			if len(steps) > skillContextMaxSteps {
+				steps = steps[:skillContextMaxSteps]
+			}
+			for _, st := range steps {
+				line := "\n  Step (" + st.Type + "): " + st.Description
+				if st.Command != "" {
+					line += " [" + st.Command + "]"
+				}
+				b.WriteString(line)
+			}
+		}
+	}
+	return b.String()
+}
+
 // aiAskTimeout bounds a single assistant call (a local model can be slow).
 const aiAskTimeout = 2 * time.Minute
 
@@ -238,6 +302,9 @@ func (h *Handlers) AIAsk(w http.ResponseWriter, r *http.Request) {
 	}
 	if rb := h.runbookContext(r); rb != "" {
 		contextText = rb + "\n\n" + contextText
+	}
+	if sk := h.skillContext(r, req.Scope, req.ScopeID); sk != "" {
+		contextText = sk + "\n\n" + contextText
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), aiAskTimeout)
