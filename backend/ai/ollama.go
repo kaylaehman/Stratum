@@ -33,13 +33,25 @@ type ollamaChatRequest struct {
 	Model    string          `json:"model"`
 	Messages []ollamaMessage `json:"messages"`
 	Stream   bool            `json:"stream"`
+	// Think disables a reasoning model's "thinking" channel so the answer lands
+	// in message.content instead of message.thinking. Pointer so we can send an
+	// explicit false; a no-op for non-reasoning models.
+	Think *bool `json:"think,omitempty"`
+}
+
+// ollamaRespMessage is the assistant message in a /api/chat response. Reasoning
+// models may place their answer in `thinking` and leave `content` empty.
+type ollamaRespMessage struct {
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	Thinking string `json:"thinking"`
 }
 
 type ollamaChatResponse struct {
-	Message         ollamaMessage `json:"message"`
-	PromptEvalCount int           `json:"prompt_eval_count"`
-	EvalCount       int           `json:"eval_count"`
-	Error           string        `json:"error"`
+	Message         ollamaRespMessage `json:"message"`
+	PromptEvalCount int               `json:"prompt_eval_count"`
+	EvalCount       int               `json:"eval_count"`
+	Error           string            `json:"error"`
 }
 
 func (o *Ollama) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
@@ -49,7 +61,8 @@ func (o *Ollama) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	}
 	msgs = append(msgs, ollamaMessage{Role: "user", Content: req.Prompt})
 
-	body, _ := json.Marshal(ollamaChatRequest{Model: o.model, Messages: msgs, Stream: false})
+	think := false
+	body, _ := json.Marshal(ollamaChatRequest{Model: o.model, Messages: msgs, Stream: false, Think: &think})
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/chat", bytes.NewReader(body))
 	if err != nil {
 		return AskResponse{}, err
@@ -72,8 +85,15 @@ func (o *Ollama) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	if out.Error != "" {
 		return AskResponse{}, fmt.Errorf("ollama: %s", out.Error)
 	}
+	// Reasoning models may answer in `thinking` and leave `content` empty even
+	// with think:false. Fall back to the thinking text so the user never sees a
+	// blank reply.
+	answer := strings.TrimSpace(out.Message.Content)
+	if answer == "" {
+		answer = strings.TrimSpace(out.Message.Thinking)
+	}
 	return AskResponse{
-		Answer:       strings.TrimSpace(out.Message.Content),
+		Answer:       answer,
 		InputTokens:  out.PromptEvalCount,
 		OutputTokens: out.EvalCount,
 	}, nil
