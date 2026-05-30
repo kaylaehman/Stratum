@@ -230,6 +230,30 @@ func (s *Service) Reprobe(ctx context.Context, id string) (NodeView, error) {
 	return toView(n), nil
 }
 
+// ProbeReachability runs the same probe as Reprobe (SSH + Docker + Proxmox,
+// using the pinned host key) but does NOT persist — it returns just whether the
+// node is reachable and, if not, a sanitized error category. The inventory
+// poller uses this so SSH-only nodes (and nodes whose Docker/Proxmox transport
+// is down but SSH is up) are correctly marked reachable instead of always
+// "unreachable" with an empty last_error.
+func (s *Service) ProbeReachability(ctx context.Context, n db.Node) (reachable bool, lastErr string) {
+	creds, err := OpenCredentials(s.cipher, n.CredentialsEncrypted)
+	if err != nil {
+		return false, ""
+	}
+	in := ConnInput{
+		Host:               n.Host,
+		SSHPort:            n.Port,
+		Credentials:        creds,
+		ProxmoxEndpoint:    n.ProxmoxEndpoint,
+		ProxmoxTLSInsecure: n.ProxmoxTLSInsecure,
+		DockerEndpoint:     n.DockerEndpoint,
+		PinnedHostKey:      n.SSHHostKey,
+	}
+	status, le, _ := deriveStatus(discovery.Probe(ctx, in.target()))
+	return status == "ok", le
+}
+
 // List returns all nodes (no secrets).
 func (s *Service) List(ctx context.Context) ([]NodeView, error) {
 	nodes, err := s.store.ListNodes(ctx)

@@ -30,6 +30,32 @@ func TestAcquireSkipIfBusy(t *testing.T) {
 	}
 }
 
+func TestUpdateNodeStatus_RecordsReachabilityAndError(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	p := &Poller{store: st, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	n, err := st.GetNode(ctx, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unreachable with a sanitized SSH error category → persisted (no more empty
+	// last_error on a down node).
+	p.updateNodeStatus(ctx, n, false, "ssh_detect_failed")
+	n, _ = st.GetNode(ctx, "n1")
+	if n.Status != "unreachable" || n.LastError != "ssh_detect_failed" {
+		t.Fatalf("after unreachable: status=%q last_error=%q", n.Status, n.LastError)
+	}
+
+	// Reachable → ok, error cleared, last_seen stamped.
+	p.updateNodeStatus(ctx, n, true, "")
+	n, _ = st.GetNode(ctx, "n1")
+	if n.Status != "ok" || n.LastError != "" || n.LastSeen == nil {
+		t.Fatalf("after reachable: status=%q last_error=%q last_seen=%v", n.Status, n.LastError, n.LastSeen)
+	}
+}
+
 func TestRunStopsOnContextCancel(t *testing.T) {
 	st := testStore(t) // creates one node "n1" with no reachable clients
 	key := make([]byte, crypto.KeySize)

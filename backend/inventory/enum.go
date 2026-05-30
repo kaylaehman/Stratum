@@ -18,9 +18,11 @@ func enumProxmox(ctx context.Context, cl *proxmox.Client, nodeID string) ([]db.V
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("inventory: proxmox members listed", "node", nodeID, "members", len(members))
 	var out []db.VM
 	for _, m := range members {
 		if !m.Online {
+			slog.Debug("inventory: proxmox member offline; skipping", "node", nodeID, "member", m.Name)
 			continue // skip offline members (review §14)
 		}
 		qemu, err := cl.QemuList(ctx, m.Name)
@@ -33,6 +35,7 @@ func enumProxmox(ctx context.Context, cl *proxmox.Client, nodeID string) ([]db.V
 			slog.Warn("inventory: lxc list failed for cluster member; skipping", "member", m.Name, "error", err)
 			continue
 		}
+		slog.Debug("inventory: proxmox member guests", "node", nodeID, "member", m.Name, "qemu", len(qemu), "lxc", len(lxc))
 		for _, g := range append(qemu, lxc...) {
 			out = append(out, db.VM{
 				NodeID:      nodeID,
@@ -43,6 +46,13 @@ func enumProxmox(ctx context.Context, cl *proxmox.Client, nodeID string) ([]db.V
 				Status:      g.Status,
 			})
 		}
+	}
+	// Confirmed auth but zero guests is almost always a token-permission gap:
+	// without VM.Audit on /vms the Proxmox API returns an empty list (not an
+	// error), so nothing above logs. Surface it so it's diagnosable.
+	if len(out) == 0 {
+		slog.Info("inventory: proxmox enumeration returned 0 guests; check the API token has VM.Audit on /vms (or a parent path)",
+			"node", nodeID, "members", len(members))
 	}
 	return out, nil
 }
