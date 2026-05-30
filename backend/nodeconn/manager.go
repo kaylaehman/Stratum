@@ -7,8 +7,13 @@ package nodeconn
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
+	"net"
+	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/kaylaehman/stratum/backend/capabilities"
 	"github.com/kaylaehman/stratum/backend/crypto"
@@ -110,4 +115,49 @@ func (m *Manager) Invalidate(nodeID string) {
 	m.mu.Lock()
 	delete(m.cache, nodeID)
 	m.mu.Unlock()
+}
+
+// Rebuild forces a fresh client build for nodeID (dropping the cache entry) and
+// returns the new Clients. It is safe to call concurrently: it delegates to Get
+// after invalidating. Use this when a Docker call returns a transport-level
+// error (EOF, connection reset) indicating the cached connection is stale.
+func (m *Manager) Rebuild(ctx context.Context, nodeID string) (*Clients, error) {
+	m.Invalidate(nodeID)
+	return m.Get(ctx, nodeID)
+}
+
+// IsTransportError reports whether err indicates a dead or reset TCP/TLS
+// connection rather than a Docker-protocol or application error. These errors
+// mean the cached http.Transport has a stale keep-alive connection and the call
+// should be retried on a fresh client, NOT treated as "node unreachable".
+func IsTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	// syscall.ECONNRESET / EPIPE — the peer reset or closed the connection.
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	// Catch-all string match for wrapped transport errors not reachable via
+	// errors.Is on Windows or via the Docker SDK's error wrapping.
+	msg := err.Error()
+	for _, fragment := range []string{
+		"connection reset by peer",
+		"broken pipe",
+		"EOF",
+		"use of closed network connection",
+		"connection refused",
+		"forcibly closed",
+	} {
+		if strings.Contains(msg, fragment) {
+			return true
+		}
+	}
+	return false
 }
