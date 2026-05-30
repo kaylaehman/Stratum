@@ -26,14 +26,15 @@ import {
   ShieldCheck,
   Wrench,
   Bot,
+  ChevronRight,
 } from 'lucide-react'
-import { NavLink, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import { useBookmarks, useRemoveBookmark } from '../../lib/api/bookmarks'
 import { useCan } from '../../lib/roles'
 import type { BookmarkResourceType } from '../../types/api'
 
-interface NavItem {
+interface NavLeaf {
   icon: React.ReactNode
   label: string
   to: string
@@ -41,14 +42,32 @@ interface NavItem {
   operatorOnly?: boolean
 }
 
-const navItems: NavItem[] = [
+interface NavGroup {
+  icon: React.ReactNode
+  label: string
+  children: NavLeaf[]
+}
+
+type NavEntry = NavLeaf | NavGroup
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return 'children' in entry
+}
+
+const navItems: NavEntry[] = [
   { icon: <LayoutDashboard size={14} />, label: 'Dashboard', to: '/' },
   { icon: <GitBranch size={14} />, label: 'Resources', to: '/resources' },
   { icon: <HardDrive size={14} />, label: 'Nodes', to: '/nodes' },
   { icon: <Database size={14} />, label: 'Volumes', to: '/volumes' },
   { icon: <TrendingUp size={14} />, label: 'Metrics', to: '/metrics' },
-  { icon: <Share2 size={14} />, label: 'Network', to: '/network' },
-  { icon: <Workflow size={14} />, label: 'Dependencies', to: '/dependencies' },
+  {
+    icon: <Share2 size={14} />,
+    label: 'Topology',
+    children: [
+      { icon: <Share2 size={14} />, label: 'Network', to: '/network' },
+      { icon: <Workflow size={14} />, label: 'Dependencies', to: '/dependencies' },
+    ],
+  },
   { icon: <ScrollText size={14} />, label: 'Logs', to: '/logs' },
   { icon: <Bot size={14} />, label: 'Assistant', to: '/chat', operatorOnly: true },
   { icon: <Shield size={14} />, label: 'Security', to: '/security' },
@@ -65,6 +84,76 @@ const navItems: NavItem[] = [
   { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications', adminOnly: true },
   { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },
 ]
+
+// Shared NavLink styling for leaf entries (top-level and nested).
+function navLinkStyle({ isActive }: { isActive: boolean }): React.CSSProperties {
+  return {
+    backgroundColor: isActive ? 'var(--accent-glow)' : 'transparent',
+    color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+    borderRadius: '3px',
+    textDecoration: 'none',
+  }
+}
+
+/** A collapsible sidebar group (e.g. Topology → Network, Dependencies). Auto-
+ *  expands when one of its child routes is active; otherwise starts collapsed. */
+function NavGroupItem({ group }: { group: NavGroup }) {
+  const location = useLocation()
+  const childActive = group.children.some(
+    (c) => location.pathname === c.to || location.pathname.startsWith(`${c.to}/`),
+  )
+  const [open, setOpen] = useState(childActive)
+
+  // Expand automatically when navigating into one of the group's routes.
+  useEffect(() => {
+    if (childActive) setOpen(true)
+  }, [childActive])
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-sm transition-colors w-full"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: childActive ? 'var(--accent)' : 'var(--text-secondary)',
+          borderRadius: '3px',
+          textAlign: 'left',
+        }}
+      >
+        {group.icon}
+        <span className="flex-1">{group.label}</span>
+        <ChevronRight
+          size={13}
+          style={{
+            color: 'var(--text-muted)',
+            transform: open ? 'rotate(90deg)' : 'none',
+            transition: 'transform 0.12s',
+          }}
+        />
+      </button>
+      {open && (
+        <ul className="flex flex-col gap-0.5 mt-0.5" style={{ marginLeft: '10px', paddingLeft: '8px', borderLeft: '1px solid var(--border-subtle)' }}>
+          {group.children.map((child) => (
+            <li key={child.to}>
+              <NavLink
+                to={child.to}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-sm transition-colors"
+                style={navLinkStyle}
+              >
+                {child.icon}
+                {child.label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
 
 function bookmarkIcon(type: BookmarkResourceType) {
   switch (type) {
@@ -174,6 +263,9 @@ export function Sidebar() {
       </div>
       <ul className="flex flex-col gap-0.5 px-2">
         {navItems.map((item) => {
+          if (isGroup(item)) {
+            return <NavGroupItem key={item.label} group={item} />
+          }
           if (item.adminOnly && !isAdmin) return null
           if (item.operatorOnly && !isOperator) return null
           return (
@@ -182,12 +274,7 @@ export function Sidebar() {
                 to={item.to}
                 end={item.to === '/'}
                 className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-sm transition-colors"
-                style={({ isActive }) => ({
-                  backgroundColor: isActive ? 'var(--accent-glow)' : 'transparent',
-                  color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                  borderRadius: '3px',
-                  textDecoration: 'none',
-                })}
+                style={navLinkStyle}
               >
                 {item.icon}
                 {item.label}
