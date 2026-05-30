@@ -157,6 +157,7 @@ func run(logger *slog.Logger) error {
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
 	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL)
 	proxySvc := proxy.New(store, cipher)
+	proxySvc.WithFiles(filesSvc)
 	dnsSvc := dnspkg.New(store, cipher)
 	featureSvc := features.New(store)
 	chatSvc := chatbot.New(store, cipher, logger, func(ctx context.Context) bool {

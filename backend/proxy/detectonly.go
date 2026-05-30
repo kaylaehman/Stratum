@@ -4,7 +4,7 @@ import "context"
 
 func init() {
 	Register(&detectOnly{name: "caddy", patterns: []string{"caddy"}})
-	Register(&detectOnly{name: "cloudflared", patterns: []string{"cloudflare/cloudflared", "cloudflared"}})
+	// cloudflared is promoted to a real adapter (see cloudflared.go).
 	Register(&detectOnly{name: "haproxy", patterns: []string{"haproxy"}})
 	Register(&detectOnly{name: "nginx", patterns: []string{"nginx"}})
 }
