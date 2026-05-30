@@ -13,27 +13,36 @@ COPY backend/ ./
 ENV GOWORK=off CGO_ENABLED=0
 RUN go build -trimpath -ldflags="-s -w" -o /out/stratum .
 
-# Trivy is bundled so container-image CVE scanning works out of the box with zero
-# config. The aquasec/trivy image is multi-arch; BuildKit resolves the platform
-# for this stage from the build's TARGETPLATFORM, so the COPY below lands the
-# correct amd64/arm64 binary automatically (no hardcoded arch).
+# Optional Trivy stage. The aquasec/trivy image is multi-arch; BuildKit resolves
+# the platform from TARGETPLATFORM, so the COPY in app-trivy lands the correct
+# amd64/arm64 binary. BuildKit skips unreferenced stages, so the default build
+# (target: app) never pulls this ~150MB image — keeping redeploys fast.
 FROM aquasec/trivy:${TRIVY_VERSION} AS trivy
 
-FROM gcr.io/distroless/static-debian12:nonroot
-# Bundled trivy lands on PATH at /usr/local/bin/trivy so exec.LookPath("trivy")
-# finds it with zero config. TRIVY_PATH still overrides when set. (BuildKit does
-# not expand ARGs in COPY --from, so the stage name is fixed; to ship without
-# trivy, build a variant that skips this COPY and rely on TRIVY_PATH instead.)
-COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
+# Shared runtime image (no Trivy). Basis for both variants below.
+FROM gcr.io/distroless/static-debian12:nonroot AS app-base
 COPY --from=build /out/stratum /stratum
 # Container-troubleshooting skill library (reference data). Build context is the
 # repo root, so assets/skills is available; SKILLS_DIR defaults to /app/skills.
 COPY assets/skills /app/skills
-# Persistent, writable Trivy cache/DB on the mounted data volume (uid 65532 owns
-# /data). First scan downloads the DB from mirror.gcr.io/aquasec/trivy-db, then
-# it's reused across restarts. Overridable via TRIVY_CACHE_DIR.
+# Writable Trivy cache/DB on the mounted data volume (uid 65532 owns /data); used
+# only when Trivy is available (bundled via app-trivy, or via TRIVY_PATH).
 ENV TRIVY_CACHE_DIR=/data/trivy-cache
 # /data holds the SQLite DB + agent CA + trivy cache; mount a volume here.
 VOLUME ["/data"]
 EXPOSE 8080
 ENTRYPOINT ["/stratum"]
+
+# Opt-in variant: bundle Trivy for zero-config container-image CVE scanning. It
+# pulls the ~150MB aquasec/trivy image, so it is NOT the default. Enable with:
+#   docker build --target app-trivy ...
+#   or compose: services.backend.build.target: app-trivy
+# trivy lands on PATH at /usr/local/bin/trivy so exec.LookPath("trivy") finds it;
+# TRIVY_PATH still overrides when set.
+FROM app-base AS app-trivy
+COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
+
+# Default target (last stage): slim image WITHOUT Trivy. CVE scanning reports
+# "not available" until you bundle Trivy (app-trivy) or set TRIVY_PATH to a host
+# trivy. Fast to build — no aquasec/trivy pull.
+FROM app-base AS app
