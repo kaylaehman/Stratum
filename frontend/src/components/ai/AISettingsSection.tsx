@@ -202,6 +202,7 @@ export function AISettingsSection() {
   const [ollamaModel, setOllamaModel] = useState('')
   const [claudeModel, setClaudeModel] = useState('')
   const [openaiModel, setOpenaiModel] = useState('')
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState('')
   const [geminiModel, setGeminiModel] = useState('')
   // newApiKey: undefined = not touched (don't send), '' = clear, string = set
   const [newApiKey, setNewApiKey] = useState<string | undefined>(undefined)
@@ -219,6 +220,7 @@ export function AISettingsSection() {
     setOllamaModel(config.ollama_model ?? '')
     setClaudeModel(config.claude_model ?? '')
     setOpenaiModel(config.openai_model ?? '')
+    setOpenaiBaseUrl(config.openai_base_url ?? '')
     setGeminiModel(config.gemini_model ?? '')
     setNewApiKey(undefined)
     setShowKeyInput(false)
@@ -236,6 +238,7 @@ export function AISettingsSection() {
         ollama_model: provider === 'ollama' ? ollamaModel : undefined,
         claude_model: provider === 'claude' || provider === 'claude-oauth' ? claudeModel : undefined,
         openai_model: provider === 'openai' ? openaiModel : undefined,
+        openai_base_url: provider === 'openai' ? openaiBaseUrl : undefined,
         gemini_model: provider === 'gemini' ? geminiModel : undefined,
         // Only include api_key in payload if user actually typed something or explicitly cleared
         ...(newApiKey !== undefined ? { api_key: newApiKey } : {}),
@@ -385,18 +388,37 @@ export function AISettingsSection() {
             </div>
           )}
           {provider === 'openai' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Model</label>
-              <input
-                type="text"
-                value={openaiModel}
-                onChange={e => setOpenaiModel(e.target.value)}
-                onFocus={() => setFocusField('openaiModel')}
-                onBlur={() => setFocusField(null)}
-                placeholder="gpt-4o-mini"
-                style={inputStyle(focusField === 'openaiModel')}
-              />
-            </div>
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Model</label>
+                <input
+                  type="text"
+                  value={openaiModel}
+                  onChange={e => setOpenaiModel(e.target.value)}
+                  onFocus={() => setFocusField('openaiModel')}
+                  onBlur={() => setFocusField(null)}
+                  placeholder="gpt-4o-mini"
+                  style={inputStyle(focusField === 'openaiModel')}
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Base URL (optional)</label>
+                <input
+                  type="text"
+                  value={openaiBaseUrl}
+                  onChange={e => setOpenaiBaseUrl(e.target.value)}
+                  onFocus={() => setFocusField('openaiBaseUrl')}
+                  onBlur={() => setFocusField(null)}
+                  placeholder="https://api.openai.com/v1"
+                  style={inputStyle(focusField === 'openaiBaseUrl')}
+                />
+                <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                  Leave blank for OpenAI. Point at any OpenAI-compatible endpoint — e.g. a
+                  <code> claude-max-api-proxy</code> (<code>http://host:3456/v1</code>) to use a Claude Max
+                  subscription, LiteLLM, vLLM, or OpenRouter. The API key may be optional for local proxies.
+                </p>
+              </div>
+            </>
           )}
           {provider === 'gemini' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
