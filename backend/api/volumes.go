@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -13,9 +14,11 @@ import (
 	"github.com/kaylaehman/stratum/backend/volumes"
 )
 
-// volumeListNodeTimeout bounds a single node's volume listing so one slow daemon
-// (DiskUsage computes du and can be slow) cannot stall the whole cross-node list.
-const volumeListNodeTimeout = 15 * time.Second
+// volumeListNodeTimeout bounds a single node's volume listing. The VolumeList
+// call inside is fast; the DiskUsage enrichment has its own inner timeout (see
+// docker.dfTimeout). This outer deadline guards against hung TCP connections or
+// extremely slow stores.
+const volumeListNodeTimeout = 30 * time.Second
 
 // ListVolumes lists volumes across all docker-capable nodes with health status.
 // Read-only; available to any authenticated user.
@@ -37,7 +40,10 @@ func (h *Handlers) ListVolumes(w http.ResponseWriter, r *http.Request) {
 		vols, err := h.Volumes.ListForNode(nodeCtx, n.ID)
 		cancel()
 		if err != nil {
-			continue // a single unreachable/slow node must not fail the whole list
+			// Log so operators can diagnose why a node's volumes are absent,
+			// but do not fail the whole cross-node list.
+			slog.Warn("volumes: list for node failed, skipping", "node", n.ID, "name", n.Name, "error", err)
+			continue
 		}
 		out = append(out, vols...)
 	}
