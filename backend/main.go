@@ -167,6 +167,22 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Merge user-authored (custom) skills from the DB on top of the shipped
+	// library so they survive restarts and participate in matching like any
+	// built-in skill. A malformed stored skill is logged and skipped, never fatal.
+	if customSkills, err := store.ListCustomSkills(context.Background()); err != nil {
+		logger.Warn("skills: load custom skills", "error", err)
+	} else {
+		for _, cs := range customSkills {
+			s, err := skills.Parse([]byte(cs.YAML))
+			if err != nil {
+				logger.Warn("skills: skip malformed custom skill", "id", cs.ID, "error", err)
+				continue
+			}
+			s.Source = skills.SourceCustom
+			skillLib.Upsert(s)
+		}
+	}
 	logger.Info("skills library loaded", "count", skillLib.Len(), "dir", cfg.SkillsDir)
 
 	handlers := &api.Handlers{

@@ -83,6 +83,11 @@ const (
 	ActionRunbookUpdate = "runbook.update"
 	ActionRunbookDelete = "runbook.delete"
 
+	ActionSkillCreate   = "skill.create"
+	ActionSkillUpdate   = "skill.update"
+	ActionSkillDelete   = "skill.delete"
+	ActionSkillGenerate = "skill.generate"
+
 	ActionProxyConfig   = "proxy.config"
 	ActionDNSConfig     = "dns.config"
 	ActionFeatureToggle = "feature.toggle"
@@ -109,6 +114,7 @@ const (
 	TargetSSHKey          = "sshkey"
 	TargetScript          = "script"
 	TargetAI              = "ai"
+	TargetSkill           = "skill"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -196,6 +202,11 @@ var actionCatalog = []ActionInfo{
 	{ActionRunbookCreate, "Runbook created", "runbook", TargetAI},
 	{ActionRunbookUpdate, "Runbook updated", "runbook", TargetAI},
 	{ActionRunbookDelete, "Runbook deleted", "runbook", TargetAI},
+
+	{ActionSkillCreate, "Troubleshooting skill created", "skill", TargetSkill},
+	{ActionSkillUpdate, "Troubleshooting skill updated", "skill", TargetSkill},
+	{ActionSkillDelete, "Troubleshooting skill deleted", "skill", TargetSkill},
+	{ActionSkillGenerate, "Troubleshooting skill drafted by AI", "skill", TargetSkill},
 
 	{ActionProxyConfig, "Reverse-proxy endpoint configured", "proxy", TargetNode},
 	{ActionDNSConfig, "DNS endpoint configured", "dns", TargetNode},

@@ -18,6 +18,8 @@ type skillSummary struct {
 	ImagePatterns []string `json:"image_patterns"`
 	PortHints     []int    `json:"port_hints"`
 	IssueCount    int      `json:"issue_count"`
+	Source        string   `json:"source"`   // "builtin" | "custom"
+	Editable      bool     `json:"editable"` // true for user-authored (custom) skills
 }
 
 // skillStep is the detail projection of a single step.
@@ -48,6 +50,8 @@ type skillDetail struct {
 	ImagePatterns []string     `json:"image_patterns"`
 	PortHints     []int        `json:"port_hints"`
 	CommonIssues  []skillIssue `json:"common_issues"`
+	Source        string       `json:"source"`
+	Editable      bool         `json:"editable"`
 }
 
 func summarize(s skills.Skill) skillSummary {
@@ -60,6 +64,8 @@ func summarize(s skills.Skill) skillSummary {
 		ImagePatterns: nonNilStrings(s.ContainerMatch.ImagePatterns),
 		PortHints:     nonNilInts(s.ContainerMatch.PortHints),
 		IssueCount:    len(s.CommonIssues),
+		Source:        s.Source,
+		Editable:      s.Source == skills.SourceCustom,
 	}
 }
 
@@ -93,6 +99,8 @@ func detail(s skills.Skill) skillDetail {
 		ImagePatterns: nonNilStrings(s.ContainerMatch.ImagePatterns),
 		PortHints:     nonNilInts(s.ContainerMatch.PortHints),
 		CommonIssues:  issues,
+		Source:        s.Source,
+		Editable:      s.Source == skills.SourceCustom,
 	}
 }
 

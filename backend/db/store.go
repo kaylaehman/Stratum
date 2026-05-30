@@ -294,6 +294,17 @@ type Runbook struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+// CustomSkill is a user-authored troubleshooting skill, stored as the verbatim
+// YAML the operator wrote (parsed into the in-memory library at load time). ID
+// is the skill's own id parsed from that YAML.
+type CustomSkill struct {
+	ID        string    `json:"id"`
+	YAML      string    `json:"yaml"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // SSOConfig is per-container access-control configuration (Feature F2). It is
 // configuration only — the enforcing auth gateway is a follow-on.
 // ClientSecretEncrypted is AES-sealed; the plaintext is never returned.
@@ -653,6 +664,13 @@ type Store interface {
 	ListRunbooks(ctx context.Context) ([]Runbook, error)
 	UpdateRunbook(ctx context.Context, rb Runbook) error
 	DeleteRunbook(ctx context.Context, id string) error
+
+	// Custom (user-authored) skills — editable counterpart to the built-in
+	// container-troubleshooting library. The full YAML is stored verbatim.
+	UpsertCustomSkill(ctx context.Context, cs CustomSkill) error
+	GetCustomSkill(ctx context.Context, id string) (CustomSkill, error)
+	ListCustomSkills(ctx context.Context) ([]CustomSkill, error)
+	DeleteCustomSkill(ctx context.Context, id string) error
 
 	// Agent memory (Feature F9)
 	CreateAgentMemory(ctx context.Context, m AgentMemory) error
