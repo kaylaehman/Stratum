@@ -268,12 +268,15 @@ func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time) erro
 	return nil
 }
 
-// ListSessionsByUser returns a user's sessions (newest first), including
-// revoked/expired ones so the UI can show session history.
+// ListSessionsByUser returns a user's active (non-expired, non-revoked) sessions
+// newest first. Expired and revoked sessions are excluded so the UI only shows
+// sessions that can still be used.
 func (s *Store) ListSessionsByUser(ctx context.Context, userID string) ([]appdb.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, user_id, refresh_hash, user_agent, ip, created_at, expires_at, revoked_at
-		 FROM sessions WHERE user_id = ? ORDER BY created_at DESC`, userID)
+		 FROM sessions
+		 WHERE user_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
+		 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list sessions: %w", err)
 	}
@@ -308,6 +311,18 @@ func (s *Store) RevokeAllUserSessions(ctx context.Context, userID string, at tim
 		`UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, tsText(at), userID)
 	if err != nil {
 		return fmt.Errorf("sqlite: revoke user sessions: %w", err)
+	}
+	return nil
+}
+
+// DeleteExpiredSessionsByUser hard-deletes all sessions for a user whose
+// expires_at is in the past. This is a housekeeping operation; it does not
+// touch active or revoked-but-not-expired sessions.
+func (s *Store) DeleteExpiredSessionsByUser(ctx context.Context, userID string, now time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id = ? AND expires_at <= ?`, userID, tsText(now))
+	if err != nil {
+		return fmt.Errorf("sqlite: delete expired sessions: %w", err)
 	}
 	return nil
 }

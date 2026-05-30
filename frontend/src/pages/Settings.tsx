@@ -32,6 +32,7 @@ import {
   useDeleteUser,
   useSessions,
   useRevokeSession,
+  usePruneExpiredSessions,
   useChangePassword,
   useUpdateUser,
 } from '../lib/api/users'
@@ -1123,6 +1124,7 @@ function ChangePasswordSection() {
 function SessionsSection() {
   const { data, isLoading } = useSessions()
   const revoke = useRevokeSession()
+  const pruneExpired = usePruneExpiredSessions()
   const [revokeErrors, setRevokeErrors] = useState<Record<string, string>>({})
 
   const sessions = data?.sessions ?? []
@@ -1147,7 +1149,7 @@ function SessionsSection() {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
         <Monitor size={16} style={{ color: 'var(--text-muted)' }} />
-        <div>
+        <div style={{ flex: 1 }}>
           <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)', margin: 0 }}>
             Active Sessions
           </h2>
@@ -1155,6 +1157,21 @@ function SessionsSection() {
             Your signed-in devices
           </p>
         </div>
+        <button
+          onClick={() => void pruneExpired.mutateAsync()}
+          disabled={pruneExpired.isPending || isLoading}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            background: 'transparent', color: 'var(--text-muted)',
+            border: '1px solid var(--border-subtle)', borderRadius: '3px',
+            fontSize: 11, padding: '4px 10px', cursor: 'pointer',
+            opacity: pruneExpired.isPending ? 0.6 : 1,
+          }}
+          title="Delete all your expired sessions"
+        >
+          <Trash2 size={11} />
+          {pruneExpired.isPending ? 'Removing…' : 'Remove expired'}
+        </button>
       </div>
 
       {isLoading ? (

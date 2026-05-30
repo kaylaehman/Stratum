@@ -289,6 +289,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/users/{id}", d.Handlers.UpdateUser)
 			audited.Delete("/users/{id}", d.Handlers.DeleteUser)
 			audited.Delete("/sessions/{id}", d.Handlers.RevokeOwnSession)
+			audited.Delete("/sessions/expired", d.Handlers.PruneExpiredSessions)
 			audited.Post("/auth/change-password", d.Handlers.ChangeOwnPassword)
 		})
 	})
