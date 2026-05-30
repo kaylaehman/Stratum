@@ -276,15 +276,15 @@ function VolumeRow({ volume, nodeName, isAdmin }: VolumeRowProps) {
           className="px-3 py-2 text-xs"
           style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', maxWidth: '200px' }}
         >
-          {volume.attached_containers.length > 0
-            ? volume.attached_containers.join(', ')
+          {(volume.attached_containers ?? []).length > 0
+            ? (volume.attached_containers ?? []).join(', ')
             : '—'}
         </td>
         <td
           className="px-3 py-2"
           style={{ borderBottom: '1px solid var(--border-subtle)' }}
         >
-          <Sparkline samples={volume.samples} />
+          <Sparkline samples={volume.samples ?? []} />
         </td>
         <td
           className="px-3 py-2"
