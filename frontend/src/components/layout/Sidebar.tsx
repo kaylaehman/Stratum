@@ -29,6 +29,7 @@ import {
   ChevronRight,
   SquareTerminal,
   Network as NetworkIcon,
+  Layers,
 } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
@@ -69,6 +70,7 @@ const navItems: NavEntry[] = [
       { icon: <NetworkIcon size={14} />, label: 'Infrastructure', to: '/infrastructure' },
       { icon: <Share2 size={14} />, label: 'Network', to: '/network' },
       { icon: <Workflow size={14} />, label: 'Dependencies', to: '/dependencies' },
+      { icon: <Layers size={14} />, label: 'Stacks', to: '/stacks' },
     ],
   },
   { icon: <ScrollText size={14} />, label: 'Logs', to: '/logs' },
