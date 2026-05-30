@@ -7,11 +7,12 @@ import {
   Loader,
   ExternalLink,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
-import { useCVEScans, useCVEDetail, useScanContainer } from '../lib/api/cve'
+import { useCVEScans, useCVEDetail, useScanContainer, useCVEStatus } from '../lib/api/cve'
 import { ApiError } from '../lib/api'
 import type { ImageScan, CVEVuln } from '../types/api'
 
@@ -491,10 +492,13 @@ export default function CVE() {
   const isAdmin = me?.role === 'admin'
 
   const { data, isLoading, refetch, isRefetching } = useCVEScans(isAdmin)
+  const { data: status } = useCVEStatus(isAdmin)
   const [expandedDigest, setExpandedDigest] = useState<string | null>(null)
   const [tableFilter, setTableFilter] = useState<SeverityFilter>('all')
 
-  const scannerAvailable = data?.available ?? true
+  // Prefer the status endpoint's resolved trivy presence; fall back to the
+  // scans payload's `available` until status loads.
+  const scannerAvailable = status?.available ?? data?.available ?? true
   const rawScans = data?.scans ?? []
   const sorted = sortScans(rawScans).filter((s) => passesTableFilter(s, tableFilter))
 
@@ -556,8 +560,8 @@ export default function CVE() {
         {/* Content */}
         {isAdmin && !meLoading && !isLoading && (
           <>
-            {/* Scanner unavailable notice */}
-            {!scannerAvailable && (
+            {/* Scanner status banner */}
+            {!scannerAvailable ? (
               <div
                 className="flex items-start gap-2 px-3 py-2.5 text-xs mb-6"
                 style={{
@@ -578,6 +582,42 @@ export default function CVE() {
                     trivy
                   </code>{' '}
                   on the Stratum host. Cached scan results are shown below (read-only).
+                </span>
+              </div>
+            ) : (
+              <div
+                className="flex items-start gap-2 px-3 py-2.5 text-xs mb-6"
+                style={{
+                  backgroundColor: 'rgba(64,200,120,0.08)',
+                  border: '1px solid rgba(64,200,120,0.25)',
+                  borderRadius: '3px',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <ShieldCheck size={12} style={{ color: '#40c878', flexShrink: 0, marginTop: '1px' }} />
+                <span>
+                  Trivy ready
+                  {status?.version ? (
+                    <>
+                      {' '}
+                      <span style={{ color: 'var(--text-muted)' }}>v{status.version}</span>
+                    </>
+                  ) : null}
+                  {' — '}
+                  {typeof status?.db_age_days === 'number' ? (
+                    status.db_age_days <= 0 ? (
+                      <span style={{ color: 'var(--text-primary)' }}>vulnerability DB updated today</span>
+                    ) : (
+                      <span style={{ color: status.db_age_days > 7 ? 'var(--status-warn)' : 'var(--text-primary)' }}>
+                        vulnerability DB {status.db_age_days} day{status.db_age_days === 1 ? '' : 's'} old
+                      </span>
+                    )
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      vulnerability DB downloads on first scan
+                    </span>
+                  )}
+                  .
                 </span>
               </div>
             )}

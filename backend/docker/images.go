@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"io"
 	"strings"
 )
 
@@ -14,6 +15,35 @@ func (c *Client) LocalRepoDigest(ctx context.Context, imageID string) (string, e
 		return "", err
 	}
 	return digestFromRepoDigests(insp.RepoDigests), nil
+}
+
+// HasRepoDigest reports whether the given image (by id or ref) carries a registry
+// repo digest. A locally-built image that was never pushed/pulled has none, which
+// means `trivy image <ref>` would fall back to a registry pull and fail — such
+// images must be scanned via an exported tarball instead (see ImageSave).
+func (c *Client) HasRepoDigest(ctx context.Context, imageRef string) (bool, error) {
+	insp, err := c.cli.ImageInspect(ctx, imageRef)
+	if err != nil {
+		return false, err
+	}
+	return len(insp.RepoDigests) > 0, nil
+}
+
+// ImageSave exports the named image (id, name, or ref) as a Docker-format tar
+// stream via the Engine API `GET /images/get`. The caller MUST Close the
+// returned reader. This is used to scan locally-built/unpublished images that a
+// registry pull cannot reach.
+//
+// NOTE: behind a restricted socket-proxy (tecnativa/docker-socket-proxy style),
+// image export requires the proxy to allow GET /images/{name}/get — i.e. the
+// IMAGES permission must be enabled. A read-only proxy that blocks it will make
+// local-image scanning unavailable while registry scans still work.
+func (c *Client) ImageSave(ctx context.Context, imageRef string) (io.ReadCloser, error) {
+	rc, err := c.cli.ImageSave(ctx, []string{imageRef})
+	if err != nil {
+		return nil, err
+	}
+	return rc, nil
 }
 
 // digestFromRepoDigests extracts the "sha256:..." portion from the first

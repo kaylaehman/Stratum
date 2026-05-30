@@ -91,6 +91,7 @@ func NewRouter(d *Deps) http.Handler {
 
 			// Image CVE scans (admin-gated; on-demand scan is audited below).
 			r.Get("/security/cve", d.Handlers.CVEScans)
+			r.Get("/security/cve/status", d.Handlers.CVEStatus)
 			r.Get("/security/cve/{digest}", d.Handlers.CVEDetail)
 
 			// Volume health (read-only; cross-node).

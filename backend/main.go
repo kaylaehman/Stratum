@@ -235,6 +235,19 @@ func run(logger *slog.Logger) error {
 	go metricsSampler.Run(ctx)                      // 15s resource-timeline sampler
 	go chatSvc.Run(ctx)                             // inbound chat-command poller (no-op until enabled+configured)
 
+	// Best-effort warm the Trivy vulnerability DB so the first user scan isn't
+	// slow. Non-fatal and time-bounded: offline deploys (no egress to the
+	// trivy-db mirror) still boot normally.
+	if cveSvc.Available() {
+		go func() {
+			if err := cveSvc.WarmDB(ctx); err != nil {
+				logger.Info("trivy db warm skipped", "error", err)
+			} else {
+				logger.Info("trivy vulnerability db ready")
+			}
+		}()
+	}
+
 	return srv.Run(ctx)
 }
 

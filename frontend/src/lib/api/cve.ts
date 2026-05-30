@@ -1,9 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiFetch } from '../api'
-import type { CVEScansResponse, CVEDetailResponse } from '../../types/api'
+import type { CVEScansResponse, CVEDetailResponse, CVEStatusResponse } from '../../types/api'
 
 export function cveScansKey() {
   return ['cve', 'scans'] as const
+}
+
+export function cveStatusKey() {
+  return ['cve', 'status'] as const
+}
+
+export function useCVEStatus(enabled = true) {
+  return useQuery({
+    queryKey: cveStatusKey(),
+    queryFn: () => apiGet<CVEStatusResponse>('/api/security/cve/status'),
+    staleTime: 60_000,
+    enabled,
+  })
 }
 
 export function cveDetailKey(digest: string) {
