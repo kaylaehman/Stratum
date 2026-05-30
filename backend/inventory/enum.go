@@ -9,11 +9,64 @@ import (
 	"github.com/kaylaehman/stratum/backend/proxmox"
 )
 
-// enumProxmox enumerates all guests across every online cluster member. A
-// single member's list error is skipped (logged), not fatal, so one bad member
-// doesn't block enumeration of the healthy ones — only a failure to list the
-// cluster members themselves is a hard error.
+// enumProxmox enumerates the guests on ONLY the cluster member this Stratum node
+// represents — not the whole cluster. proxmox1/proxmox2/proxmox3 are members of
+// one cluster but each registered as its own Stratum node; the Proxmox API
+// returns every member's guests regardless of which member answered, so
+// enumerating all members from each node would surface every guest N times (one
+// per Stratum node). We resolve the local member via cluster/status (the entry
+// flagged local == 1) and enumerate only it.
+//
+// If the local member can't be determined (e.g. a permission gap on
+// /cluster/status), we fall back to enumerating every online member — the old
+// behavior — and log it, so a single-node deployment still works rather than
+// going blank.
 func enumProxmox(ctx context.Context, cl *proxmox.Client, nodeID string) ([]db.VM, error) {
+	local, err := cl.LocalNodeName(ctx)
+	if err != nil {
+		slog.Warn("inventory: proxmox local node resolution failed; falling back to enumerating all online members (guests may duplicate across clustered Stratum nodes)",
+			"node", nodeID, "error", err)
+		return enumProxmoxAllMembers(ctx, cl, nodeID)
+	}
+	slog.Debug("inventory: proxmox local member resolved", "node", nodeID, "member", local)
+
+	qemu, err := cl.QemuList(ctx, local)
+	if err != nil {
+		return nil, err
+	}
+	lxc, err := cl.LxcList(ctx, local)
+	if err != nil {
+		return nil, err
+	}
+	slog.Debug("inventory: proxmox local member guests", "node", nodeID, "member", local, "qemu", len(qemu), "lxc", len(lxc))
+
+	out := make([]db.VM, 0, len(qemu)+len(lxc))
+	for _, g := range append(qemu, lxc...) {
+		out = append(out, db.VM{
+			NodeID:      nodeID,
+			Kind:        g.Kind,
+			ProxmoxVMID: g.VMID,
+			ProxmoxNode: local,
+			Name:        g.Name,
+			Status:      g.Status,
+		})
+	}
+	// Confirmed auth but zero guests is almost always a token-permission gap:
+	// without VM.Audit on /vms the Proxmox API returns an empty list (not an
+	// error), so nothing above logs. Surface it so it's diagnosable.
+	if len(out) == 0 {
+		slog.Info("inventory: proxmox enumeration returned 0 guests; check the API token has VM.Audit on /vms (or a parent path)",
+			"node", nodeID, "member", local)
+	}
+	return out, nil
+}
+
+// enumProxmoxAllMembers enumerates guests across every online cluster member. It
+// is the fallback used only when the local member can't be resolved. A single
+// member's list error is skipped (logged), not fatal, so one bad member doesn't
+// block enumeration of the healthy ones — only a failure to list the cluster
+// members themselves is a hard error.
+func enumProxmoxAllMembers(ctx context.Context, cl *proxmox.Client, nodeID string) ([]db.VM, error) {
 	members, err := cl.Nodes(ctx)
 	if err != nil {
 		return nil, err
@@ -47,9 +100,6 @@ func enumProxmox(ctx context.Context, cl *proxmox.Client, nodeID string) ([]db.V
 			})
 		}
 	}
-	// Confirmed auth but zero guests is almost always a token-permission gap:
-	// without VM.Audit on /vms the Proxmox API returns an empty list (not an
-	// error), so nothing above logs. Surface it so it's diagnosable.
 	if len(out) == 0 {
 		slog.Info("inventory: proxmox enumeration returned 0 guests; check the API token has VM.Audit on /vms (or a parent path)",
 			"node", nodeID, "members", len(members))

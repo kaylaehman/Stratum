@@ -143,6 +143,108 @@ func TestNodes(t *testing.T) {
 	}
 }
 
+// TestLocalNodeName verifies LocalNodeName() picks the type=="node" entry with
+// local==1 from a clustered /cluster/status response (ignoring the "cluster"
+// entry and the non-local members) and sends the correct auth header to the
+// right path.
+func TestLocalNodeName(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("Authorization")
+		if got != wantAuthHeader {
+			t.Errorf("Authorization header = %q; want %q", got, wantAuthHeader)
+		}
+		if r.URL.Path != "/api2/json/cluster/status" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// A clustered host: a "cluster" entry plus three "node" members, with
+		// proxmox2 flagged local==1 (this is the member that answered).
+		_, _ = w.Write([]byte(`{"data":[
+			{"type":"cluster","name":"homelab","local":0},
+			{"type":"node","name":"proxmox1","local":0},
+			{"type":"node","name":"proxmox2","local":1},
+			{"type":"node","name":"proxmox3","local":0}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+	name, err := c.LocalNodeName(context.Background())
+	if err != nil {
+		t.Fatalf("LocalNodeName() error: %v", err)
+	}
+	if name != "proxmox2" {
+		t.Errorf("LocalNodeName() = %q; want %q", name, "proxmox2")
+	}
+}
+
+// TestLocalNodeName_Standalone verifies that a single (non-clustered) PVE host,
+// whose cluster/status lists exactly one node flagged local==1, resolves to that
+// node.
+func TestLocalNodeName_Standalone(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[
+			{"type":"node","name":"pve","local":1}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+	name, err := c.LocalNodeName(context.Background())
+	if err != nil {
+		t.Fatalf("LocalNodeName() error: %v", err)
+	}
+	if name != "pve" {
+		t.Errorf("LocalNodeName() = %q; want %q", name, "pve")
+	}
+}
+
+// TestLocalNodeName_NoLocal verifies that a response with no local==1 node entry
+// returns an error (so the caller can fall back to enumerating all members).
+func TestLocalNodeName_NoLocal(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// No entry has local==1 (e.g. unexpected API shape / permission gap).
+		_, _ = w.Write([]byte(`{"data":[
+			{"type":"cluster","name":"homelab","local":0},
+			{"type":"node","name":"proxmox1","local":0}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+	_, err := c.LocalNodeName(context.Background())
+	if err == nil {
+		t.Fatal("expected an error when no local node is present, got nil")
+	}
+}
+
+// TestLocalNodeName_403 verifies a non-200 status from cluster/status surfaces
+// as an error.
+func TestLocalNodeName_403(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := proxmox.New(srv.URL, testTokenID, testSecret, false)
+	if _, err := c.LocalNodeName(context.Background()); err == nil {
+		t.Fatal("expected error for HTTP 403, got nil")
+	}
+}
+
 // TestQemuList verifies QemuList() parses VM data and sends the correct auth header.
 func TestQemuList(t *testing.T) {
 	t.Parallel()
