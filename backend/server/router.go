@@ -126,6 +126,7 @@ func NewRouter(d *Deps) http.Handler {
 
 			// AI assistant config (admin gate in handler; set/ask are audited below).
 			r.Get("/ai/config", d.Handlers.AIConfigGet)
+			r.Get("/ai/ollama/models", d.Handlers.AIGetOllamaModels)
 			r.Get("/ai/oauth/start", d.Handlers.AIOAuthStart)
 
 			// Certificate inventory (admin gate in handler; rescan is audited below).

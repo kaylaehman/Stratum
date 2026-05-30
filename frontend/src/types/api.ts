@@ -1268,6 +1268,10 @@ export interface SetAIConfigRequest {
   api_key?: string
 }
 
+export interface OllamaModelsResponse {
+  models: string[]
+}
+
 export type AITask = 'explain_log' | 'diagnose' | 'explain_config' | 'suggest_fix' | ''
 
 export interface AIAskRequest {

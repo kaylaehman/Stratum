@@ -155,6 +155,32 @@ func (h *Handlers) AIOAuthDisconnect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.AI.Config(r.Context()))
 }
 
+// AIGetOllamaModels queries the configured (or query-param-supplied) Ollama
+// server for its installed models and returns their names (admin-gated).
+func (h *Handlers) AIGetOllamaModels(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	baseURL := r.URL.Query().Get("base_url")
+	res, err := h.AI.OllamaModels(r.Context(), baseURL)
+	if errors.Is(err, ai.ErrNotConfigured) {
+		writeError(w, http.StatusBadRequest, "ollama_url_required")
+		return
+	}
+	if errors.Is(err, ai.ErrInvalidConfig) {
+		writeError(w, http.StatusBadRequest, "invalid_url")
+		return
+	}
+	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Warn("ollama models fetch failed", "error", err)
+		}
+		writeError(w, http.StatusBadGateway, "ollama_unreachable")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 type aiAskRequest struct {
 	Task    string `json:"task"`
 	Prompt  string `json:"prompt"`
