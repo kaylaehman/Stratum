@@ -27,6 +27,7 @@ import {
   Wrench,
   Bot,
   ChevronRight,
+  SquareTerminal,
 } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
@@ -78,6 +79,7 @@ const navItems: NavEntry[] = [
   { icon: <Wrench size={14} />, label: 'Skills', to: '/skills' },
   { icon: <ShieldCheck size={14} />, label: 'Certificates', to: '/certs', adminOnly: true },
   { icon: <KeyRound size={14} />, label: 'Secrets', to: '/secrets', adminOnly: true },
+  { icon: <SquareTerminal size={14} />, label: 'Terminal', to: '/terminal', adminOnly: true },
   { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
   { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
   { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },

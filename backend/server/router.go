@@ -45,6 +45,8 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/me", d.Handlers.Me)
 			r.Get("/me/2fa", d.Handlers.TwoFAStatus)
 			r.Get("/ws", d.Handlers.WebSocket)
+			// Interactive host shell over SSH (admin-gated in handler; audited).
+			r.Get("/nodes/{id}/terminal", d.Handlers.NodeTerminal)
 
 			// User management (admin gate enforced in handlers) + own sessions.
 			r.Get("/users", d.Handlers.ListUsers)
