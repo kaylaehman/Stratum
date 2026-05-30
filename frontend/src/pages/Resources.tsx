@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Square, RotateCw, Loader, BookmarkPlus, BookmarkCheck } from 'lucide-react'
+import { Play, Square, RotateCw, PowerOff, Loader, BookmarkPlus, BookmarkCheck } from 'lucide-react'
 import { WakeOnLan } from '../components/nodes/WakeOnLan'
 import { SSHKeys } from '../components/nodes/SSHKeys'
 import { Scheduler } from '../components/nodes/Scheduler'
@@ -24,6 +24,8 @@ import { useContainerInspect } from '../lib/api/permissions'
 import { useTreeStore } from '../store/tree'
 import { useTree } from '../lib/api/tree'
 import { useContainerLifecycle } from '../lib/api/containers'
+import { useVMPowerAction } from '../lib/api/vms'
+import type { VMAction } from '../lib/api/vms'
 import { useAddBookmark } from '../lib/api/bookmarks'
 import { useNodeGuestLinks } from '../hooks/useNodeGuestLinks'
 import { useCan } from '../lib/roles'
@@ -119,6 +121,109 @@ function LifecycleControls({ containerId, status }: LifecycleControlsProps) {
         {btn('stop', <Square size={12} />, 'Stop', !isRunning)}
         {btn('restart', <RotateCw size={12} />, 'Restart', !isRunning)}
       </div>
+      {errorMsg && (
+        <span className="font-mono text-xs mt-0.5" style={{ color: 'var(--status-error)' }}>
+          {errorMsg}
+        </span>
+      )}
+    </div>
+  )
+}
+
+interface VMLifecycleControlsProps {
+  nodeId: string
+  vmid: number
+  status: string
+}
+
+function VMLifecycleControls({ nodeId, vmid, status }: VMLifecycleControlsProps) {
+  const { isOperator } = useCan()
+  const { mutate, isPending, variables, error } = useVMPowerAction()
+  const [pendingConfirm, setPendingConfirm] = useState<VMAction | null>(null)
+
+  if (!isOperator) return null
+
+  const isRunning = status === 'running'
+  const inFlight = (action: VMAction) =>
+    isPending && variables?.nodeId === nodeId && variables?.vmid === vmid && variables?.action === action
+
+  function triggerAction(action: VMAction) {
+    // stop / reboot require a confirm step to prevent accidental power-off.
+    if ((action === 'stop' || action === 'reboot') && pendingConfirm !== action) {
+      setPendingConfirm(action)
+      return
+    }
+    setPendingConfirm(null)
+    mutate({ nodeId, vmid, action })
+  }
+
+  function btn(
+    action: VMAction,
+    icon: React.ReactNode,
+    label: string,
+    disabled: boolean,
+  ) {
+    const loading = inFlight(action)
+    const confirming = pendingConfirm === action
+    return (
+      <button
+        key={action}
+        type="button"
+        disabled={disabled || isPending}
+        onClick={() => triggerAction(action)}
+        title={confirming ? `Click again to confirm ${label}` : label}
+        className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1"
+        style={{
+          background: confirming ? 'rgba(232,64,64,0.10)' : 'var(--bg-elevated)',
+          border: `1px solid ${confirming ? 'var(--status-error)' : 'var(--border-default)'}`,
+          color: disabled || isPending ? 'var(--text-muted)' : confirming ? 'var(--status-error)' : 'var(--text-secondary)',
+          borderRadius: '3px',
+          cursor: disabled || isPending ? 'not-allowed' : 'pointer',
+          opacity: disabled || isPending ? 0.5 : 1,
+        }}
+      >
+        {loading ? <Loader size={12} className="animate-spin" /> : icon}
+        {confirming ? `Confirm ${label}` : label}
+      </button>
+    )
+  }
+
+  const errorMsg = error
+    ? (error as { body?: { error?: string } }).body?.error === 'proxmox_unreachable'
+      ? 'Action failed — Proxmox unreachable'
+      : 'Action failed'
+    : null
+
+  return (
+    <div className="flex flex-col gap-1.5 mt-2 pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Controls</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        {btn('start', <Play size={12} />, 'Start', isRunning)}
+        {btn('shutdown', <PowerOff size={12} />, 'Shutdown', !isRunning)}
+        {btn('stop', <Square size={12} />, 'Force Stop', !isRunning)}
+        {btn('reboot', <RotateCw size={12} />, 'Reboot', !isRunning)}
+      </div>
+      {pendingConfirm && (
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs" style={{ color: 'var(--status-warn)' }}>
+            Click the highlighted button again to confirm.
+          </span>
+          <button
+            type="button"
+            onClick={() => setPendingConfirm(null)}
+            className="font-mono text-xs px-2 py-0.5"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-muted)',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {errorMsg && (
         <span className="font-mono text-xs mt-0.5" style={{ color: 'var(--status-error)' }}>
           {errorMsg}
@@ -476,6 +581,11 @@ function DetailPane() {
             <Row label="Node" value={vm.proxmox_node} mono />
             <Row label="Status" value={vm.status} mono />
             {vm.os_type && <Row label="OS type" value={vm.os_type} mono />}
+            <VMLifecycleControls
+              nodeId={selection.nodeId}
+              vmid={vm.proxmox_vmid}
+              status={vm.status}
+            />
             {linkedNode ? (
               <>
                 <div

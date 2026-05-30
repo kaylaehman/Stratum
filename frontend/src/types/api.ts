@@ -1570,6 +1570,16 @@ export interface SetDnsConfigRequest {
   token?: string
 }
 
+// VM / Proxmox guest lifecycle types
+
+/** Actions accepted by POST /api/nodes/{id}/vms/{vmid}/{action} */
+export type VMAction = 'start' | 'stop' | 'shutdown' | 'reboot'
+
+/** Response from a guest power-action — carries the Proxmox task UPID. */
+export interface VMPowerActionResponse {
+  upid: string
+}
+
 // Skills library (container-troubleshooting skills browser)
 
 export type SkillSource = 'builtin' | 'custom'
