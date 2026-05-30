@@ -1,4 +1,4 @@
-import { type ReactNode, useState, useEffect } from 'react'
+import { type ReactNode, useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Topbar } from './Topbar'
 import { Sidebar } from './Sidebar'
@@ -15,11 +15,41 @@ interface AppShellProps {
   treeSlot?: ReactNode
 }
 
+const TREE_MIN = 180
+const TREE_MAX = 560
+const TREE_DEFAULT = 240
+
 export function AppShell({ children, treeSlot }: AppShellProps) {
   const navigate = useNavigate()
   const { user, clearAuth } = useAuthStore()
   const { isOperator } = useCan()
   const [searchOpen, setSearchOpen] = useState(false)
+
+  // Resizable resource-tree panel width, persisted across sessions.
+  const [treeWidth, setTreeWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('stratum.treeWidth'))
+    return Number.isFinite(saved) && saved >= TREE_MIN && saved <= TREE_MAX ? saved : TREE_DEFAULT
+  })
+  const treePanelRef = useRef<HTMLDivElement>(null)
+
+  const startTreeResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    let latest = treeWidth
+    const onMove = (ev: MouseEvent) => {
+      const left = treePanelRef.current?.getBoundingClientRect().left ?? 0
+      latest = Math.min(TREE_MAX, Math.max(TREE_MIN, ev.clientX - left))
+      setTreeWidth(latest)
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+      localStorage.setItem('stratum.treeWidth', String(Math.round(latest)))
+    }
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [treeWidth])
 
   // Global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
@@ -52,16 +82,28 @@ export function AppShell({ children, treeSlot }: AppShellProps) {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         {treeSlot && (
-          <div
-            className="flex flex-col shrink-0 overflow-hidden"
-            style={{
-              width: '220px',
-              backgroundColor: 'var(--bg-surface)',
-              borderRight: '1px solid var(--border-subtle)',
-            }}
-          >
-            {treeSlot}
-          </div>
+          <>
+            <div
+              ref={treePanelRef}
+              className="flex flex-col shrink-0 overflow-hidden"
+              style={{
+                width: `${treeWidth}px`,
+                backgroundColor: 'var(--bg-surface)',
+                borderRight: '1px solid var(--border-subtle)',
+              }}
+            >
+              {treeSlot}
+            </div>
+            {/* Drag handle to resize the tree panel */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              title="Drag to resize"
+              onMouseDown={startTreeResize}
+              className="tree-resize-handle"
+              style={{ width: '5px', cursor: 'col-resize', flexShrink: 0 }}
+            />
+          </>
         )}
         <main
           className={`flex-1 overflow-auto flex ${treeSlot ? '' : 'p-6'}`}
