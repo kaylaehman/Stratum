@@ -196,6 +196,9 @@ func TestCustomSkillLifecycle(t *testing.T) {
 
 	// It now appears in the list as custom and matches its image.
 	resp, body = doJSON(t, c, http.MethodGet, srv.URL+"/api/skills", token, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list skills = %d, want 200", resp.StatusCode)
+	}
 	var list struct {
 		Skills []struct {
 			ID     string `json:"id"`
