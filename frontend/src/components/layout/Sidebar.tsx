@@ -25,6 +25,7 @@ import {
   Archive,
   ShieldCheck,
   Wrench,
+  Bot,
 } from 'lucide-react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
@@ -37,6 +38,7 @@ interface NavItem {
   label: string
   to: string
   adminOnly?: boolean
+  operatorOnly?: boolean
 }
 
 const navItems: NavItem[] = [
@@ -48,6 +50,7 @@ const navItems: NavItem[] = [
   { icon: <Share2 size={14} />, label: 'Network', to: '/network' },
   { icon: <Workflow size={14} />, label: 'Dependencies', to: '/dependencies' },
   { icon: <ScrollText size={14} />, label: 'Logs', to: '/logs' },
+  { icon: <Bot size={14} />, label: 'Assistant', to: '/chat', operatorOnly: true },
   { icon: <Shield size={14} />, label: 'Security', to: '/security' },
   { icon: <ShieldAlert size={14} />, label: 'CVE Scan', to: '/cve' },
   { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
@@ -154,7 +157,7 @@ function BookmarksSection() {
 }
 
 export function Sidebar() {
-  const { isAdmin } = useCan()
+  const { isAdmin, isOperator } = useCan()
 
   return (
     <nav
@@ -172,6 +175,7 @@ export function Sidebar() {
       <ul className="flex flex-col gap-0.5 px-2">
         {navItems.map((item) => {
           if (item.adminOnly && !isAdmin) return null
+          if (item.operatorOnly && !isOperator) return null
           return (
             <li key={item.to}>
               <NavLink
