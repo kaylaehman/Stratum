@@ -52,7 +52,7 @@ interface VirtualizedLogListProps {
 
 function VirtualizedLogList({ scrollRef }: VirtualizedLogListProps) {
   const filteredLines = useFilteredLines()
-  const { colorMap, selectedContainers, paused } = useLogsStore()
+  const { colorMap, selectedContainers, paused, filter } = useLogsStore()
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(400)
 
@@ -111,6 +111,8 @@ function VirtualizedLogList({ scrollRef }: VirtualizedLogListProps) {
               line={line}
               color={color}
               containerName={name}
+              searchQuery={filter.query}
+              searchIsRegex={filter.isRegex}
             />
           )
         })}

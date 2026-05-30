@@ -1,10 +1,94 @@
+import type { CSSProperties } from 'react'
 import type { RichLogLine } from '../../store/logs'
 
 interface LogLineRowProps {
   line: RichLogLine
   color: string
   containerName: string
+  /** When set, matched substrings are highlighted. */
+  searchQuery?: string
+  /** When true, searchQuery is treated as a regex. */
+  searchIsRegex?: boolean
 }
+
+// ---------------------------------------------------------------------------
+// Match highlighting
+// ---------------------------------------------------------------------------
+
+interface Segment {
+  text: string
+  match: boolean
+}
+
+/** Split `text` into alternating plain/matched segments for a given query. */
+function segmentText(text: string, query: string, isRegex: boolean): Segment[] {
+  if (!query) return [{ text, match: false }]
+
+  try {
+    const re = isRegex
+      ? new RegExp(query, 'gi')
+      : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+
+    const segments: Segment[] = []
+    let lastIndex = 0
+    let m: RegExpExecArray | null
+
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > lastIndex) {
+        segments.push({ text: text.slice(lastIndex, m.index), match: false })
+      }
+      segments.push({ text: m[0], match: true })
+      lastIndex = re.lastIndex
+      // Guard against zero-length matches looping forever
+      if (m[0].length === 0) re.lastIndex++
+    }
+
+    if (lastIndex < text.length) {
+      segments.push({ text: text.slice(lastIndex), match: false })
+    }
+
+    return segments.length > 0 ? segments : [{ text, match: false }]
+  } catch {
+    return [{ text, match: false }]
+  }
+}
+
+function HighlightedText({
+  text,
+  query,
+  isRegex,
+  baseStyle,
+}: {
+  text: string
+  query: string
+  isRegex: boolean
+  baseStyle?: CSSProperties
+}) {
+  if (!query) return <span style={baseStyle}>{text}</span>
+  const segments = segmentText(text, query, isRegex)
+  return (
+    <span style={baseStyle}>
+      {segments.map((seg, i) =>
+        seg.match ? (
+          <span
+            key={i}
+            style={{
+              background: 'var(--accent-glow)',
+              color: 'var(--accent)',
+              borderRadius: '2px',
+            }}
+          >
+            {seg.text}
+          </span>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        ),
+      )}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
 
 const LEVEL_STYLES: Record<string, { bg: string; color: string }> = {
   error: { bg: 'rgba(232,64,64,0.18)', color: '#e84040' },
@@ -32,7 +116,13 @@ function formatTs(ts: string): string {
   }
 }
 
-export function LogLineRow({ line, color, containerName }: LogLineRowProps) {
+export function LogLineRow({
+  line,
+  color,
+  containerName,
+  searchQuery = '',
+  searchIsRegex = false,
+}: LogLineRowProps) {
   const ts = formatTs(line.ts)
   const levelStyle = line.level ? (LEVEL_STYLES[line.level] ?? null) : null
   const isStderr = line.stream === 'stderr'
@@ -86,14 +176,18 @@ export function LogLineRow({ line, color, containerName }: LogLineRowProps) {
       </span>
 
       {/* Log text */}
-      <span
-        className="break-all whitespace-pre-wrap flex-1 pr-2"
-        style={{
+      <HighlightedText
+        text={text}
+        query={searchQuery}
+        isRegex={searchIsRegex}
+        baseStyle={{
           color: isStderr ? '#f87171' : 'var(--text-primary)',
+          wordBreak: 'break-all',
+          whiteSpace: 'pre-wrap',
+          flex: 1,
+          paddingRight: '8px',
         }}
-      >
-        {text}
-      </span>
+      />
     </div>
   )
 }
