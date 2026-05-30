@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiPost } from '../api'
-import type { BackupsResponse, StartBackupRequest, StartBackupResponse } from '../../types/api'
+import type {
+  BackupsResponse,
+  StartBackupRequest,
+  StartBackupResponse,
+  StartGuestBackupRequest,
+  StartGuestBackupResponse,
+} from '../../types/api'
 
 export function backupsKey() {
   return ['backups'] as const
@@ -28,6 +34,26 @@ export function useStartBackup() {
         volume,
         dest_dir: destDir,
       } satisfies StartBackupRequest),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: backupsKey() })
+    },
+  })
+}
+
+interface StartGuestBackupVars {
+  nodeId: string
+  vmid: number
+  storage: string
+}
+
+export function useStartGuestBackup() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ nodeId, vmid, storage }: StartGuestBackupVars) =>
+      apiPost<StartGuestBackupResponse>(
+        `/api/nodes/${nodeId}/vms/${vmid}/backup`,
+        { storage } satisfies StartGuestBackupRequest,
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: backupsKey() })
     },

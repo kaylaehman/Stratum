@@ -1202,6 +1202,15 @@ export interface StartBackupResponse {
   backup_id: string
 }
 
+/** POST /api/nodes/{id}/vms/{vmid}/backup — trigger a Proxmox vzdump. */
+export interface StartGuestBackupRequest {
+  storage: string
+}
+
+export interface StartGuestBackupResponse {
+  backup_id: string
+}
+
 // Snapshot & Rollback types (Features 15 & 17)
 
 export type SnapshotReason = 'manual' | 'pre-update' | 'pre-rollback'

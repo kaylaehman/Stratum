@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -100,6 +101,80 @@ func (h *Handlers) StartBackup(w http.ResponseWriter, r *http.Request) {
 		e.TargetType = ptr(activity.TargetNode)
 		e.TargetID = &nodeID
 		e.Detail = map[string]string{"volume": body.Volume, "dest": body.DestDir, "backup_id": id}
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"backup_id": id})
+}
+
+type startGuestBackupBody struct {
+	Storage string `json:"storage"`
+}
+
+// StartGuestBackup triggers an async vzdump backup for a Proxmox VM or LXC.
+// URL params: nodeId (Stratum node), vmid (Proxmox integer VMID).
+// Admin-gated + audited.
+func (h *Handlers) StartGuestBackup(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	nodeID := chi.URLParam(r, "id")
+	vmidStr := chi.URLParam(r, "vmid")
+
+	vmid, err := strconv.Atoi(vmidStr)
+	if err != nil || vmid <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid_vmid")
+		return
+	}
+
+	node, err := h.Store.GetNode(r.Context(), nodeID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
+	if !caps.Proxmox {
+		writeCapabilityUnavailable(w, "proxmox", "")
+		return
+	}
+
+	// Look up the VM row to get the pveNode (Proxmox cluster node name).
+	vms, err := h.Store.ListVMsByNode(r.Context(), nodeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	pveNode := ""
+	for _, v := range vms {
+		if v.ProxmoxVMID == vmid {
+			pveNode = v.ProxmoxNode
+			break
+		}
+	}
+	if pveNode == "" {
+		writeError(w, http.StatusNotFound, "vm_not_found")
+		return
+	}
+
+	var body startGuestBackupBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+
+	id, err := h.Backups.StartGuestBackup(r.Context(), nodeID, pveNode, vmid, body.Storage)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "backup_failed")
+		return
+	}
+
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = activity.ActionBackupGuestStart
+		e.TargetType = ptr(activity.TargetNode)
+		e.TargetID = &nodeID
+		e.Detail = map[string]any{"vmid": vmid, "pve_node": pveNode, "storage": body.Storage, "backup_id": id}
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"backup_id": id})
 }

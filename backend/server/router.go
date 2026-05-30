@@ -257,6 +257,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)
 			audited.Post("/scripts/{id}/run", d.Handlers.RunScript)
 			audited.Post("/nodes/{id}/backups", d.Handlers.StartBackup)
+			audited.Post("/nodes/{id}/vms/{vmid}/backup", d.Handlers.StartGuestBackup)
 			audited.Put("/ai/config", d.Handlers.AIConfigSet)
 			audited.Post("/ai/ask", d.Handlers.AIAsk)
 			audited.Post("/ai/oauth/exchange", d.Handlers.AIOAuthExchange)

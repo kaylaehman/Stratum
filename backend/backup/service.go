@@ -1,12 +1,12 @@
-// Package backup orchestrates Docker volume backups (Feature 28). A volume is
-// archived with the idiomatic throwaway-container tar (no host root needed):
-// `docker run --rm -v <vol>:/data:ro -v <dest>:/backup alpine tar czf ...`.
-// Jobs run asynchronously; the DB row tracks running → ok/error. Proxmox vzdump
-// + scheduling are a later concern.
+// Package backup orchestrates Docker volume backups and Proxmox vzdump guest
+// backups (Feature 28). Volume backups use the idiomatic throwaway-container tar
+// (no host root needed). Proxmox backups call the vzdump API and poll to
+// completion. Jobs run asynchronously; the DB row tracks running → ok/error.
 package backup
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -14,23 +14,34 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/proxmox"
 )
 
 // ExecFunc runs a command on a node over SSH (matches fs.Service.Exec).
 type ExecFunc func(ctx context.Context, nodeID, cmd string, args ...string) (string, error)
 
+// ProxmoxFunc returns a *proxmox.Client for the given node, or an error if the
+// node has no Proxmox credentials configured.
+type ProxmoxFunc func(ctx context.Context, nodeID string) (*proxmox.Client, error)
+
 const backupTimeout = time.Hour
 
-// Service starts and records volume backups.
+// Service starts and records volume and Proxmox guest backups.
 type Service struct {
-	store db.Store
-	exec  ExecFunc
+	store   db.Store
+	exec    ExecFunc
+	proxmox ProxmoxFunc // may be nil; guest backup returns error if nil
 }
 
-// New wires the store + SSH exec.
+// New wires the store + SSH exec. proxmoxFn may be nil in tests that only
+// exercise volume backups.
 func New(store db.Store, exec ExecFunc) *Service {
 	return &Service{store: store, exec: exec}
 }
+
+// SetProxmox wires the Proxmox client provider. Called during server startup
+// after the nodeconn.Manager is available.
+func (s *Service) SetProxmox(fn ProxmoxFunc) { s.proxmox = fn }
 
 // StartVolumeBackup validates inputs, records a running backup row, and runs the
 // archive in the background. Returns the backup id immediately.
@@ -93,6 +104,60 @@ func archiveName(destPath string) string {
 		return destPath[i+1:]
 	}
 	return destPath
+}
+
+// StartGuestBackup triggers a Proxmox vzdump backup for the given VMID on
+// pveNode. storage is the Proxmox storage ID (e.g. "local"); pass "" to use
+// the Proxmox default. Returns the backup record ID immediately; the job runs
+// asynchronously.
+func (s *Service) StartGuestBackup(ctx context.Context, nodeID, pveNode string, vmid int, storage string) (string, error) {
+	if s.proxmox == nil {
+		return "", fmt.Errorf("backup: proxmox client not configured")
+	}
+	cl, err := s.proxmox(ctx, nodeID)
+	if err != nil {
+		return "", fmt.Errorf("backup: get proxmox client: %w", err)
+	}
+
+	id := uuid.NewString()
+	target := fmt.Sprintf("%d", vmid)
+	if err := s.store.CreateBackup(ctx, db.BackupRow{
+		ID: id, NodeID: nodeID, Kind: "proxmox", Target: target, DestPath: "proxmox:" + storage, Status: "running",
+	}); err != nil {
+		return "", err
+	}
+
+	go s.runGuest(nodeID, id, cl, pveNode, vmid, storage)
+	return id, nil
+}
+
+// runGuest calls vzdump and waits for the Proxmox task to finish.
+func (s *Service) runGuest(nodeID, id string, cl *proxmox.Client, pveNode string, vmid int, storage string) {
+	ctx, cancel := context.WithTimeout(context.Background(), backupTimeout)
+	defer cancel()
+
+	finish := func(status, errMsg string) {
+		t := time.Now()
+		_ = s.store.UpdateBackup(ctx, db.BackupRow{
+			ID: id, Status: status, Error: errMsg, FinishedAt: &t,
+		})
+	}
+
+	upid, err := cl.VzdumpBackup(ctx, pveNode, vmid, storage)
+	if err != nil {
+		finish("error", err.Error())
+		return
+	}
+	exitStatus, err := cl.WaitTask(ctx, pveNode, upid)
+	if err != nil {
+		finish("error", err.Error())
+		return
+	}
+	if exitStatus != "OK" {
+		finish("error", "vzdump task exited: "+exitStatus)
+		return
+	}
+	finish("ok", "")
 }
 
 // List returns the backup history.
