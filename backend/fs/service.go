@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/kaylaehman/stratum/backend/crypto"
@@ -175,6 +176,123 @@ func (s *Service) List(ctx context.Context, nodeID, p string) ([]Entry, bool, er
 		}
 	}
 	return entries, truncated, nil
+}
+
+// SearchHit is one Search match: the matched entry plus where it lives.
+type SearchHit struct {
+	Entry
+	Path   string `json:"path"`    // absolute path of the matched entry
+	RelDir string `json:"rel_dir"` // parent dir relative to the search root ("." at root)
+}
+
+// Search bounds: a deep search runs over a single SSH connection on the remote
+// host, so it must stay responsive and can never be turned into a full-disk
+// crawl. The first cap hit ends the walk and marks the result truncated.
+const (
+	searchMaxDepth   = 8                // directory levels below the root
+	searchMaxResults = 500              // hits returned before truncating
+	searchMaxDirs    = 2000             // directories listed before truncating
+	searchTimeout    = 20 * time.Second // wall-clock budget for the whole walk
+)
+
+// Search walks the tree under root breadth-first and returns entries whose name
+// contains query (case-insensitive). The walk reuses one SSH connection and is
+// bounded by the search* caps and a deadline; truncated is true when any cap was
+// hit before the tree was exhausted. Symlinked directories are not followed (loop
+// guard) and the /proc and /sys pseudo-filesystems are never descended into.
+func (s *Service) Search(ctx context.Context, nodeID, root, query string) ([]SearchHit, bool, error) {
+	clean, err := ValidatePath(root)
+	if err != nil {
+		return nil, false, err
+	}
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return nil, false, ErrInvalidPath
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
+	defer cancel()
+
+	prov, closer, err := s.open(ctx, nodeID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer closer.Close()
+
+	var maps *permissions.Maps
+	if s.userdb != nil {
+		if m, rerr := s.userdb.Resolve(ctx, nodeID); rerr == nil {
+			maps = m
+		}
+	}
+
+	type queued struct {
+		dir   string
+		depth int
+	}
+	queue := []queued{{dir: clean, depth: 0}}
+	hits := make([]SearchHit, 0, 64)
+	dirsListed := 0
+	truncated := false
+
+	for len(queue) > 0 {
+		if ctx.Err() != nil || len(hits) >= searchMaxResults || dirsListed >= searchMaxDirs {
+			truncated = true
+			break
+		}
+		cur := queue[0]
+		queue = queue[1:]
+
+		entries, listTrunc, lerr := prov.List(ctx, cur.dir)
+		if lerr != nil {
+			// A directory we can't read (permission denied, vanished mid-walk)
+			// shouldn't abort the whole search — skip it and keep going.
+			continue
+		}
+		dirsListed++
+		if listTrunc {
+			truncated = true
+		}
+
+		for i := range entries {
+			e := entries[i]
+			if strings.Contains(strings.ToLower(e.Name), needle) {
+				if maps != nil {
+					e.Owner = maps.UIDToName[e.UID]
+					e.Group = maps.GIDToName[e.GID]
+				}
+				hits = append(hits, SearchHit{
+					Entry:  e,
+					Path:   path.Join(cur.dir, e.Name),
+					RelDir: relDir(clean, cur.dir),
+				})
+				if len(hits) >= searchMaxResults {
+					truncated = true
+					break
+				}
+			}
+			if e.IsDir && !e.IsSymlink && cur.depth < searchMaxDepth {
+				child := path.Join(cur.dir, e.Name)
+				if child == "/proc" || child == "/sys" {
+					continue
+				}
+				queue = append(queue, queued{dir: child, depth: cur.depth + 1})
+			}
+		}
+	}
+	return hits, truncated, nil
+}
+
+// relDir renders dir relative to root: "." when equal, otherwise the path with
+// the root prefix stripped (root=/var/www dir=/var/www/app -> "app").
+func relDir(root, dir string) string {
+	if dir == root {
+		return "."
+	}
+	if root == "/" {
+		return strings.TrimPrefix(dir, "/")
+	}
+	return strings.TrimPrefix(dir, root+"/")
 }
 
 // Preview returns up to PreviewMax bytes of a file, or tooLarge if it exceeds

@@ -6,6 +6,7 @@ import type {
   FsFileResponse,
   FsMkdirRequest,
   FsRenameRequest,
+  FsSearchResponse,
   FsUploadResponse,
 } from '../../types/api'
 
@@ -25,6 +26,23 @@ export function useDir(nodeId: string, path: string) {
         `/api/nodes/${nodeId}/fs?path=${encodeURIComponent(path)}`,
       ),
     enabled: Boolean(nodeId && path),
+  })
+}
+
+// ---- Recursive subtree search (deep "include subfolders" mode) ----
+
+export function useFsSearch(nodeId: string, root: string, query: string) {
+  return useQuery({
+    queryKey: ['fs', 'search', nodeId, root, query] as const,
+    queryFn: () =>
+      apiFetch<FsSearchResponse>(
+        `/api/nodes/${nodeId}/fs/search?path=${encodeURIComponent(root)}&q=${encodeURIComponent(query)}`,
+      ),
+    // The caller passes empty root/query to disable; the walk is expensive so
+    // don't refetch on focus and treat results as fresh for a short window.
+    enabled: Boolean(nodeId && root && query),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
   })
 }
 

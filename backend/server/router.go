@@ -192,6 +192,7 @@ func NewRouter(d *Deps) http.Handler {
 
 			// Filesystem reads (admin-gated writes are in the audited group).
 			r.Get("/nodes/{id}/fs", d.Handlers.FSList)
+			r.Get("/nodes/{id}/fs/search", d.Handlers.FSSearch)
 			r.Get("/nodes/{id}/fs/file", d.Handlers.FSReadFile)
 			r.Get("/nodes/{id}/fs/download", d.Handlers.FSDownload)
 

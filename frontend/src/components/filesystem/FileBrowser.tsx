@@ -1,19 +1,22 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Loader,
   FolderPlus,
   Upload as UploadIcon,
   RefreshCw,
+  Search,
+  X,
 } from 'lucide-react'
 import { Breadcrumbs } from './Breadcrumbs'
 import { FileList } from './FileList'
 import { FileViewer } from './FileViewer'
 import { FileEditor } from './FileEditor'
 import { UploadDropzone } from './UploadDropzone'
-import { useDir, useMkdir, useRename, useDeletePath } from '../../lib/api/fs'
+import { SearchResults } from './SearchResults'
+import { useDir, useFsSearch, useMkdir, useRename, useDeletePath } from '../../lib/api/fs'
 import { useAuthStore } from '../../store/auth'
-import type { FsEntry } from '../../types/api'
+import type { FsEntry, FsSearchHit } from '../../types/api'
 
 type PanelMode = 'list' | 'view' | 'edit' | 'upload' | 'mkdir'
 
@@ -182,6 +185,11 @@ export function FileBrowser({ nodeId, containerId }: FileBrowserProps) {
   const [panel, setPanel] = useState<PanelMode>('list')
   const [activeEntry, setActiveEntry] = useState<FsEntry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<FsEntry | null>(null)
+  // Search: `query` filters the current folder instantly; `deep` escalates to a
+  // recursive backend walk of the subtree (debounced — that walk runs over SSH).
+  const [query, setQuery] = useState('')
+  const [deep, setDeep] = useState(false)
+  const [debouncedQuery, setDebouncedQuery] = useState('')
 
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
 
@@ -189,6 +197,24 @@ export function FileBrowser({ nodeId, containerId }: FileBrowserProps) {
   const mkdir = useMkdir(nodeId, path)
   const rename = useRename(nodeId, path)
   const deletePath = useDeletePath(nodeId, path)
+
+  // Debounce the deep query so we don't fire an SSH subtree walk per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 400)
+    return () => clearTimeout(t)
+  }, [query])
+
+  // Deep search runs only when the toggle is on and there are 2+ chars to match.
+  const deepEnabled = deep && debouncedQuery.length >= 2
+  const search = useFsSearch(nodeId, deepEnabled ? path : '', deepEnabled ? debouncedQuery : '')
+
+  // Shallow mode: filter the already-loaded listing by name (instant, no fetch).
+  const shallowEntries = useMemo(() => {
+    if (!data) return []
+    const t = query.trim().toLowerCase()
+    if (!t || deep) return data.entries
+    return data.entries.filter((e) => e.name.toLowerCase().includes(t))
+  }, [data, query, deep])
 
   // Keep URL query param in sync
   useEffect(() => {
@@ -207,12 +233,30 @@ export function FileBrowser({ nodeId, containerId }: FileBrowserProps) {
       setPath(newPath)
       setPanel('list')
       setActiveEntry(null)
+      // Search scopes to a single directory; clear it when the folder changes.
+      setQuery('')
+      setDeep(false)
     },
     [],
   )
 
   function handleOpenDir(name: string) {
     navigate(joinPath(path, name))
+  }
+
+  // Open a deep-search hit: descend into directories; for files, jump to the
+  // containing folder and open the viewer there (FileViewer reads dirPath+entry).
+  function handleOpenHit(hit: FsSearchHit) {
+    if (hit.is_dir) {
+      navigate(hit.path)
+      return
+    }
+    const parent = hit.path.slice(0, hit.path.lastIndexOf('/')) || '/'
+    setPath(parent)
+    setActiveEntry(hit)
+    setPanel('view')
+    setQuery('')
+    setDeep(false)
   }
 
   function handleOpenFile(entry: FsEntry) {
@@ -289,7 +333,68 @@ export function FileBrowser({ nodeId, containerId }: FileBrowserProps) {
       >
         <Breadcrumbs path={path} onNavigate={navigate} />
 
-        <div className="flex items-center gap-2 ml-auto shrink-0">
+        {/* Search box: filters this folder live; "subfolders" escalates to a
+            recursive backend search of the subtree under the current path. */}
+        <div
+          className="flex items-center gap-1.5 px-2 py-1 ml-auto"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            borderRadius: '3px',
+          }}
+        >
+          <Search size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setQuery('')
+            }}
+            placeholder={deep ? 'Search subfolders…' : 'Filter this folder…'}
+            className="font-mono text-xs"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: 'var(--text-primary)',
+              width: '150px',
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              title="Clear"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <X size={12} />
+            </button>
+          )}
+          <label
+            className="flex items-center gap-1 text-xs cursor-pointer select-none pl-1.5"
+            style={{ color: 'var(--text-muted)', borderLeft: '1px solid var(--border-subtle)' }}
+            title="Search recursively inside all subfolders of the current path"
+          >
+            <input
+              type="checkbox"
+              checked={deep}
+              onChange={(e) => setDeep(e.target.checked)}
+              style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
+            />
+            subfolders
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => void refetch()}
@@ -402,34 +507,60 @@ export function FileBrowser({ nodeId, containerId }: FileBrowserProps) {
               overflow: 'hidden',
             }}
           >
-            {isLoading && (
-              <div className="flex items-center gap-2 px-4 py-6">
-                <Loader
-                  size={13}
-                  className="animate-spin"
-                  style={{ color: 'var(--accent)' }}
-                />
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Loading...
-                </span>
-              </div>
-            )}
-            {isError && (
-              <div className="px-4 py-4 text-xs" style={{ color: 'var(--status-error)' }}>
-                Failed to load directory. Check that the path exists and the
-                node is reachable.
-              </div>
-            )}
-            {data && (
-              <FileList
-                entries={data.entries}
-                truncated={data.truncated}
-                onOpenDir={handleOpenDir}
-                onOpenFile={handleOpenFile}
-                onRename={handleRename}
-                onDelete={handleDeleteRequest}
-                isAdmin={!!isAdmin}
+            {/* Deep (recursive) search replaces the listing while active. */}
+            {deepEnabled ? (
+              <SearchResults
+                query={debouncedQuery}
+                result={search.data}
+                isLoading={search.isLoading}
+                isError={search.isError}
+                onOpenHit={handleOpenHit}
               />
+            ) : (
+              <>
+                {/* "subfolders" on but query too short to walk yet. */}
+                {deep && query.trim().length > 0 && query.trim().length < 2 && (
+                  <div className="px-4 py-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Type at least 2 characters to search subfolders.
+                  </div>
+                )}
+                {isLoading && (
+                  <div className="flex items-center gap-2 px-4 py-6">
+                    <Loader
+                      size={13}
+                      className="animate-spin"
+                      style={{ color: 'var(--accent)' }}
+                    />
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      Loading...
+                    </span>
+                  </div>
+                )}
+                {isError && (
+                  <div className="px-4 py-4 text-xs" style={{ color: 'var(--status-error)' }}>
+                    Failed to load directory. Check that the path exists and the
+                    node is reachable.
+                  </div>
+                )}
+                {data && (shallowEntries.length > 0 || !query.trim()) && (
+                  <FileList
+                    entries={shallowEntries}
+                    truncated={data.truncated}
+                    onOpenDir={handleOpenDir}
+                    onOpenFile={handleOpenFile}
+                    onRename={handleRename}
+                    onDelete={handleDeleteRequest}
+                    isAdmin={!!isAdmin}
+                  />
+                )}
+                {/* Shallow filter matched nothing in this folder. */}
+                {data && query.trim() && shallowEntries.length === 0 && (
+                  <div className="px-4 py-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Nothing in this folder matches &ldquo;{query.trim()}&rdquo;. Turn on
+                    &ldquo;subfolders&rdquo; to search deeper.
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

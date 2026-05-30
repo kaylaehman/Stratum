@@ -44,6 +44,19 @@ func (h *Handlers) FSList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "truncated": truncated})
 }
 
+// FSSearch walks the subtree under ?path= for entries whose name matches ?q=
+// (case-insensitive). Read-only; bounded by the fs service's depth/result/time
+// caps. Returns {hits, truncated}.
+func (h *Handlers) FSSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	hits, truncated, err := h.Files.Search(r.Context(), chi.URLParam(r, "id"), q.Get("path"), q.Get("q"))
+	if err != nil {
+		writeFSError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hits": hits, "truncated": truncated})
+}
+
 // FSReadFile returns a file's inline preview (<=5MB) or a tooLarge flag, with a
 // Last-Modified header for lost-update protection on PUT.
 func (h *Handlers) FSReadFile(w http.ResponseWriter, r *http.Request) {
