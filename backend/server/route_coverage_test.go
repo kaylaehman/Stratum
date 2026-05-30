@@ -87,6 +87,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/containers/{id}/start":           true,
 		"POST /api/containers/{id}/stop":            true,
 		"POST /api/containers/{id}/restart":         true,
+		"POST /api/nodes/{id}/vms/{vmid}/{action}":  true,
 		"POST /api/containers/bulk":                 true,
 		"PUT /api/nodes/{id}/wol":                   true,
 		"POST /api/nodes/{id}/wake":                 true,

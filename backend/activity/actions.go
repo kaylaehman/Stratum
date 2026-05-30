@@ -39,6 +39,11 @@ const (
 	ActionContainerRollback    = "container.rollback"
 	ActionContainerHealthcheck = "container.healthcheck"
 
+	ActionVMStart    = "vm.start"
+	ActionVMStop     = "vm.stop"
+	ActionVMShutdown = "vm.shutdown"
+	ActionVMReboot   = "vm.reboot"
+
 	ActionWebhookCreate = "webhook.create"
 	ActionWebhookUpdate = "webhook.update"
 	ActionWebhookDelete = "webhook.delete"
@@ -103,6 +108,7 @@ const (
 // Target type constants for ActivityEntry.TargetType.
 const (
 	TargetNode            = "node"
+	TargetVM              = "vm"
 	TargetContainer       = "container"
 	TargetFile            = "file"
 	TargetSecret          = "secret"
@@ -150,6 +156,11 @@ var actionCatalog = []ActionInfo{
 	{ActionSecurityAckRevoke, "Security acknowledgement revoked", "security", TargetAcknowledgement},
 
 	{ActionVolumeRemove, "Volume removed", "volume", TargetVolume},
+
+	{ActionVMStart, "VM/LXC started", "vm", TargetVM},
+	{ActionVMStop, "VM/LXC stopped (force)", "vm", TargetVM},
+	{ActionVMShutdown, "VM/LXC shutdown (graceful)", "vm", TargetVM},
+	{ActionVMReboot, "VM/LXC rebooted", "vm", TargetVM},
 
 	{ActionContainerStart, "Container started", "container", TargetContainer},
 	{ActionContainerStop, "Container stopped", "container", TargetContainer},
