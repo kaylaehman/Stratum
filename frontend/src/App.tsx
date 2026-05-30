@@ -30,6 +30,7 @@ import Certs from './pages/Certs'
 import Skills from './pages/Skills'
 import Assistant from './pages/Assistant'
 import TerminalPage from './pages/Terminal'
+import Infrastructure from './pages/Infrastructure'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -112,6 +113,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Metrics />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/infrastructure"
+          element={
+            <AuthGuard>
+              <Infrastructure />
             </AuthGuard>
           }
         />
