@@ -17,41 +17,30 @@ interface VMRowsProps {
 }
 
 function VMRows({ node, vms }: VMRowsProps) {
-  const { expanded, toggleExpanded, selection, setSelected } = useTreeStore()
+  const { selection, setSelected } = useTreeStore()
 
   return (
     <>
       {vms.map((vm) => {
-        const vmKey = `vm:${vm.id}`
-        const vmExpanded = expanded.has(vmKey)
         const vmSelected = selection?.kind === 'vm' && selection.vmId === vm.id
 
+        // No "Filesystem" child: a guest's filesystem isn't reachable through the
+        // Proxmox host's SSH connection. To browse a VM/LXC's files, register it
+        // as its own SSH node. (The old entry browsed the HOST fs and never
+        // highlighted — misleading, so it's removed.)
         return (
-          <div key={vm.id}>
-            <TreeNodeRow
-              depth={2}
-              icon={<VMIcon kind={vm.kind} />}
-              label={vm.name}
-              sublabel={`${vm.kind.toUpperCase()} ${vm.proxmox_vmid}`}
-              status={vm.status}
-              stale={vm.stale}
-              expandable
-              expanded={vmExpanded}
-              selected={vmSelected}
-              onToggle={() => toggleExpanded(vmKey)}
-              onClick={() => setSelected({ kind: 'vm', nodeId: node.id, vmId: vm.id, vmKind: vm.kind })}
-            />
-            {vmExpanded && (
-              <TreeNodeRow
-                depth={3}
-                icon={<FolderIcon />}
-                label="Filesystem"
-                expandable={false}
-                selected={selection?.kind === 'fs-root' && (selection as { vmId?: string }).vmId === vm.id}
-                onClick={() => setSelected({ kind: 'fs-root', nodeId: node.id })}
-              />
-            )}
-          </div>
+          <TreeNodeRow
+            key={vm.id}
+            depth={2}
+            icon={<VMIcon kind={vm.kind} />}
+            label={vm.name}
+            sublabel={`${vm.kind.toUpperCase()} ${vm.proxmox_vmid}`}
+            status={vm.status}
+            stale={vm.stale}
+            expandable={false}
+            selected={vmSelected}
+            onClick={() => setSelected({ kind: 'vm', nodeId: node.id, vmId: vm.id, vmKind: vm.kind })}
+          />
         )
       })}
     </>
