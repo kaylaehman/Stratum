@@ -3,6 +3,7 @@ import { apiGet, apiPost } from '../api'
 import type {
   AcknowledgeRequest,
   PortsResponse,
+  PostureResult,
   PrivilegedResponse,
   SecurityBadgesResponse,
 } from '../../types/api'
@@ -55,6 +56,19 @@ export function useAcknowledgeFlag() {
       void queryClient.invalidateQueries({ queryKey: privilegedKey() })
       void queryClient.invalidateQueries({ queryKey: securityBadgesKey() })
     },
+  })
+}
+
+export function postureKey(nodeId: string) {
+  return ['security', 'posture', nodeId] as const
+}
+
+export function usePosture(nodeId: string, enabled = true) {
+  return useQuery({
+    queryKey: postureKey(nodeId),
+    queryFn: () => apiGet<PostureResult>(`/api/nodes/${encodeURIComponent(nodeId)}/posture`),
+    enabled: enabled && nodeId !== '',
+    staleTime: 60_000,
   })
 }
 

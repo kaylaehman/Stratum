@@ -619,6 +619,25 @@ export interface AcknowledgeRequest {
   note?: string
 }
 
+// Security posture score (Feature posture-score)
+
+export type PostureGrade = 'A' | 'B' | 'C' | 'D' | 'F'
+export type RemediationSeverity = 'critical' | 'high' | 'medium' | 'low'
+
+export interface RemediationItem {
+  title: string
+  severity: RemediationSeverity
+  metric: string
+  action: string
+}
+
+export interface PostureResult {
+  score: number
+  grade: PostureGrade
+  remediation: RemediationItem[]
+  data_sources: Record<string, boolean>
+}
+
 // Activity Log types (Sub-project 9)
 
 export interface ActivityEntry {

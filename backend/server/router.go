@@ -91,6 +91,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/containers/security-badges", d.Handlers.SecurityBadges)
 			r.Get("/containers/{id}/security", d.Handlers.ContainerSecurity)
 
+			// Security posture score (admin-gated; read-only composition of stored data).
+			r.Get("/nodes/{id}/posture", d.Handlers.NodePosture)
+
 			// Image CVE scans (admin-gated; on-demand scan is audited below).
 			r.Get("/security/cve", d.Handlers.CVEScans)
 			r.Get("/security/cve/status", d.Handlers.CVEStatus)
