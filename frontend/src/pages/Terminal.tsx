@@ -51,6 +51,11 @@ export default function TerminalPage() {
                 </span>
               </div>
 
+              {/* Clipboard hint */}
+              <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
+                Ctrl+Shift+C&nbsp;/&nbsp;Ctrl+Shift+V — copy&nbsp;/&nbsp;paste
+              </span>
+
               {/* Node selector */}
               <select
                 value={nodeId ?? ''}

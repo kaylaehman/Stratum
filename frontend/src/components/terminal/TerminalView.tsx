@@ -96,6 +96,49 @@ export function TerminalView({ nodeId, reconnectKey, onStatusChange }: TerminalV
     // fit() changes term.cols/rows -> onResize fires -> tell the PTY.
     const resizeDisp = term.onResize(() => sendResize())
 
+    function sendText(text: string) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(new TextEncoder().encode(text))
+      }
+    }
+
+    // Clipboard copy/paste via custom key handler.
+    // Returning false swallows the event (it does not reach the shell).
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true
+
+      // Copy: Ctrl+Shift+C or Ctrl+Insert — only when there is a selection.
+      const isCopy =
+        (e.ctrlKey && e.shiftKey && e.key === 'C') ||
+        (e.ctrlKey && e.key === 'Insert')
+      if (isCopy) {
+        const sel = term.getSelection()
+        if (sel) {
+          navigator.clipboard.writeText(sel).catch(() => {})
+          return false
+        }
+        return true // no selection — let it propagate
+      }
+
+      // Paste: Ctrl+Shift+V or Shift+Insert.
+      const isPaste =
+        (e.ctrlKey && e.shiftKey && e.key === 'V') ||
+        (e.shiftKey && e.key === 'Insert')
+      if (isPaste) {
+        navigator.clipboard.readText().then(sendText).catch(() => {})
+        return false
+      }
+
+      return true
+    })
+
+    // Right-click to paste.
+    function onContextMenu(ev: MouseEvent) {
+      ev.preventDefault()
+      navigator.clipboard.readText().then(sendText).catch(() => {})
+    }
+    container.addEventListener('contextmenu', onContextMenu)
+
     const observer = new ResizeObserver(() => {
       try {
         fit.fit()
@@ -106,6 +149,7 @@ export function TerminalView({ nodeId, reconnectKey, onStatusChange }: TerminalV
     observer.observe(container)
 
     return () => {
+      container.removeEventListener('contextmenu', onContextMenu)
       observer.disconnect()
       dataDisp.dispose()
       resizeDisp.dispose()
