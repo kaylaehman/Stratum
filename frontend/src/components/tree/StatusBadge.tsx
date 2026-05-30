@@ -62,7 +62,7 @@ export function StatusBadge({ status, stale, dot }: StatusBadgeProps) {
         backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`,
         border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
         lineHeight: '16px',
         animation: pulse ? 'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite' : undefined,
       }}

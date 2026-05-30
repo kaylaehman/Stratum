@@ -270,7 +270,7 @@ function RunDialog({ script, onClose }: RunDialogProps) {
                         <span style={{ color: 'var(--text-muted)' }}>{n.host}</span>
                         <span
                           className="font-mono ml-auto"
-                          style={{ fontSize: '10px', color: 'var(--text-muted)' }}
+                          style={{ fontSize: '12px', color: 'var(--text-muted)' }}
                         >
                           {n.type}
                         </span>
@@ -446,7 +446,7 @@ function ResultBlock({ result, nodeName }: { result: ScriptRunResult; nodeName: 
             border: `1px solid ${result.ok ? 'rgba(64,200,120,0.35)' : 'rgba(232,64,64,0.35)'}`,
             color: result.ok ? 'var(--status-ok, #40c878)' : 'var(--status-error)',
             borderRadius: '3px',
-            fontSize: '10px',
+            fontSize: '12px',
           }}
         >
           {result.ok ? 'ok' : 'failed'}

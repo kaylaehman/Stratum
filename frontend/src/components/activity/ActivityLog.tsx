@@ -40,7 +40,7 @@ function ResultChip({ result }: { result: string }) {
         border: `1px solid ${border}`,
         color,
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
         whiteSpace: 'nowrap',
       }}
     >
@@ -53,7 +53,7 @@ function ResultChip({ result }: { result: string }) {
 
 const tdBase: React.CSSProperties = {
   padding: '6px 12px',
-  fontSize: '11px',
+  fontSize: '12px',
   borderBottom: '1px solid var(--border-subtle)',
   verticalAlign: 'middle',
 }

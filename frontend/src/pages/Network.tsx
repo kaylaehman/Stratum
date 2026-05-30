@@ -41,7 +41,7 @@ function NetworkRow({ net, highlighted }: { net: TopologyNetwork; highlighted: b
           className="font-mono uppercase text-xs"
           style={{
             color: 'var(--text-muted)',
-            fontSize: '10px',
+            fontSize: '12px',
             letterSpacing: '0.06em',
             background: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
@@ -54,20 +54,20 @@ function NetworkRow({ net, highlighted }: { net: TopologyNetwork; highlighted: b
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px' }}>
         {net.subnet && (
-          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
             subnet: {net.subnet}
           </span>
         )}
         {net.gateway && (
-          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+          <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
             gw: {net.gateway}
           </span>
         )}
-        <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+        <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
           {endpointCount} container{endpointCount !== 1 ? 's' : ''}
         </span>
         {net.internal && (
-          <span className="font-mono text-xs" style={{ color: 'var(--status-warn)', fontSize: '10px' }}>
+          <span className="font-mono text-xs" style={{ color: 'var(--status-warn)', fontSize: '12px' }}>
             internal
           </span>
         )}
@@ -95,7 +95,7 @@ function SpecialContainerList({ containers }: { containers: TopologyContainer[] 
         style={{ borderBottom: '1px solid rgba(232,64,64,0.2)' }}
       >
         <AlertTriangle size={11} style={{ color: 'var(--status-error)', flexShrink: 0 }} />
-        <span className="text-xs uppercase tracking-wider font-medium" style={{ color: 'var(--status-error)', fontSize: '10px' }}>
+        <span className="text-xs uppercase tracking-wider font-medium" style={{ color: 'var(--status-error)', fontSize: '12px' }}>
           Flagged containers
         </span>
       </div>
@@ -110,7 +110,7 @@ function SpecialContainerList({ containers }: { containers: TopologyContainer[] 
           </span>
           <span
             className="font-mono uppercase text-xs"
-            style={{ color: 'var(--status-error)', fontSize: '10px', letterSpacing: '0.05em' }}
+            style={{ color: 'var(--status-error)', fontSize: '12px', letterSpacing: '0.05em' }}
           >
             {c.isolated ? 'isolated' : 'host-net'}
           </span>
@@ -142,7 +142,7 @@ function Legend() {
     >
       <div className="flex items-center gap-1.5 w-full mb-0.5">
         <Info size={10} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-        <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+        <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
           Legend
         </span>
       </div>
@@ -158,7 +158,7 @@ function Legend() {
               flexShrink: 0,
             }}
           />
-          <span className="text-xs" style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>
+          <span className="text-xs" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
             {item.label}
           </span>
         </div>
@@ -387,13 +387,13 @@ export default function Network() {
                 }}
               >
                 <div>
-                  <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>Containers</div>
+                  <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Containers</div>
                   <div className="font-mono text-sm" style={{ color: 'var(--text-primary)' }}>
                     {topology.containers.length}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>Flagged</div>
+                  <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Flagged</div>
                   <div
                     className="font-mono text-sm"
                     style={{ color: specialCtrs.length > 0 ? 'var(--status-error)' : 'var(--text-muted)' }}

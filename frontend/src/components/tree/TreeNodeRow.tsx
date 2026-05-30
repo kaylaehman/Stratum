@@ -98,7 +98,7 @@ export function TreeNodeRow({
       {sublabel && (
         <span
           className="font-mono text-xs truncate"
-          style={{ color: 'var(--text-muted)', fontSize: '10px', flexShrink: 1 }}
+          style={{ color: 'var(--text-muted)', fontSize: '12px', flexShrink: 1 }}
           title={sublabel}
         >
           {sublabel}

@@ -26,7 +26,7 @@ interface SparklineProps {
 
 function Sparkline({ samples }: SparklineProps) {
   if (samples.length < 2) {
-    return <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>—</span>
+    return <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
   }
 
   const W = 60
@@ -91,7 +91,7 @@ function StatusChip({ status }: { status: VolumeView['status'] }) {
   return (
     <span
       className="font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
-      style={{ color, background: bg, border: `1px solid ${border}`, borderRadius: '3px', fontSize: '10px' }}
+      style={{ color, background: bg, border: `1px solid ${border}`, borderRadius: '3px', fontSize: '12px' }}
     >
       {label}
     </span>
@@ -256,7 +256,7 @@ function VolumeRow({ volume, nodeName, isAdmin }: VolumeRowProps) {
         </td>
         <td
           className="px-3 py-2 font-mono text-xs uppercase"
-          style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', fontSize: '10px' }}
+          style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', fontSize: '12px' }}
         >
           {volume.driver}
         </td>

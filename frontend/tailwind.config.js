@@ -29,7 +29,7 @@ export default {
         mono: ['"Space Mono"', 'monospace'],
       },
       fontSize: {
-        base: ['13px', { lineHeight: '1.5' }],
+        base: ['0.875rem', { lineHeight: '1.5' }],
       },
       borderRadius: {
         btn: '3px',

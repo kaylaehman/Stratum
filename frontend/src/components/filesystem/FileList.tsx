@@ -173,7 +173,7 @@ function FileRow({
               background: 'rgba(240,160,32,0.15)',
               color: 'var(--status-warn)',
               borderRadius: '2px',
-              fontSize: '10px',
+              fontSize: '12px',
             }}
           >
             suid
@@ -186,7 +186,7 @@ function FileRow({
               background: 'rgba(240,160,32,0.15)',
               color: 'var(--status-warn)',
               borderRadius: '2px',
-              fontSize: '10px',
+              fontSize: '12px',
             }}
           >
             sgid

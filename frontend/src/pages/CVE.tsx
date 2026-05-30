@@ -100,7 +100,7 @@ function SeverityBadge({ count, severity }: { count: number; severity: string })
         border: `1px solid ${severityBorder(severity)}`,
         color: severityColor(severity),
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
         marginRight: '4px',
       }}
     >
@@ -190,7 +190,7 @@ function CVEDetailPanel({ digest }: CVEDetailPanelProps) {
                           color: 'var(--text-muted)',
                           borderBottom: '1px solid var(--border-subtle)',
                           whiteSpace: 'nowrap',
-                          fontSize: '10px',
+                          fontSize: '12px',
                         }}
                       >
                         {col}
@@ -235,7 +235,7 @@ function CVEDetailPanel({ digest }: CVEDetailPanelProps) {
                             border: `1px solid ${severityBorder(vuln.severity)}`,
                             color: severityColor(vuln.severity),
                             borderRadius: '3px',
-                            fontSize: '10px',
+                            fontSize: '12px',
                           }}
                         >
                           {vuln.severity}
@@ -666,7 +666,7 @@ export default function CVE() {
                           style={{
                             color: 'var(--text-muted)',
                             borderBottom: '1px solid var(--border-subtle)',
-                            fontSize: '10px',
+                            fontSize: '12px',
                             whiteSpace: 'nowrap',
                           }}
                         >

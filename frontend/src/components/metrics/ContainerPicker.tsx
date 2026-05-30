@@ -103,7 +103,7 @@ export function ContainerPicker({ selectedIds, onChange }: ContainerPickerProps)
                       className="font-mono text-xs ml-auto"
                       style={{
                         color: c.status === 'running' ? 'var(--accent)' : 'var(--text-muted)',
-                        fontSize: '9px',
+                        fontSize: '12px',
                         textTransform: 'uppercase',
                         letterSpacing: '0.05em',
                         flexShrink: 0,

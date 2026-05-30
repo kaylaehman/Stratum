@@ -90,7 +90,7 @@ function BookmarksSection() {
     <div className="mt-3">
       <div className="px-3 mb-2">
         <span
-          className="text-xs font-medium uppercase tracking-wider"
+          className="text-sm font-medium uppercase tracking-wider"
           style={{ color: 'var(--text-muted)' }}
         >
           Bookmarks
@@ -108,7 +108,7 @@ function BookmarksSection() {
             <button
               type="button"
               onClick={() => navigate('/resources')}
-              className="flex items-center gap-2 px-2.5 py-1.5 flex-1 text-xs truncate text-left"
+              className="flex items-center gap-2 px-2.5 py-1.5 flex-1 text-sm truncate text-left"
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -156,14 +156,14 @@ export function Sidebar() {
 
   return (
     <nav
-      className="w-52 shrink-0 flex flex-col pt-2 pb-4"
+      className="w-52 shrink-0 flex flex-col pt-2 pb-4 overflow-y-auto"
       style={{
         backgroundColor: 'var(--bg-surface)',
         borderRight: '1px solid var(--border-subtle)',
       }}
     >
       <div className="px-3 mb-2">
-        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        <span className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
           Navigation
         </span>
       </div>
@@ -175,7 +175,7 @@ export function Sidebar() {
               <NavLink
                 to={item.to}
                 end={item.to === '/'}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-xs transition-colors"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-sm transition-colors"
                 style={({ isActive }) => ({
                   backgroundColor: isActive ? 'var(--accent-glow)' : 'transparent',
                   color: isActive ? 'var(--accent)' : 'var(--text-secondary)',

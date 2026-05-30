@@ -45,7 +45,7 @@ function StatusChip({ status, error }: { status: BackupStatus; error?: string })
           background: 'rgba(240,160,32,0.12)',
           border: '1px solid rgba(240,160,32,0.4)',
           borderRadius: '3px',
-          fontSize: '10px',
+          fontSize: '12px',
         }}
       >
         <Loader size={9} className="animate-spin" />
@@ -62,7 +62,7 @@ function StatusChip({ status, error }: { status: BackupStatus; error?: string })
           background: 'rgba(64,200,120,0.1)',
           border: '1px solid rgba(64,200,120,0.35)',
           borderRadius: '3px',
-          fontSize: '10px',
+          fontSize: '12px',
         }}
         title={error}
       >
@@ -79,7 +79,7 @@ function StatusChip({ status, error }: { status: BackupStatus; error?: string })
         background: 'rgba(232,64,64,0.1)',
         border: '1px solid rgba(232,64,64,0.3)',
         borderRadius: '3px',
-        fontSize: '10px',
+        fontSize: '12px',
         maxWidth: '200px',
       }}
       title={error}
@@ -112,10 +112,10 @@ function BackupRow({ backup, nodeName }: BackupRowProps) {
       <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
         {backup.status === 'running' ? '—' : humanBytes(backup.size_bytes)}
       </td>
-      <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', fontSize: '11px' }}>
+      <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', fontSize: '12px' }}>
         {fmtTime(backup.started_at)}
       </td>
-      <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', fontSize: '11px' }}>
+      <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', fontSize: '12px' }}>
         {fmtTime(backup.finished_at)}
       </td>
       <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', maxWidth: '200px' }}>
@@ -390,7 +390,7 @@ export default function Backups() {
           )}
           <span
             className="ml-auto text-xs font-mono"
-            style={{ color: 'var(--text-muted)', fontSize: '10px' }}
+            style={{ color: 'var(--text-muted)', fontSize: '12px' }}
           >
             auto-refreshes every 5s
           </span>
