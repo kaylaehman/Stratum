@@ -82,6 +82,16 @@ func (s *Service) ListForNode(ctx context.Context, nodeID string) ([]VolumeView,
 	for _, v := range vols {
 		attached := byVolume[v.Name]
 		sort.Strings(attached)
+		// Never leave these slices nil: a nil slice marshals to JSON `null`, and
+		// the frontend does `.attached_containers.length` / `<Sparkline samples=>`
+		// which throws on null (white-screens the Volumes page). Empty `[]` is safe.
+		if attached == nil {
+			attached = []string{}
+		}
+		pts := samples[v.Name]
+		if pts == nil {
+			pts = []SamplePoint{}
+		}
 		out = append(out, VolumeView{
 			NodeID:             nodeID,
 			Name:               v.Name,
@@ -93,7 +103,7 @@ func (s *Service) ListForNode(ctx context.Context, nodeID string) ([]VolumeView,
 			Status:             status(v.RefCount, len(attached)),
 			AttachedContainers: attached,
 			OverThreshold:      s.threshold > 0 && v.SizeBytes >= s.threshold,
-			Samples:            samples[v.Name],
+			Samples:            pts,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
