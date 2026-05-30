@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -171,6 +173,10 @@ type updateNodeBody struct {
 	ProxmoxTLSInsecure *bool            `json:"proxmox_tls_insecure"`
 	Credentials        *credentialsBody `json:"credentials"`
 	AckInsecureDocker  bool             `json:"ack_insecure_docker"`
+	// LinkedVMID is the manual Proxmox-guest link (tri-state). json.RawMessage so
+	// the handler can tell "key omitted" (leave as-is) from an explicit JSON
+	// null (AUTO), 0 (NONE), or a vmid (>=100). Absent => not supplied.
+	LinkedVMID json.RawMessage `json:"linked_vmid"`
 }
 
 // RenameNode updates an existing node's display name and/or Docker/Proxmox
@@ -197,6 +203,19 @@ func (h *Handlers) RenameNode(w http.ResponseWriter, r *http.Request) {
 		DockerEndpoint:     body.DockerEndpoint,
 		ProxmoxEndpoint:    body.ProxmoxEndpoint,
 		ProxmoxTLSInsecure: body.ProxmoxTLSInsecure,
+	}
+	// linked_vmid tri-state: absent => leave as-is; explicit null => AUTO (nil);
+	// a number => NONE (0) or an explicit VMID (>=100). Reject negatives.
+	if body.LinkedVMID != nil {
+		in.LinkedVMIDSupplied = true
+		if !isJSONNull(body.LinkedVMID) {
+			var v int
+			if err := json.Unmarshal(body.LinkedVMID, &v); err != nil || v < 0 {
+				writeError(w, http.StatusBadRequest, "invalid_linked_vmid")
+				return
+			}
+			in.LinkedVMID = &v
+		}
 	}
 	if body.Credentials != nil {
 		in.DockerTLSSupplied = true
@@ -301,6 +320,12 @@ func (h *Handlers) ProbePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	result := h.Nodes.ProbePreview(r.Context(), body.toConnInput())
 	writeJSON(w, http.StatusOK, result)
+}
+
+// isJSONNull reports whether a raw JSON value is the literal null (ignoring
+// surrounding whitespace).
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
 }
 
 func enrichNodeActivity(r *http.Request, action, nodeID string) {

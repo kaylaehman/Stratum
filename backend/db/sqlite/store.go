@@ -471,3 +471,11 @@ func nullableEmpty(s string) any {
 	}
 	return s
 }
+
+// nullableInt stores a nil *int as SQL NULL for optional integer columns.
+func nullableInt(p *int) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}

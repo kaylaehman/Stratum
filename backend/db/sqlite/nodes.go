@@ -19,7 +19,7 @@ func boolToInt(b bool) int {
 
 const nodeColumns = `id, name, type, host, port, auth_method, os_type, capabilities_json,
 	credentials_encrypted, credentials_version, ssh_host_key, proxmox_endpoint,
-	proxmox_tls_insecure, docker_endpoint, status, last_error, last_seen, created_at, updated_at`
+	proxmox_tls_insecure, docker_endpoint, linked_vmid, status, last_error, last_seen, created_at, updated_at`
 
 func (s *Store) CreateNode(ctx context.Context, n appdb.Node) error {
 	now := time.Now()
@@ -34,11 +34,11 @@ func (s *Store) CreateNode(ctx context.Context, n appdb.Node) error {
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO nodes (`+nodeColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Type, n.Host, n.Port, n.AuthMethod, nullableEmpty(n.OSType),
 		n.CapabilitiesJSON, n.CredentialsEncrypted, n.CredentialsVersion,
 		nullableEmpty(n.SSHHostKey), nullableEmpty(n.ProxmoxEndpoint), boolToInt(n.ProxmoxTLSInsecure),
-		nullableEmpty(n.DockerEndpoint), n.Status, nullableEmpty(n.LastError),
+		nullableEmpty(n.DockerEndpoint), nullableInt(n.LinkedVMID), n.Status, nullableEmpty(n.LastError),
 		nullTSText(n.LastSeen), tsText(n.CreatedAt), tsText(n.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("sqlite: create node: %w", err)
@@ -72,13 +72,13 @@ func (s *Store) UpdateNode(ctx context.Context, n appdb.Node) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE nodes SET name=?, type=?, host=?, port=?, auth_method=?, os_type=?,
 		   capabilities_json=?, credentials_encrypted=?, credentials_version=?, ssh_host_key=?,
-		   proxmox_endpoint=?, proxmox_tls_insecure=?, docker_endpoint=?, status=?, last_error=?,
+		   proxmox_endpoint=?, proxmox_tls_insecure=?, docker_endpoint=?, linked_vmid=?, status=?, last_error=?,
 		   last_seen=?, updated_at=?
 		 WHERE id=?`,
 		n.Name, n.Type, n.Host, n.Port, n.AuthMethod, nullableEmpty(n.OSType),
 		n.CapabilitiesJSON, n.CredentialsEncrypted, n.CredentialsVersion, nullableEmpty(n.SSHHostKey),
 		nullableEmpty(n.ProxmoxEndpoint), boolToInt(n.ProxmoxTLSInsecure), nullableEmpty(n.DockerEndpoint),
-		n.Status, nullableEmpty(n.LastError), nullTSText(n.LastSeen), tsText(n.UpdatedAt), n.ID)
+		nullableInt(n.LinkedVMID), n.Status, nullableEmpty(n.LastError), nullTSText(n.LastSeen), tsText(n.UpdatedAt), n.ID)
 	if err != nil {
 		return fmt.Errorf("sqlite: update node: %w", err)
 	}
@@ -119,10 +119,11 @@ func scanNodeRow(row rowScanner) (appdb.Node, error) {
 	var osType, sshHostKey, proxmoxEndpoint, dockerEndpoint, lastError sql.NullString
 	var lastSeen, createdAt, updatedAt sql.NullString
 	var proxmoxInsecure int
+	var linkedVMID sql.NullInt64
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Type, &n.Host, &n.Port, &n.AuthMethod, &osType, &n.CapabilitiesJSON,
 		&n.CredentialsEncrypted, &n.CredentialsVersion, &sshHostKey, &proxmoxEndpoint,
-		&proxmoxInsecure, &dockerEndpoint, &n.Status, &lastError, &lastSeen, &createdAt, &updatedAt)
+		&proxmoxInsecure, &dockerEndpoint, &linkedVMID, &n.Status, &lastError, &lastSeen, &createdAt, &updatedAt)
 	if err != nil {
 		return appdb.Node{}, err
 	}
@@ -132,6 +133,10 @@ func scanNodeRow(row rowScanner) (appdb.Node, error) {
 	n.DockerEndpoint = dockerEndpoint.String
 	n.LastError = lastError.String
 	n.ProxmoxTLSInsecure = proxmoxInsecure != 0
+	if linkedVMID.Valid {
+		v := int(linkedVMID.Int64)
+		n.LinkedVMID = &v
+	}
 	if n.LastSeen, err = scanNullTS(lastSeen); err != nil {
 		return appdb.Node{}, err
 	}

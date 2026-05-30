@@ -77,6 +77,9 @@ type NodeView struct {
 	Capabilities      capabilities.Set `json:"capabilities"`
 	ProxmoxEndpoint   string           `json:"proxmox_endpoint,omitempty"`
 	DockerEndpoint    string           `json:"docker_endpoint,omitempty"`
+	// LinkedVMID is the manual Proxmox-guest correlation (tri-state): null = AUTO
+	// (frontend matches by name), 0 = NONE (force-unlinked), >=100 = explicit VMID.
+	LinkedVMID        *int             `json:"linked_vmid,omitempty"`
 	ProxmoxAuthStatus string           `json:"proxmox_auth_status"`
 	Status            string           `json:"status"`
 	LastError         string           `json:"last_error,omitempty"`
@@ -203,6 +206,12 @@ type UpdateConfigInput struct {
 	ProxmoxEndpoint    *string
 	ProxmoxTLSInsecure *bool
 
+	// LinkedVMID tri-state edit. When LinkedVMIDSupplied is true, the stored
+	// linked_vmid is replaced with LinkedVMID (nil = AUTO/clear, *0 = NONE,
+	// *>=100 = explicit VMID). When false, the stored value is left as-is.
+	LinkedVMIDSupplied bool
+	LinkedVMID         *int
+
 	DockerTLSSupplied bool
 	DockerTLSCA       string
 	DockerTLSCert     string
@@ -235,6 +244,9 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, in UpdateConfigIn
 	}
 	if in.ProxmoxTLSInsecure != nil {
 		n.ProxmoxTLSInsecure = *in.ProxmoxTLSInsecure
+	}
+	if in.LinkedVMIDSupplied {
+		n.LinkedVMID = in.LinkedVMID
 	}
 
 	credsChanged := false
@@ -425,6 +437,7 @@ func toView(n db.Node) NodeView {
 		Capabilities:      env.Set,
 		ProxmoxEndpoint:   n.ProxmoxEndpoint,
 		DockerEndpoint:    n.DockerEndpoint,
+		LinkedVMID:        n.LinkedVMID,
 		ProxmoxAuthStatus: env.ProxmoxAuthStatus,
 		Status:            n.Status,
 		LastError:         n.LastError,

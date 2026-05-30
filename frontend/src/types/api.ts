@@ -104,6 +104,13 @@ export interface NodeView {
   last_error?: string
   last_seen?: string
   docker_endpoint?: string
+  /**
+   * Manual Proxmox-guest correlation (tri-state):
+   *   undefined → AUTO (match a guest by name)
+   *   0         → NONE (force-unlinked; never nest)
+   *   >= 100    → explicit Proxmox VMID this node runs as
+   */
+  linked_vmid?: number
   created_at: string
   updated_at: string
 }
@@ -153,6 +160,12 @@ export interface UpdateNodeRequest {
     'docker_tls_ca' | 'docker_tls_cert' | 'docker_tls_key'
   >
   ack_insecure_docker?: boolean
+  /**
+   * Manual Proxmox-guest link, tri-state. Omit the key to leave unchanged;
+   * send null for AUTO (match by name), 0 for NONE (force-unlinked), or a
+   * Proxmox VMID (>= 100) to link explicitly.
+   */
+  linked_vmid?: number | null
 }
 
 export interface ProbePreviewRequest {
