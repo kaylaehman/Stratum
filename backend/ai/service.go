@@ -48,6 +48,7 @@ type ConfigView struct {
 	OllamaModel    string `json:"ollama_model"`
 	ClaudeModel    string `json:"claude_model"`
 	OpenAIModel    string `json:"openai_model"`
+	OpenAIBaseURL  string `json:"openai_base_url"`
 	GeminiModel    string `json:"gemini_model"`
 	HasAPIKey      bool   `json:"has_api_key"`
 	OAuthConnected bool   `json:"oauth_connected"`
@@ -62,6 +63,7 @@ type ConfigUpdate struct {
 	OllamaModel   string  `json:"ollama_model"`
 	ClaudeModel   string  `json:"claude_model"`
 	OpenAIModel   string  `json:"openai_model"`
+	OpenAIBaseURL string  `json:"openai_base_url"`
 	GeminiModel   string  `json:"gemini_model"`
 	APIKey        *string `json:"api_key"`
 }
@@ -75,6 +77,7 @@ func (s *Service) Config(ctx context.Context) ConfigView {
 		OllamaModel:    cfg.OllamaModel,
 		ClaudeModel:    cfg.ClaudeModel,
 		OpenAIModel:    cfg.OpenAIModel,
+		OpenAIBaseURL:  cfg.OpenAIBaseURL,
 		GeminiModel:    cfg.GeminiModel,
 		HasAPIKey:      len(cfg.APIKeyEncrypted) > 0 || s.envClaudeKey != "",
 		OAuthConnected: len(cfg.OAuthAccessEncrypted) > 0,
@@ -103,6 +106,11 @@ func (s *Service) SetConfig(ctx context.Context, u ConfigUpdate) error {
 			return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 		}
 	}
+	if u.OpenAIBaseURL != "" {
+		if err := validateBaseURL(u.OpenAIBaseURL); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+		}
+	}
 
 	existing, _ := s.store.GetAIConfig(ctx)
 	cfg := db.AIConfig{
@@ -111,6 +119,7 @@ func (s *Service) SetConfig(ctx context.Context, u ConfigUpdate) error {
 		OllamaModel:     u.OllamaModel,
 		ClaudeModel:     u.ClaudeModel,
 		OpenAIModel:     u.OpenAIModel,
+		OpenAIBaseURL:   u.OpenAIBaseURL,
 		GeminiModel:     u.GeminiModel,
 		APIKeyEncrypted: existing.APIKeyEncrypted, // preserved unless changed below
 		// OAuth tokens are managed by the sign-in flow, not this settings save —
@@ -201,10 +210,15 @@ func (s *Service) providerFrom(cfg db.AIConfig) (Provider, error) {
 		return NewClaudeOAuth(string(tok), cfg.ClaudeModel, s.http), nil
 	case ProviderOpenAI:
 		key, err := s.storedAPIKey(cfg)
-		if err != nil || key == "" {
+		if err != nil {
+			return nil, err
+		}
+		// A custom base URL (e.g. a local OpenAI-compatible proxy) may need no
+		// key; the real OpenAI API does.
+		if key == "" && cfg.OpenAIBaseURL == "" {
 			return nil, ErrNotConfigured
 		}
-		return NewOpenAI(key, cfg.OpenAIModel, s.http), nil
+		return NewOpenAI(key, cfg.OpenAIModel, cfg.OpenAIBaseURL, s.http), nil
 	case ProviderGemini:
 		key, err := s.storedAPIKey(cfg)
 		if err != nil || key == "" {
@@ -369,6 +383,25 @@ func validateHTTPURL(raw string) error {
 	// request target (e.g. http://host/x?y= -> http://host/x?y=/api/chat).
 	if u.Path != "" && u.Path != "/" {
 		return errors.New("url must not include a path")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("url must not include a query or fragment")
+	}
+	return nil
+}
+
+// validateBaseURL is like validateHTTPURL but PERMITS a path (e.g. "/v1"), since
+// OpenAI-compatible endpoints are addressed as <base>/chat/completions.
+func validateBaseURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("url must be http or https")
+	}
+	if u.Host == "" {
+		return errors.New("url must include a host")
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
 		return errors.New("url must not include a query or fragment")

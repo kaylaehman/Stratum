@@ -10,26 +10,32 @@ import (
 	"strings"
 )
 
-// openaiEndpoint is the Chat Completions API. A var (not const) so tests can
-// point it at a stub server.
-var openaiEndpoint = "https://api.openai.com/v1/chat/completions"
+// defaultOpenAIBaseURL is the real OpenAI API. Overridable per-config so the
+// provider can target any OpenAI-compatible endpoint (claude-max-api-proxy,
+// LiteLLM, vLLM, OpenRouter, …).
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 
 // DefaultOpenAIModel is used when no model is configured.
 const DefaultOpenAIModel = "gpt-4o-mini"
 
-// OpenAI talks to the OpenAI Chat Completions API with an API key.
+// OpenAI talks to an OpenAI-compatible Chat Completions API.
 type OpenAI struct {
-	apiKey string
-	model  string
-	http   *http.Client
+	apiKey  string
+	model   string
+	baseURL string
+	http    *http.Client
 }
 
-// NewOpenAI builds an OpenAI provider. model defaults to DefaultOpenAIModel.
-func NewOpenAI(apiKey, model string, hc *http.Client) *OpenAI {
+// NewOpenAI builds an OpenAI provider. model defaults to DefaultOpenAIModel;
+// baseURL defaults to the real OpenAI API.
+func NewOpenAI(apiKey, model, baseURL string, hc *http.Client) *OpenAI {
 	if model == "" {
 		model = DefaultOpenAIModel
 	}
-	return &OpenAI{apiKey: apiKey, model: model, http: hc}
+	if baseURL == "" {
+		baseURL = defaultOpenAIBaseURL
+	}
+	return &OpenAI{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/"), http: hc}
 }
 
 func (c *OpenAI) Kind() string { return ProviderOpenAI }
@@ -71,12 +77,16 @@ func (c *OpenAI) Ask(ctx context.Context, req AskRequest) (AskResponse, error) {
 	msgs = append(msgs, openaiMessage{Role: "user", Content: req.Prompt})
 
 	body, _ := json.Marshal(openaiRequest{Model: c.model, Messages: msgs, MaxTokens: maxTok})
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, openaiEndpoint, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return AskResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	// Some OpenAI-compatible proxies (e.g. claude-max-api-proxy) need no key;
+	// only send auth when one is configured.
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {

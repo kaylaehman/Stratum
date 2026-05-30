@@ -1196,6 +1196,7 @@ export interface AIConfig {
   ollama_model: string
   claude_model: string
   openai_model: string
+  openai_base_url: string
   gemini_model: string
   has_api_key: boolean
   oauth_connected: boolean
@@ -1214,6 +1215,7 @@ export interface SetAIConfigRequest {
   ollama_model?: string
   claude_model?: string
   openai_model?: string
+  openai_base_url?: string
   gemini_model?: string
   api_key?: string
 }

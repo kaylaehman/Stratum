@@ -19,11 +19,8 @@ func TestOpenAI_Ask(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"hi there"}}],"usage":{"prompt_tokens":7,"completion_tokens":3}}`))
 	}))
 	defer srv.Close()
-	old := openaiEndpoint
-	openaiEndpoint = srv.URL
-	defer func() { openaiEndpoint = old }()
 
-	c := NewOpenAI("sk-test", "", srv.Client())
+	c := NewOpenAI("sk-test", "", srv.URL, srv.Client())
 	if c.model != DefaultOpenAIModel {
 		t.Errorf("default model = %q, want %q", c.model, DefaultOpenAIModel)
 	}
@@ -51,11 +48,8 @@ func TestOpenAI_Error(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"bad key"}}`))
 	}))
 	defer srv.Close()
-	old := openaiEndpoint
-	openaiEndpoint = srv.URL
-	defer func() { openaiEndpoint = old }()
 
-	_, err := NewOpenAI("x", "", srv.Client()).Ask(context.Background(), AskRequest{Prompt: "q"})
+	_, err := NewOpenAI("x", "", srv.URL, srv.Client()).Ask(context.Background(), AskRequest{Prompt: "q"})
 	if err == nil || !strings.Contains(err.Error(), "bad key") {
 		t.Errorf("want error with message, got %v", err)
 	}
