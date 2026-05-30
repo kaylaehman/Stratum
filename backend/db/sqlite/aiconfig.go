@@ -47,7 +47,7 @@ func (s *Store) UpsertAIConfig(ctx context.Context, c appdb.AIConfig) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO ai_config (id, provider, ollama_base_url, ollama_model, claude_model, openai_model, openai_base_url, gemini_model, api_key_encrypted,
 		                        oauth_access_encrypted, oauth_refresh_encrypted, oauth_expires_at, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   provider=excluded.provider,
 		   ollama_base_url=excluded.ollama_base_url,
