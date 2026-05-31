@@ -86,12 +86,12 @@ func TestClassifyRisk(t *testing.T) {
 			want:     RiskDestructive,
 		},
 		{
-			name:     "generic shell command",
+			name:     "allowlisted single-service restart is low (reversible)",
 			commands: []string{"systemctl restart nginx"},
-			want:     RiskMedium,
+			want:     RiskLow,
 		},
 		{
-			name:     "systemctl stop is high",
+			name:     "systemctl stop is not allowlisted -> high",
 			commands: []string{"systemctl stop myservice"},
 			want:     RiskHigh,
 		},
@@ -142,14 +142,50 @@ func TestClassifyRisk(t *testing.T) {
 			want:     RiskDestructive,
 		},
 		{
-			name:     "read-only access to a system path is NOT over-escalated",
+			name:     "reading a sensitive system path is NOT auto-safe -> high",
 			commands: []string{"cat /etc/passwd"},
-			want:     RiskMedium,
+			want:     RiskHigh,
 		},
 		{
 			name:     "sudo without other signals is high",
 			commands: []string{"sudo whoami"},
 			want:     RiskHigh,
+		},
+		// --- defense-in-depth: positive allowlist; unknown -> High (step-up) ---
+		{
+			name:     "opaque local script defaults to high (denylist would miss it)",
+			commands: []string{"./wipe.sh"},
+			want:     RiskHigh,
+		},
+		{
+			name:     "ansible-playbook defaults to high",
+			commands: []string{"ansible-playbook teardown.yml"},
+			want:     RiskHigh,
+		},
+		{
+			name:     "interpreter one-liner defaults to high",
+			commands: []string{`python3 -c "import shutil"`},
+			want:     RiskHigh,
+		},
+		{
+			name:     "allowlisted container restart is low (auto-heal)",
+			commands: []string{"docker restart plex"},
+			want:     RiskLow,
+		},
+		{
+			name:     "allowlisted read-only docker logs is low",
+			commands: []string{"docker logs --tail 100 plex"},
+			want:     RiskLow,
+		},
+		{
+			name:     "non-sensitive read is low",
+			commands: []string{"cat /var/log/app.log"},
+			want:     RiskLow,
+		},
+		{
+			name:     "allowlisted service status is low",
+			commands: []string{"systemctl status nginx"},
+			want:     RiskLow,
 		},
 	}
 
@@ -170,8 +206,8 @@ func TestRequiresStepUp(t *testing.T) {
 		want  bool
 	}{
 		{RiskLow, false},
-		{RiskMedium, false},
-		{RiskHigh, false},
+		{RiskMedium, true},
+		{RiskHigh, true},
 		{RiskDestructive, true},
 	}
 	for _, tc := range cases {

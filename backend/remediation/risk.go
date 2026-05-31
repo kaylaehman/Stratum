@@ -5,8 +5,10 @@
 // SAFETY GUARANTEES (enforced here and in the API layer):
 //   - Auto-execution is impossible: generate and execute are distinct operations
 //     separated by an explicit approval stored in the DB.
-//   - Destructive proposals additionally require TOTP step-up auth before
-//     the execute endpoint is reached (enforced by the handler via requireStepUp).
+//   - Risk is classified by a POSITIVE low-risk allowlist (not a denylist):
+//     anything not recognized as safe defaults to High. Any non-low-risk
+//     proposal requires TOTP step-up before the execute endpoint proceeds
+//     (enforced by the handler via requireStepUp); destructive also needs admin.
 //   - All state transitions are written to the activity log.
 //   - Secret material is never included in proposal commands or log detail.
 package remediation
@@ -80,17 +82,30 @@ var destructivePatterns = []*regexp.Regexp{
 	ci(`\bkillall\b`),
 }
 
-// highRiskPatterns: matched when no destructive pattern fires.
-var highRiskPatterns = []*regexp.Regexp{
-	ci(`\bsudo\b`),    // privilege escalation
-	ci(`\bchmod\b`),   // any chmod
-	ci(`\bchown\b`),   // any chown
-	ci(`\bsetfacl\b`), // ACL modification
-	ci(`\bchattr\b`),
-	ci(`\bkill\b`), // process kill
-	ci(`\biptables\b`), ci(`\bnft\b`), ci(`\bufw\b`),
-	ci(`\bsystemctl\s+(stop|disable|mask)\b`),
-	ci(`\bservice\s+\S+\s+(stop|restart)\b`),
+// lowRiskAllowlist is a POSITIVE allowlist. Only a command matching one of these
+// (and NOT touching a sensitive path — see isLowRisk) is classified RiskLow and
+// allowed to skip step-up / run autonomously. This is the deliberate inverse of a
+// denylist: a denylist is bypassable by construction — `./wipe.sh`,
+// `ansible-playbook teardown.yml`, and `python3 -c "shutil.rmtree(...)"` all look
+// benign — so anything NOT positively recognized as safe defaults to RiskHigh and
+// requires step-up. Entries are anchored to the start of the command and limited
+// to read-only inspection or safely-reversible lifecycle ops (the core of
+// auto-heal: bouncing a container/service).
+var lowRiskAllowlist = []*regexp.Regexp{
+	// Reversible container lifecycle.
+	ci(`^docker\s+(restart|start|stop|unpause|pause)\s+\S`),
+	ci(`^docker\s+compose\s+(restart|start|stop)\b`),
+	// Read-only docker inspection.
+	ci(`^docker\s+(ps|logs|inspect|stats|top|events|version|info|port|images)\b`),
+	ci(`^docker\s+(image\s+ls|compose\s+(ps|logs|top))\b`),
+	// Reversible single-service restart.
+	ci(`^systemctl\s+restart\s+\S+\s*$`),
+	ci(`^service\s+\S+\s+restart\s*$`),
+	// Read-only status / inspection.
+	ci(`^systemctl\s+(status|is-active|is-enabled|list-units|list-timers|show)\b`),
+	ci(`^journalctl\b`),
+	ci(`^(cat|ls|stat|head|tail|less|file|wc|df|du|free|uptime|date|hostname|whoami|id|uname|pwd|getfacl|lsblk|findmnt|ss|netstat|ps|env|printenv|true)\b`),
+	ci(`^echo\s`),
 }
 
 // ClassifyRisk returns the highest risk level across all commands.
@@ -129,12 +144,29 @@ func classifyOne(cmd string) string {
 	if mutatingVerb.MatchString(cmd) && sensitivePath.MatchString(cmd) {
 		return RiskDestructive
 	}
-	for _, p := range highRiskPatterns {
+	// Defense-in-depth: only positively-allowlisted, non-sensitive commands are
+	// Low. Everything else — unknown scripts, interpreters, ansible, opaque
+	// binaries — defaults to High and therefore requires step-up. We never infer
+	// safety from the mere ABSENCE of a denylist match.
+	if isLowRisk(cmd) {
+		return RiskLow
+	}
+	return RiskHigh
+}
+
+// isLowRisk reports whether cmd is on the positive low-risk allowlist and does
+// not reference a sensitive system path. A command touching /etc, /boot, /dev,
+// etc. is never auto-safe even when read-only (e.g. `cat /etc/shadow`).
+func isLowRisk(cmd string) bool {
+	if sensitivePath.MatchString(cmd) {
+		return false
+	}
+	for _, p := range lowRiskAllowlist {
 		if p.MatchString(cmd) {
-			return RiskHigh
+			return true
 		}
 	}
-	return RiskMedium
+	return false
 }
 
 func riskRank(r string) int {
@@ -152,8 +184,11 @@ func riskRank(r string) int {
 	}
 }
 
-// RequiresStepUp returns true when the risk level demands TOTP re-auth before
-// execution. Currently only RiskDestructive qualifies.
+// RequiresStepUp returns true for any command not positively classified as
+// low-risk. TOTP step-up is required before executing Medium, High, or
+// Destructive proposals; only allowlisted Low-risk commands skip it. This is
+// the policy half of the defense-in-depth model: we gate on the absence of a
+// positive safe-classification, not on the presence of a known-bad pattern.
 func RequiresStepUp(riskLevel string) bool {
-	return riskLevel == RiskDestructive
+	return riskLevel != RiskLow
 }
