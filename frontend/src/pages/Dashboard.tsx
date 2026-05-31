@@ -76,7 +76,7 @@ function NodeRow({ node }: { node: NodeView }) {
   const meta = statusMeta[node.status] ?? statusMeta.unknown
   return (
     <Link
-      to="/resources"
+      to={`/resources?node=${node.id}`}
       className="flex items-center gap-3 px-4 py-2.5"
       style={{ borderTop: '1px solid var(--border-subtle)', textDecoration: 'none' }}
     >
@@ -204,7 +204,7 @@ export default function Dashboard() {
             title: c.name,
             subtitle: tn.name,
             detail: issues.map((i) => i.text).join(' · '),
-            to: '/resources',
+            to: `/resources?node=${tn.id}&container=${c.id}`,
           })
         }
       }
@@ -405,7 +405,7 @@ export default function Dashboard() {
                         </span>
                       </div>
                       {tn.containers.map((c) => (
-                        <ContainerRow key={c.id} c={c} />
+                        <ContainerRow key={c.id} c={c} nodeId={tn.id} />
                       ))}
                     </div>
                   )
@@ -448,11 +448,11 @@ export default function Dashboard() {
   )
 }
 
-function ContainerRow({ c }: { c: TreeContainer }) {
+function ContainerRow({ c, nodeId }: { c: TreeContainer; nodeId: string }) {
   const meta = containerStatusMeta[c.status] ?? { color: 'var(--text-muted)', label: c.status }
   return (
     <Link
-      to="/resources"
+      to={`/resources?node=${nodeId}&container=${c.id}`}
       className="flex items-center gap-3 px-4 py-1.5"
       style={{ borderTop: '1px solid var(--border-subtle)', textDecoration: 'none' }}
     >

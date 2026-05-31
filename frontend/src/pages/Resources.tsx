@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Play, Square, RotateCw, PowerOff, Loader, BookmarkPlus, BookmarkCheck, AlertTriangle } from 'lucide-react'
 import { WakeOnLan } from '../components/nodes/WakeOnLan'
 import { SSHKeys } from '../components/nodes/SSHKeys'
@@ -846,7 +847,56 @@ function DetailPane() {
   )
 }
 
+/**
+ * Reads `?node=<id>` and optional `?container=<id>` query params and, once the
+ * tree data has loaded, selects the target item and expands its ancestors so it
+ * is visible. Runs at most once per unique target (tracked by a ref so a
+ * subsequent navigation to /resources without params doesn't re-fire).
+ */
+function useResourceDeepLink() {
+  const [params, setParams] = useSearchParams()
+  const { data } = useTree()
+  const { setSelected, setExpanded } = useTreeStore()
+  const appliedRef = useRef<string | null>(null)
+
+  const nodeId = params.get('node')
+  const containerId = params.get('container')
+  const targetKey = nodeId ? `${nodeId}:${containerId ?? ''}` : null
+
+  useEffect(() => {
+    if (!nodeId || !data || appliedRef.current === targetKey) return
+
+    const node = data.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+
+    // Always expand the node row.
+    setExpanded(`node:${nodeId}`, true)
+
+    if (containerId) {
+      const container = node.containers.find((c) => c.id === containerId)
+      if (!container) return
+
+      // Expand the compose-stack group that contains this container.
+      const UNGROUPED = ' ungrouped'
+      const projectKey = container.compose_project && container.compose_project.length > 0
+        ? container.compose_project
+        : UNGROUPED
+      setExpanded(`project:${nodeId}:${projectKey}`, true)
+
+      setSelected({ kind: 'container', nodeId, containerId })
+    } else {
+      setSelected({ kind: 'node', nodeId })
+    }
+
+    appliedRef.current = targetKey
+
+    // Strip the query params from the URL so refreshing doesn't re-apply.
+    setParams({}, { replace: true })
+  }, [nodeId, containerId, data, targetKey, setSelected, setExpanded, setParams])
+}
+
 export default function Resources() {
+  useResourceDeepLink()
   return (
     <AppShell treeSlot={<ResourceTree />}>
       <DetailPane />

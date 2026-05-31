@@ -34,7 +34,7 @@ import {
   Radio,
 } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useBookmarks, useRemoveBookmark } from '../../lib/api/bookmarks'
 import { useCan } from '../../lib/roles'
 import type { BookmarkResourceType } from '../../types/api'
@@ -257,9 +257,31 @@ function BookmarksSection() {
 
 export function Sidebar() {
   const { isAdmin, isOperator } = useCan()
+  const navRef = useRef<HTMLElement>(null)
+
+  // Restore scroll position on mount (covers the rare full-remount case).
+  useEffect(() => {
+    const el = navRef.current
+    if (!el) return
+    const saved = sessionStorage.getItem('stratum.sidebarScroll')
+    if (saved) el.scrollTop = Number(saved)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Persist scroll position whenever the user scrolls the sidebar.
+  // Because AppShell keeps the Sidebar mounted across all routes, this
+  // listener stays active and scrollTop is never reset by navigation.
+  useEffect(() => {
+    const el = navRef.current
+    if (!el) return
+    const onScroll = () => sessionStorage.setItem('stratum.sidebarScroll', String(el.scrollTop))
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
 
   return (
     <nav
+      ref={navRef}
       className="w-52 shrink-0 flex flex-col pt-2 pb-4 overflow-y-auto"
       style={{
         backgroundColor: 'var(--bg-surface)',
