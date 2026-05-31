@@ -214,6 +214,10 @@ type ImageUpdateRow struct {
 	Status        string // up_to_date | update_available | unknown
 	CurrentDigest string
 	LatestDigest  string
+	// UnknownReason is a human-readable explanation of why the status is
+	// "unknown" (e.g. "local digest unavailable", "registry lookup failed:
+	// 401 Unauthorized"). Empty when status != "unknown".
+	UnknownReason string
 	CheckedAt     time.Time
 }
 

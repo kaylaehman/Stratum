@@ -33,7 +33,12 @@ function sortUpdates(updates: ImageUpdate[]): ImageUpdate[] {
 
 // ---- Status chip ----
 
-function StatusChip({ status }: { status: UpdateStatus }) {
+interface StatusChipProps {
+  status: UpdateStatus
+  unknownReason?: string
+}
+
+function StatusChip({ status, unknownReason }: StatusChipProps) {
   if (status === 'update_available') {
     return (
       <span
@@ -75,6 +80,7 @@ function StatusChip({ status }: { status: UpdateStatus }) {
   return (
     <span
       className="flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
+      title={unknownReason || undefined}
       style={{
         color: 'var(--text-muted)',
         background: 'transparent',
@@ -82,6 +88,7 @@ function StatusChip({ status }: { status: UpdateStatus }) {
         borderRadius: '3px',
         fontSize: '12px',
         whiteSpace: 'nowrap',
+        cursor: unknownReason ? 'help' : undefined,
       }}
     >
       <HelpCircle size={10} />
@@ -223,7 +230,7 @@ function UpdateRow({ update, containerName, nodeName, isAdmin }: UpdateRowProps)
               Updated
             </span>
           ) : (
-            <StatusChip status={update.status} />
+            <StatusChip status={update.status} unknownReason={update.unknown_reason} />
           )}
         </td>
         <td
