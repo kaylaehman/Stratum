@@ -6,11 +6,15 @@ ARG TRIVY_VERSION=0.70.0
 # Build context is the repo root; this module has no local-module deps, so we
 # build it standalone with GOWORK=off.
 FROM golang:1.26 AS build
+ENV GOWORK=off CGO_ENABLED=0
 WORKDIR /src
+# backend depends on the local proto module via `replace ... => ../proto`, so the
+# proto module must be present in the image at the path the replace resolves to
+# (/proto, i.e. ../proto from /src). Copy it before downloading/building.
+COPY proto/ /proto/
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-ENV GOWORK=off CGO_ENABLED=0
 RUN go build -trimpath -ldflags="-s -w" -o /out/stratum .
 
 # Optional Trivy stage. The aquasec/trivy image is multi-arch; BuildKit resolves
