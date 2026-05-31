@@ -1482,6 +1482,8 @@ export interface ProxyStatus {
   has_token: boolean
   rules: ProxyRule[]
   rule_error?: string
+  /** cloudflared: ingress is managed in the Cloudflare Zero Trust dashboard (no local config). */
+  dashboard_managed: boolean
   supported: SupportedProxy[]
 }
 

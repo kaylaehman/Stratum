@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -48,17 +49,20 @@ func (s *Service) WithFiles(f *fs.Service) { s.files = f }
 // capabilities, whether an admin endpoint is configured, the live rules (when
 // listable), and the catalog of supported tools for the empty state.
 type Status struct {
-	Detected     string       `json:"detected"` // adapter name or ""
-	Capabilities Capabilities `json:"capabilities"`
-	Configured   bool         `json:"configured"` // admin endpoint set
-	Endpoint     string       `json:"endpoint,omitempty"`
-	HasToken     bool         `json:"has_token"`
-	Rules        []Rule       `json:"rules"`
-	RuleError    string       `json:"rule_error,omitempty"` // why rules couldn't be listed
-	Supported    []ToolInfo   `json:"supported"`
+	Detected         string       `json:"detected"` // adapter name or ""
+	Capabilities     Capabilities `json:"capabilities"`
+	Configured       bool         `json:"configured"` // admin endpoint set
+	Endpoint         string       `json:"endpoint,omitempty"`
+	HasToken         bool         `json:"has_token"`
+	Rules            []Rule       `json:"rules"`
+	RuleError        string       `json:"rule_error,omitempty"` // why rules couldn't be listed
+	DashboardManaged bool         `json:"dashboard_managed"`    // cloudflared: ingress in Cloudflare dashboard
+	Supported        []ToolInfo   `json:"supported"`
 }
 
 // detect returns the adapter for a node based on its container images.
+// For file-based adapters (cloudflared), also probes for a host-service
+// installation when no matching container is found.
 func (s *Service) detect(ctx context.Context, nodeID string) (Adapter, error) {
 	containers, err := s.store.ListContainersByNode(ctx, nodeID)
 	if err != nil {
@@ -68,7 +72,49 @@ func (s *Service) detect(ctx context.Context, nodeID string) (Adapter, error) {
 	for _, c := range containers {
 		images = append(images, c.Image)
 	}
-	return DetectByImages(images), nil
+	if a := DetectByImages(images); a != nil {
+		return a, nil
+	}
+
+	// No container matched. Check if cloudflared is installed as a host service
+	// by probing config file paths via SSH/agent. This covers the very common
+	// deployment where cloudflared is installed with `cloudflared service install`
+	// and runs as a systemd unit — no Docker container is involved.
+	if s.files != nil {
+		cf := getCloudflaredAdapter()
+		if cf != nil {
+			conn := s.hostConn(nodeID)
+			if cf.ProbeHostService(ctx, conn) {
+				slog.Info("cloudflared: detected host-service installation (no container)", "node_id", nodeID)
+				return cf, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// getCloudflaredAdapter returns the registered Cloudflared adapter, or nil.
+func getCloudflaredAdapter() *Cloudflared {
+	for _, a := range Adapters() {
+		if cf, ok := a.(*Cloudflared); ok {
+			return cf
+		}
+	}
+	return nil
+}
+
+// hostConn builds a minimal Conn with only ReadFile populated (no endpoint or
+// token needed for host-service probing).
+func (s *Service) hostConn(nodeID string) Conn {
+	if s.files == nil {
+		return Conn{}
+	}
+	filesSvc := s.files
+	return Conn{
+		ReadFile: func(ctx context.Context, path string) (io.ReadCloser, error) {
+			return filesSvc.Download(ctx, nodeID, path)
+		},
+	}
 }
 
 // conn builds the admin connection (endpoint + decrypted token) for a node.
@@ -124,8 +170,14 @@ func (s *Service) Status(ctx context.Context, nodeID string) (Status, error) {
 		rules, lerr := adapter.ListRules(ctx, conn)
 		if lerr != nil {
 			st.RuleError = lerr.Error()
+			slog.Warn("proxy: could not list rules", "adapter", adapter.Name(), "node_id", nodeID, "error", lerr)
 		} else {
 			st.Rules = rules
+			// For cloudflared: check if this is a dashboard-managed tunnel so the
+			// UI can display an informative state rather than an empty table.
+			if cf, ok := adapter.(*Cloudflared); ok && len(rules) == 0 {
+				st.DashboardManaged = cf.IsDashboardManaged(ctx, conn)
+			}
 		}
 	} else if adapter.Capabilities().List && !configured {
 		if isFileBased(adapter) {
