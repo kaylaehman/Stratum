@@ -55,6 +55,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
+	"github.com/kaylaehman/stratum/backend/uptime"
 	"github.com/kaylaehman/stratum/backend/volumes"
 	"github.com/kaylaehman/stratum/backend/webhooks"
 )
@@ -209,6 +210,14 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("skills library loaded", "count", skillLib.Len(), "dir", cfg.SkillsDir)
 
+	uptimeSvc := uptime.New(store, logger)
+	uptimeSvc.SetNotify(func(ctx context.Context, trigger string, msg webhooks.Message) {
+		webhookDispatcher.Notify(ctx, trigger, msg)
+	})
+
+	// Import the uptime triggers package so its init() registers the trigger.
+	// The import happens via the uptime package itself (triggers.go init).
+
 	handlers := &api.Handlers{
 		Store:          store,
 		Activity:       activity.NewStore(store),
@@ -242,6 +251,7 @@ func run(logger *slog.Logger) error {
 		FileWatch:      fileWatchSvc,
 		SSO:            ssoSvc,
 		Skills:         skillLib,
+		Uptime:         uptimeSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -258,6 +268,8 @@ func run(logger *slog.Logger) error {
 	go volumeSvc.RunDailySampler(ctx, 24*time.Hour) // volume size-trend sampler
 	go metricsSampler.Run(ctx)                      // 15s resource-timeline sampler
 	go chatSvc.Run(ctx)                             // inbound chat-command poller (no-op until enabled+configured)
+	go uptimeSvc.Run(ctx)                           // uptime monitor checker loop
+	go uptimeSvc.RunPrune(ctx, 90*24*time.Hour)     // prune results older than 90 days
 
 	// Best-effort warm the Trivy vulnerability DB so the first user scan isn't
 	// slow. Non-fatal and time-bounded: offline deploys (no egress to the

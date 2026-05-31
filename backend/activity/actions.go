@@ -107,6 +107,10 @@ const (
 	ActionWatchScan   = "watch.scan"
 
 	ActionSSOConfig = "sso.config"
+
+	ActionUptimeCreate = "uptime.create"
+	ActionUptimeUpdate = "uptime.update"
+	ActionUptimeDelete = "uptime.delete"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -125,6 +129,7 @@ const (
 	TargetScript          = "script"
 	TargetAI              = "ai"
 	TargetSkill           = "skill"
+	TargetUptime          = "uptime_monitor"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -234,6 +239,10 @@ var actionCatalog = []ActionInfo{
 	{ActionWatchDelete, "File watch removed", "watch", TargetNode},
 	{ActionWatchScan, "File change scan", "watch", TargetNode},
 	{ActionSSOConfig, "SSO access configured", "sso", TargetContainer},
+
+	{ActionUptimeCreate, "Uptime monitor created", "uptime", TargetUptime},
+	{ActionUptimeUpdate, "Uptime monitor updated", "uptime", TargetUptime},
+	{ActionUptimeDelete, "Uptime monitor deleted", "uptime", TargetUptime},
 }
 
 var actionByName = func() map[string]ActionInfo {
