@@ -259,7 +259,7 @@ common_issues:
       - id: step-8
         description: Monitor backup completion
         type: check
-        command: "sleep 30 && ls -lh {backup_path}/ | grep -E 'vault.bak|vault_.*\.bak' | tail -1"
+        command: 'sleep 30 && ls -lh {backup_path}/ | grep -E ''vault.bak|vault_.*\.bak'' | tail -1'
 
 default_config:
   compose_template: |

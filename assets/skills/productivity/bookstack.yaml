@@ -115,9 +115,8 @@ common_issues:
         type: inform
         command: ""
       - id: step-3
-        description: Verify what URL you are using to access BookStack
-        type: confirm
         description: "Please confirm: Are you accessing BookStack via http://localhost, an IP address, or a domain name?"
+        type: confirm
       - id: step-4
         description: Update APP_URL environment variable to match access URL
         type: fix

@@ -226,6 +226,17 @@ notes: |
   - FTLCONF_LOCAL_IPV4: If you change the host's IP after deployment, update this variable so Pi-hole advertises the correct IP to DHCP clients.
   - DHCP server: Optional but requires /etc/pihole and /etc/dnsmasq.d to be mounted and writable.
 
+  Port 53 (DNS) must be accessible on both TCP and UDP.
+  Port 80 is for the admin web interface; use reverse proxy for HTTPS.
+
+  Optional DHCP server: Set DHCP_ENABLED=true and configure DHCP_ variables to use Pi-hole as your network's DHCP server.
+
+  Upstream DNS: Configure primary and secondary servers. Cloudflare (1.1.1.1), Google (8.8.8.8), and Quad9 (9.9.9.9) are popular choices.
+
+  Ad list management: Add adlists (blocklists) via the Admin → Adlists page. Community lists are available at:
+  https://doh.centraleuropean.de (curated blocklists)
+  https://firebog.net (comprehensive blocklist compilation)
+
 default_config:
   compose_template: |
     services:
@@ -284,17 +295,3 @@ default_config:
 
 linuxserver_conventions:
   enabled: false
-
-notes: |
-  Pi-hole blocks ads and tracking at the DNS level, protecting all devices on your network.
-
-  Port 53 (DNS) must be accessible on both TCP and UDP.
-  Port 80 is for the admin web interface; use reverse proxy for HTTPS.
-
-  Optional DHCP server: Set DHCP_ENABLED=true and configure DHCP_ variables to use Pi-hole as your network's DHCP server.
-
-  Upstream DNS: Configure primary and secondary servers. Cloudflare (1.1.1.1), Google (8.8.8.8), and Quad9 (9.9.9.9) are popular choices.
-
-  Ad list management: Add adlists (blocklists) via the Admin → Adlists page. Community lists are available at:
-  https://doh.centraleuropean.de (curated blocklists)
-  https://firebog.net (comprehensive blocklist compilation)

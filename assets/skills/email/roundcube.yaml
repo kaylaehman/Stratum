@@ -139,7 +139,6 @@ common_issues:
     resolution: |
       Roundcube's PHP process runs as the www-data user (UID 33). The web root directory must be owned by www-data for Roundcube to write configuration files. Ownership has been corrected and the container restarted. Roundcube should now be able to initialize its configuration directory on first run.
 
-common_issues:
   - id: password-reset-not-working
     name: Password reset or plugin installation fails
     symptoms:

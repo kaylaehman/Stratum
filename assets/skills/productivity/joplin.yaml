@@ -87,9 +87,8 @@ common_issues:
         type: inform
         command: ""
       - id: step-3
-        description: Confirm the URL you use to access Joplin
-        type: confirm
         description: "Please confirm: Are you accessing Joplin via http://localhost:22300 or another URL (reverse proxy, domain name, etc.)?"
+        type: confirm
       - id: step-4
         description: Update APP_BASE_URL to match access URL
         type: fix

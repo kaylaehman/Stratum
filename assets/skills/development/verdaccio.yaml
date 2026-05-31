@@ -111,7 +111,7 @@ common_issues:
         description: Test connectivity to npm registry
         type: check
         command: "docker exec {container_name} curl -I https://registry.npmjs.org/ 2>&1 | head -3"
-        expected_output: "200\|301\|302"
+        expected_output: '200\|301\|302'
         on_fail: step-3
       - id: step-3
         description: Check host network connectivity to external registry

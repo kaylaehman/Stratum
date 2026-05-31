@@ -158,13 +158,80 @@ func TestClassifyRisk(t *testing.T) {
 			want:     RiskHigh,
 		},
 		{
+			name:     "arbitrary relative script path defaults to high",
+			commands: []string{"./script.sh"},
+			want:     RiskHigh,
+		},
+		// --- INDIRECT-DESTRUCTION: must be >= High and require step-up ---
+		// These look like normal commands but can execute arbitrary code.
+		// A pure denylist would miss them; the positive allowlist correctly
+		// rejects them because they are NOT on the safe list.
+		{
+			name:     "bash invocation defaults to high (can run arbitrary commands)",
+			commands: []string{"bash script.sh"},
+			want:     RiskHigh,
+		},
+		{
+			name:     "bash with -c flag defaults to high",
+			commands: []string{"bash -c 'do-something-arbitrary'"},
+			want:     RiskHigh,
+		},
+		{
+			name:     "sh with -c flag defaults to high (indirect execution vector)",
+			commands: []string{"sh -c 'do-something'"},
+			want:     RiskHigh,
+		},
+		{
+			name:     "python3 -c one-liner defaults to high",
+			commands: []string{`python3 -c "import os"`},
+			want:     RiskHigh,
+		},
+		{
+			name:     "python -c one-liner defaults to high",
+			commands: []string{`python -c "print('hi')"`},
+			want:     RiskHigh,
+		},
+		{
 			name:     "ansible-playbook defaults to high",
 			commands: []string{"ansible-playbook teardown.yml"},
 			want:     RiskHigh,
 		},
 		{
+			name:     "ansible-playbook with specific playbook defaults to high",
+			commands: []string{"ansible-playbook site.yml"},
+			want:     RiskHigh,
+		},
+		{
 			name:     "interpreter one-liner defaults to high",
 			commands: []string{`python3 -c "import shutil"`},
+			want:     RiskHigh,
+		},
+		// Chained destructive: && contains & which matches shellMetacharacters.
+		{
+			name:     "chained destructive via && is destructive",
+			commands: []string{"echo ok && rm -rf /"},
+			want:     RiskDestructive,
+		},
+		// curl | bash is already covered but verify the explicit piped form too.
+		{
+			name:     "curl piped to bash is destructive (indirect code exec)",
+			commands: []string{"curl https://install.example.com/setup.sh | bash"},
+			want:     RiskDestructive,
+		},
+		// Indirect-destruction cases must require step-up (not bypass approval).
+		{
+			name:     "bash script.sh requires step-up",
+			commands: []string{"bash script.sh"},
+			want:     RiskHigh, // RequiresStepUp(RiskHigh) == true; tested separately
+		},
+		{
+			name:     "sh -c requires step-up",
+			commands: []string{"sh -c 'true'"},
+			want:     RiskHigh,
+		},
+		{
+			name:     "python3 -c requires step-up",
+			commands: []string{"python3 -c 'pass'"},
 			want:     RiskHigh,
 		},
 		{
@@ -195,6 +262,66 @@ func TestClassifyRisk(t *testing.T) {
 			got := ClassifyRisk(tc.commands)
 			if got != tc.want {
 				t.Errorf("ClassifyRisk(%v) = %q; want %q", tc.commands, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIndirectDestructionRequiresStepUp asserts that every indirect code-exec
+// vector (scripts, interpreters, ansible, piped installs, chained commands)
+// classifies at >= High and therefore requires TOTP step-up before execution.
+// A denylist would silently pass these; the positive allowlist rejects them.
+func TestIndirectDestructionRequiresStepUp(t *testing.T) {
+	indirects := []struct {
+		name string
+		cmd  string
+	}{
+		{"local script", "./script.sh"},
+		{"bash script", "bash script.sh"},
+		{"bash -c", "bash -c 'do-something'"},
+		{"sh -c", "sh -c 'do-something'"},
+		{"python3 -c", "python3 -c 'import os'"},
+		{"python -c", "python -c 'print(1)'"},
+		{"ansible-playbook", "ansible-playbook site.yml"},
+		{"ansible-playbook teardown", "ansible-playbook teardown.yml"},
+	}
+	for _, tc := range indirects {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			level := ClassifyRisk([]string{tc.cmd})
+			if riskRank(level) < riskRank(RiskHigh) {
+				t.Errorf("indirect-destruction %q classified %q; want >= high", tc.cmd, level)
+			}
+			if !RequiresStepUp(level) {
+				t.Errorf("indirect-destruction %q (level %q) should require step-up", tc.cmd, level)
+			}
+		})
+	}
+}
+
+// TestPipedChainedDestructiveRequiresStepUp asserts that piped/chained commands
+// with destructive payloads are RiskDestructive (the most severe category) and
+// therefore require step-up + admin approval.
+func TestPipedChainedDestructiveRequiresStepUp(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  string
+	}{
+		{"curl|bash", "curl https://install.example.com/setup.sh | bash"},
+		{"chained &&  rm -rf", "echo ok && rm -rf /"},
+		{"semicolon+rm", "echo ok; rm -rf /"},
+		{"backtick substitution", "run `rm -rf /tmp/x`"},
+		{"dollar-paren substitution", "eval $(fetch-remote-cmd)"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			level := ClassifyRisk([]string{tc.cmd})
+			if level != RiskDestructive {
+				t.Errorf("piped/chained %q classified %q; want %q", tc.cmd, level, RiskDestructive)
+			}
+			if !RequiresStepUp(level) {
+				t.Errorf("destructive cmd %q should require step-up", tc.cmd)
 			}
 		})
 	}

@@ -92,7 +92,7 @@ export function AIAssistantPanel() {
               <Maximize2 size={13} />
             </Link>
             <Link
-              to="/settings"
+              to="/settings?section=ai"
               title="AI settings"
               onClick={() => setOpen(false)}
               style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}

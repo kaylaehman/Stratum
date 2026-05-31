@@ -71,7 +71,7 @@ common_issues:
     symptoms:
       - "Connection timeout when connecting from client"
       - "No response from VPN server address"
-      - "Client stuck at "Connecting" state"
+      - 'Client stuck at "Connecting" state'
       - "Port 1194/udp unreachable from external network"
     trigger_conditions:
       - log_pattern: "connection refused"
@@ -181,7 +181,7 @@ common_issues:
         type: check
         command: "docker logs {container_name} | grep -i 'memory\\|leak\\|alloc' | tail -10"
       - id: step-4
-        description: Set memory limit on container (default: 256MB, adjust as needed)
+        description: "Set memory limit on container (default: 256MB, adjust as needed)"
         type: fix
         command: "docker update --memory=512m --memory-swap=512m {container_name}"
         requires_approval: true

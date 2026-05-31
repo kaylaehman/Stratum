@@ -19,6 +19,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/kaylaehman/stratum/backend/prommetrics"
 	"github.com/kaylaehman/stratum/backend/agent"
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/api"
@@ -285,7 +286,8 @@ func run(logger *slog.Logger) error {
 		PreviewLimiter: rate.NewLimiter(rate.Every(2*time.Second), 5),
 	}
 
-	router := server.NewRouter(&server.Deps{Handlers: handlers, JWT: jwt, Store: store})
+	promReg := prommetrics.Registry(store, h)
+	router := server.NewRouter(&server.Deps{Handlers: handlers, JWT: jwt, Store: store, PromRegistry: promReg})
 	srv := server.New(fmt.Sprintf(":%d", cfg.Port), router, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

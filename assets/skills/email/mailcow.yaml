@@ -55,7 +55,7 @@ common_issues:
     symptoms:
       - "certificate verify failed"
       - "SSL: CERTIFICATE_VERIFY_FAILED"
-      - "acme error" in logs
+      - '"acme error" in logs'
     trigger_conditions:
       - log_pattern: "certificate"
     steps:
@@ -84,7 +84,7 @@ common_issues:
     name: Mailcow MySQL database is unhealthy or unreachable
     symptoms:
       - "MySQL connection error"
-      - "database error" in logs
+      - '"database error" in logs'
       - "Cannot access mailcow admin panel"
     trigger_conditions:
       - log_pattern: "MySQL"

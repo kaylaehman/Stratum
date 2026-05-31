@@ -234,6 +234,18 @@ notes: |
   https://filterlists.com
   https://github.com/AdguardTeam/AdGuardHome/wiki/Hosts-Blocklists
 
+  Setup workflow:
+  1. Start the container
+  2. Access http://<host>:3000 to run the setup wizard
+  3. Configure admin password and DNS settings
+  4. Dashboard moves to http://<host>:80 after setup
+
+  Upstream DNS: Configure in Settings → DNS Upstream Servers. Use Cloudflare (1.1.1.1), Google (8.8.8.8), or quad9 (9.9.9.9).
+
+  Port binding: Requires CAP_NET_ADMIN. If running behind a reverse proxy, configure AdGuard to listen on a different port and proxy externally.
+
+  Filter lists: Add community blocklists to improve ad blocking. https://filterlists.com has comprehensive curated lists.
+
 default_config:
   compose_template: |
     services:
@@ -277,18 +289,3 @@ default_config:
 
 linuxserver_conventions:
   enabled: false
-
-notes: |
-  AdGuard Home is a modern ad blocker that intercepts DNS queries and blocks known ad domains.
-
-  Setup workflow:
-  1. Start the container
-  2. Access http://<host>:3000 to run the setup wizard
-  3. Configure admin password and DNS settings
-  4. Dashboard moves to http://<host>:80 after setup
-
-  Upstream DNS: Configure in Settings → DNS Upstream Servers. Use Cloudflare (1.1.1.1), Google (8.8.8.8), or quad9 (9.9.9.9).
-
-  Port binding: Requires CAP_NET_ADMIN. If running behind a reverse proxy, configure AdGuard to listen on a different port and proxy externally.
-
-  Filter lists: Add community blocklists to improve ad blocking. https://filterlists.com has comprehensive curated lists.

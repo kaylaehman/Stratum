@@ -150,7 +150,8 @@ interface CVEDetailPanelProps {
 
 function CVEDetailPanel({ digest }: CVEDetailPanelProps) {
   const [detailFilter, setDetailFilter] = useState<SeverityFilter>('all')
-  const { data, isLoading } = useCVEDetail(digest, true)
+  const enabled = digest.length > 0
+  const { data, isLoading } = useCVEDetail(digest, enabled)
 
   const vulns: CVEVuln[] = data?.vulns ?? []
   const filtered = vulns.filter((v) => {
@@ -160,6 +161,22 @@ function CVEDetailPanel({ digest }: CVEDetailPanelProps) {
   const sorted = [...filtered].sort(
     (a, b) => (SEVERITY_ORDER[b.severity.toLowerCase()] ?? 0) - (SEVERITY_ORDER[a.severity.toLowerCase()] ?? 0),
   )
+
+  if (!enabled) {
+    return (
+      <div
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          borderTop: '1px solid var(--border-subtle)',
+          padding: '12px 16px',
+        }}
+      >
+        <span className="text-xs" style={{ color: 'var(--status-warn)' }}>
+          No image digest recorded for this scan — re-scan the container to load vulnerability details.
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div
