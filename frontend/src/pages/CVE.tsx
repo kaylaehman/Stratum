@@ -8,13 +8,26 @@ import {
   ExternalLink,
   ShieldAlert,
   ShieldCheck,
+  Clock,
+  Trash2,
+  Plus,
 } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
-import { useCVEScans, useCVEDetail, useScanContainer, useCVEStatus } from '../lib/api/cve'
+import {
+  useCVEScans,
+  useCVEDetail,
+  useScanContainer,
+  useCVEStatus,
+  useBulkScan,
+  useCVESchedules,
+  useCreateCveSchedule,
+  useToggleCveSchedule,
+  useDeleteCveSchedule,
+} from '../lib/api/cve'
 import { ApiError } from '../lib/api'
-import type { ImageScan, CVEVuln } from '../types/api'
+import type { ImageScan, CVEVuln, CveSchedule } from '../types/api'
 
 // ---- Types ----
 
@@ -473,6 +486,389 @@ function ScanTrigger({ scannerAvailable }: ScanTriggerProps) {
   )
 }
 
+// ---- Bulk scan trigger ----
+
+interface BulkScanTriggerProps {
+  scannerAvailable: boolean
+}
+
+function BulkScanTrigger({ scannerAvailable }: BulkScanTriggerProps) {
+  const { data: tree } = useTree()
+  const { mutate: bulkScan, isPending, data: results, reset } = useBulkScan()
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const containers = (tree?.nodes ?? []).flatMap((node) =>
+    node.containers.map((c) => ({ ...c, nodeName: node.name })),
+  )
+
+  function toggleContainer(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) { next.delete(id) } else { next.add(id) }
+      return next
+    })
+    reset()
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set(containers.map((c) => c.id)))
+    reset()
+  }
+
+  function clearAll() {
+    setSelectedIds(new Set())
+    reset()
+  }
+
+  return (
+    <div
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: '3px',
+        padding: '12px 16px',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <Bug size={12} style={{ color: 'var(--text-muted)' }} />
+        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          Scan Multiple Containers
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <button
+          type="button"
+          onClick={selectAll}
+          className="text-xs px-2 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+            cursor: 'pointer',
+          }}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          onClick={clearAll}
+          className="text-xs px-2 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+            cursor: 'pointer',
+          }}
+        >
+          None
+        </button>
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {selectedIds.size} of {containers.length} selected
+        </span>
+      </div>
+
+      <div
+        className="mb-3"
+        style={{
+          maxHeight: '120px',
+          overflowY: 'auto',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: '3px',
+        }}
+      >
+        {containers.map((c) => (
+          <label
+            key={c.id}
+            className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-[var(--bg-elevated)]"
+          >
+            <input
+              type="checkbox"
+              checked={selectedIds.has(c.id)}
+              onChange={() => toggleContainer(c.id)}
+              disabled={!scannerAvailable || isPending}
+              className="accent-[var(--accent)]"
+            />
+            <span className="font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
+              {c.name}
+            </span>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              ({c.nodeName})
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={!scannerAvailable || isPending || selectedIds.size === 0}
+          onClick={() => bulkScan(Array.from(selectedIds))}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+          style={{
+            backgroundColor: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+            cursor: (!scannerAvailable || isPending || selectedIds.size === 0) ? 'not-allowed' : 'pointer',
+            opacity: (!scannerAvailable || selectedIds.size === 0) ? 0.5 : 1,
+          }}
+        >
+          {isPending ? (
+            <><Loader size={11} className="animate-spin" /> Scanning…</>
+          ) : (
+            <><RefreshCw size={11} /> Scan Selected</>
+          )}
+        </button>
+      </div>
+
+      {results && !isPending && (
+        <div className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+          {results.results.filter((r) => !r.error).length} succeeded,{' '}
+          {results.results.filter((r) => !!r.error).length} failed
+          {results.results.some((r) => !!r.error) && (
+            <ul className="mt-1">
+              {results.results.filter((r) => !!r.error).map((r) => (
+                <li key={r.container_id} style={{ color: 'var(--status-error)' }}>
+                  {r.image}: {r.error}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- CVE schedules panel ----
+
+const INTERVAL_OPTIONS = [
+  { label: 'Every hour', seconds: 3600 },
+  { label: 'Every 6 hours', seconds: 21600 },
+  { label: 'Every 12 hours', seconds: 43200 },
+  { label: 'Every day', seconds: 86400 },
+  { label: 'Every 3 days', seconds: 259200 },
+  { label: 'Every week', seconds: 604800 },
+]
+
+interface SchedulesPanelProps {
+  isAdmin: boolean
+}
+
+function SchedulesPanel({ isAdmin }: SchedulesPanelProps) {
+  const { data: tree } = useTree()
+  const { data, isLoading } = useCVESchedules(isAdmin)
+  const { mutate: createSchedule, isPending: isCreating } = useCreateCveSchedule()
+  const { mutate: toggleSchedule } = useToggleCveSchedule()
+  const { mutate: deleteSchedule } = useDeleteCveSchedule()
+
+  const [targetType, setTargetType] = useState<'node' | 'container'>('node')
+  const [targetId, setTargetId] = useState('')
+  const [label, setLabel] = useState('')
+  const [intervalSeconds, setIntervalSeconds] = useState(86400)
+
+  const nodes = tree?.nodes ?? []
+  const containers = nodes.flatMap((n) => n.containers.map((c) => ({ ...c, nodeName: n.name })))
+
+  const targets = targetType === 'node'
+    ? nodes.map((n) => ({ id: n.id, label: n.name }))
+    : containers.map((c) => ({ id: c.id, label: `${c.name} (${c.nodeName})` }))
+
+  function handleCreate() {
+    if (!targetId) return
+    createSchedule(
+      { target_type: targetType, target_id: targetId, label, interval_seconds: intervalSeconds },
+      { onSuccess: () => { setTargetId(''); setLabel('') } },
+    )
+  }
+
+  function humanInterval(s: number): string {
+    if (s < 3600) return `${s}s`
+    if (s < 86400) return `${Math.round(s / 3600)}h`
+    return `${Math.round(s / 86400)}d`
+  }
+
+  const schedules: CveSchedule[] = data?.schedules ?? []
+
+  return (
+    <div
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: '3px',
+        padding: '12px 16px',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <Clock size={12} style={{ color: 'var(--text-muted)' }} />
+        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          Scheduled Scans
+        </span>
+      </div>
+
+      {/* Create form */}
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <select
+          value={targetType}
+          onChange={(e) => { setTargetType(e.target.value as 'node' | 'container'); setTargetId('') }}
+          className="font-mono text-xs px-2 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+          }}
+        >
+          <option value="node">Node (all containers)</option>
+          <option value="container">Container</option>
+        </select>
+
+        <select
+          value={targetId}
+          onChange={(e) => setTargetId(e.target.value)}
+          className="font-mono text-xs px-2 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+            minWidth: '160px',
+          }}
+        >
+          <option value="">Select target…</option>
+          {targets.map((t) => (
+            <option key={t.id} value={t.id}>{t.label}</option>
+          ))}
+        </select>
+
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Label (optional)"
+          className="font-mono text-xs px-2 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+            minWidth: '120px',
+          }}
+        />
+
+        <select
+          value={intervalSeconds}
+          onChange={(e) => setIntervalSeconds(Number(e.target.value))}
+          className="font-mono text-xs px-2 py-1"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+          }}
+        >
+          {INTERVAL_OPTIONS.map((o) => (
+            <option key={o.seconds} value={o.seconds}>{o.label}</option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          disabled={!targetId || isCreating}
+          onClick={handleCreate}
+          className="flex items-center gap-1 text-xs px-3 py-1"
+          style={{
+            backgroundColor: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: '3px',
+            cursor: (!targetId || isCreating) ? 'not-allowed' : 'pointer',
+            opacity: !targetId ? 0.5 : 1,
+          }}
+        >
+          {isCreating ? <Loader size={10} className="animate-spin" /> : <Plus size={10} />}
+          Add
+        </button>
+      </div>
+
+      {/* Schedules list */}
+      {isLoading ? (
+        <div className="flex items-center gap-2 py-2">
+          <Loader size={11} className="animate-spin" style={{ color: 'var(--accent)' }} />
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading schedules…</span>
+        </div>
+      ) : schedules.length === 0 ? (
+        <div className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+          No schedules configured.
+        </div>
+      ) : (
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: '3px', overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Label', 'Target', 'Interval', 'Last run', 'Enabled', ''].map((col) => (
+                  <th
+                    key={col}
+                    className="px-3 py-1.5 text-left text-xs uppercase tracking-wider font-medium"
+                    style={{
+                      color: 'var(--text-muted)',
+                      borderBottom: '1px solid var(--border-subtle)',
+                      fontSize: '11px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {schedules.map((sched) => (
+                <tr key={sched.id}>
+                  <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)' }}>
+                    {sched.label || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-xs" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)', whiteSpace: 'nowrap' }}>
+                    {sched.target_type}: {sched.target_id.slice(0, 12)}…
+                  </td>
+                  <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
+                    {humanInterval(sched.interval_seconds)}
+                  </td>
+                  <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', whiteSpace: 'nowrap' }}>
+                    {sched.last_run_at ? new Date(sched.last_run_at).toLocaleString() : 'Never'}
+                  </td>
+                  <td className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <input
+                      type="checkbox"
+                      checked={sched.enabled}
+                      onChange={(e) => toggleSchedule({ id: sched.id, enabled: e.target.checked })}
+                      className="accent-[var(--accent)]"
+                    />
+                  </td>
+                  <td className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <button
+                      type="button"
+                      onClick={() => deleteSchedule(sched.id)}
+                      className="p-0.5"
+                      style={{ color: 'var(--text-muted)', cursor: 'pointer', background: 'none', border: 'none' }}
+                      title="Delete schedule"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- Admin gate ----
 
 function AdminRequired() {
@@ -622,9 +1018,19 @@ export default function CVE() {
               </div>
             )}
 
-            {/* Scan trigger */}
-            <div className="mb-6">
+            {/* Single-container scan trigger */}
+            <div className="mb-4">
               <ScanTrigger scannerAvailable={scannerAvailable} />
+            </div>
+
+            {/* Bulk scan trigger */}
+            <div className="mb-6">
+              <BulkScanTrigger scannerAvailable={scannerAvailable} />
+            </div>
+
+            {/* Scheduled scans */}
+            <div className="mb-6">
+              <SchedulesPanel isAdmin={isAdmin} />
             </div>
 
             {/* Scans table */}

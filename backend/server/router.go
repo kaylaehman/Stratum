@@ -97,6 +97,8 @@ func NewRouter(d *Deps) http.Handler {
 			// Image CVE scans (admin-gated; on-demand scan is audited below).
 			r.Get("/security/cve", d.Handlers.CVEScans)
 			r.Get("/security/cve/status", d.Handlers.CVEStatus)
+			// CVE schedules list (read-only).
+			r.Get("/security/cve/schedules", d.Handlers.CVEListSchedules)
 			r.Get("/security/cve/{digest}", d.Handlers.CVEDetail)
 
 			// Volume health (read-only; cross-node).
@@ -264,6 +266,10 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/nodes/{id}/sshkeys/delete", d.Handlers.DeleteSSHKey)
 			audited.Put("/nodes/{id}/cron", d.Handlers.SetCron)
 			audited.Post("/containers/{id}/cve-scan", d.Handlers.CVEScanContainer)
+			audited.Post("/security/cve/bulk-scan", d.Handlers.CVEBulkScan)
+			audited.Post("/security/cve/schedules", d.Handlers.CVECreateSchedule)
+			audited.Put("/security/cve/schedules/{id}", d.Handlers.CVEToggleSchedule)
+			audited.Delete("/security/cve/schedules/{id}", d.Handlers.CVEDeleteSchedule)
 			audited.Post("/containers/{id}/update", d.Handlers.UpdateContainer)
 			audited.Post("/containers/{id}/snapshot", d.Handlers.SnapshotContainer)
 			audited.Post("/containers/{id}/rollback/{snap}", d.Handlers.RollbackContainer)
