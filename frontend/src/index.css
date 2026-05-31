@@ -7,6 +7,7 @@
   --bg-surface: #111520;
   --bg-elevated: #1a1f2e;
   --bg-overlay: #222840;
+  --bg-input: #1a1f2e; /* form fields: slightly raised, readable with --text-primary */
 
   --border-subtle: #1e2538;
   --border-default: #2a3150;
