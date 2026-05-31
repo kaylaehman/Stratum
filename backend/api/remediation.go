@@ -187,8 +187,9 @@ func (h *Handlers) RejectProposal(w http.ResponseWriter, r *http.Request) {
 
 // ExecuteProposal runs the commands on the target node. Hard requirements:
 //  1. Proposal must be in approved status (enforced by the service).
-//  2. Destructive proposals require TOTP step-up (enforced by requireStepUp).
-//  3. Admin only for destructive; operator+ otherwise.
+//  2. ANY non-low-risk proposal requires TOTP step-up (RequiresStepUp). Only
+//     positively-allowlisted low-risk commands skip it — defense in depth.
+//  3. Admin required for destructive; operator+ otherwise.
 //
 // This is the ONLY path that runs commands on hosts — no auto-execution exists.
 func (h *Handlers) ExecuteProposal(w http.ResponseWriter, r *http.Request) {
@@ -210,20 +211,25 @@ func (h *Handlers) ExecuteProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Destructive proposals require admin AND TOTP step-up.
+	// Role gate: destructive requires admin; everything else operator+.
 	if p.RiskLevel == remediation.RiskDestructive {
 		if !auth.AtLeast(user.Role, auth.RoleAdmin) {
 			writeError(w, http.StatusForbidden, "admin_required_for_destructive")
 			return
 		}
-		if !h.requireStepUp(w, r) {
-			return // 428 written by requireStepUp
-		}
 	} else {
-		// Non-destructive: operator+ only.
 		if !auth.AtLeast(user.Role, auth.RoleOperator) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
+		}
+	}
+
+	// Step-up gate: any command not positively classified low-risk requires
+	// fresh TOTP re-auth. This covers unknown scripts/binaries (default High),
+	// not just the destructive denylist.
+	if remediation.RequiresStepUp(p.RiskLevel) {
+		if !h.requireStepUp(w, r) {
+			return // 428 written by requireStepUp
 		}
 	}
 
