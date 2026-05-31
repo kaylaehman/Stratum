@@ -48,7 +48,13 @@ function humanizeInterval(seconds: number): string {
 
 // ---- Destructive automation keys ----
 
-const DESTRUCTIVE_KEYS = new Set(['auto_update_containers', 'prune_unused_volumes'])
+const DESTRUCTIVE_KEYS = new Set([
+  'auto_update_containers',
+  'prune_unused_volumes',
+  'fix_bind_mount_perms',
+  'patch_critical_cves',
+  'prune_disk_pressure',
+])
 
 // ---- Category display helpers ----
 

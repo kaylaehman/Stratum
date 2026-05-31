@@ -1,4 +1,4 @@
-// Package automation is the automations engine (Wave 6): 8 code-defined
+// Package automation is the automations engine (Wave 6): 13 code-defined
 // autonomous automations, independently configurable via DB overrides, with a
 // background Run loop and a RunNow path for manual triggers.
 //
@@ -94,6 +94,52 @@ var catalog = []Entry{
 		Category:               CategoryMaintenance,
 		DefaultIntervalSeconds: 86400,
 		DefaultConfig:          map[string]any{"node_id": "", "volume": "", "dest_dir": ""},
+	},
+	{
+		Key:   "restart_on_resource_spike",
+		Label: "Restart on resource spike",
+		Description: "Restart a container that exceeds CPU or memory thresholds for a sustained window. " +
+			"Config: cpu_pct (default 90), mem_pct (default 90), window_minutes (default 15).",
+		Category:               CategorySelfHeal,
+		DefaultIntervalSeconds: 300,
+		DefaultConfig:          map[string]any{"cpu_pct": float64(90), "mem_pct": float64(90), "window_minutes": float64(15)},
+	},
+	{
+		Key:   "fix_bind_mount_perms",
+		Label: "Fix bind-mount permission issues",
+		Description: "For containers with a detected bind-mount UID/GID mismatch, apply the diagnostic's suggested " +
+			"chmod/chown. Defaults to dry_run=true (logs the fix it would apply without executing).",
+		Category:               CategorySelfHeal,
+		DefaultIntervalSeconds: 3600,
+		DefaultConfig:          map[string]any{"dry_run": true},
+	},
+	{
+		Key:   "run_runbooks_on_alert",
+		Label: "Run runbooks on alerts",
+		Description: "When a recent incident or activity alert matches a runbook's trigger conditions, " +
+			"generate a remediation proposal from that runbook. Config: min_severity (default critical).",
+		Category:               CategorySelfHeal,
+		DefaultIntervalSeconds: 600,
+		DefaultConfig:          map[string]any{"min_severity": "critical"},
+	},
+	{
+		Key:   "patch_critical_cves",
+		Label: "Patch containers with critical CVEs",
+		Description: "Scan running images; for a container whose image has CRITICAL CVEs with an available fixed " +
+			"version, update it to the fixed image via pull+recreate. Defaults to dry_run=true. " +
+			"Config: allowlist (compose projects), dry_run.",
+		Category:               CategorySecurity,
+		DefaultIntervalSeconds: 86400,
+		DefaultConfig:          map[string]any{"allowlist": []string{}, "dry_run": true},
+	},
+	{
+		Key:   "prune_disk_pressure",
+		Label: "Prune disk pressure",
+		Description: "When host free disk falls below min_free_pct (default 10%), prune dangling images and " +
+			"Docker builder cache via SSH. Only acts when below threshold.",
+		Category:               CategoryMaintenance,
+		DefaultIntervalSeconds: 3600,
+		DefaultConfig:          map[string]any{"min_free_pct": float64(10)},
 	},
 }
 
