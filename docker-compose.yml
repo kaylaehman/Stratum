@@ -1,32 +1,33 @@
-# Production-ish Stratum stack. Provide JWT_SECRET and ENCRYPTION_KEY via a .env
-# file (never committed) or the environment. Generate them with:
-#   openssl rand -base64 48   (JWT_SECRET)
-#   openssl rand -hex 32      (ENCRYPTION_KEY)
+# One-command Stratum — pulls the published multi-arch images from GHCR.
+#
+#   cp .env.example .env      # then set JWT_SECRET + ENCRYPTION_KEY
+#   docker compose up -d
+#
+# Pin a release (recommended in production; defaults to :latest):
+#   STRATUM_TAG=v0.1.0 docker compose up -d
+#
+# Build from source instead of pulling images:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 services:
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-      # Default build is the slim image (no Trivy) so redeploys stay fast.
-      # Uncomment to bundle Trivy for zero-config CVE scanning (pulls ~150MB,
-      # slower build). Alternatively set TRIVY_PATH to a host trivy binary.
-      # target: app-trivy
+    image: ghcr.io/kaylaehman/stratum-backend:${STRATUM_TAG:-latest}
     environment:
       PORT: "8080"
       BASE_URL: ${BASE_URL:-http://localhost:8080}
       DATABASE_URL: sqlite:///data/stratum.db
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      # Optional: point at a host trivy binary for CVE scanning (the published
+      # backend image is slim and ships without Trivy).
+      TRIVY_PATH: ${TRIVY_PATH:-}
     volumes:
       - stratum-data:/data
     restart: unless-stopped
 
   frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
+    image: ghcr.io/kaylaehman/stratum-frontend:${STRATUM_TAG:-latest}
     ports:
-      - "8080:80"
+      - "${STRATUM_PORT:-8080}:80"
     depends_on:
       - backend
     restart: unless-stopped

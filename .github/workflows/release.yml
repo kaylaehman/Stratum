@@ -1,0 +1,92 @@
+name: Release
+
+# Cut a release by pushing a semver tag:
+#   git tag v0.1.0 && git push origin v0.1.0
+# This builds multi-arch (amd64 + arm64) images, pushes them to GHCR as
+# ghcr.io/kaylaehman/stratum-{backend,frontend}, and opens a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub Release
+  packages: write # push images to GHCR
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            dockerfile: backend/Dockerfile
+            target: app # slim image (no Trivy); set TRIVY_PATH or use app-trivy for bundled CVE scan
+            image: ghcr.io/kaylaehman/stratum-backend
+          - name: frontend
+            dockerfile: frontend/Dockerfile
+            target: "" # default (final) stage
+            image: ghcr.io/kaylaehman/stratum-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3 # arm64 emulation for cross-build
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so release notes diff against the previous tag
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Stratum ${{ github.ref_name }}
+
+            Self-hosted unified infrastructure management. Pull the published images:
+
+            ```bash
+            curl -O https://raw.githubusercontent.com/kaylaehman/Stratum/${{ github.ref_name }}/docker-compose.yml
+            curl -O https://raw.githubusercontent.com/kaylaehman/Stratum/${{ github.ref_name }}/.env.example
+            cp .env.example .env   # then set JWT_SECRET + ENCRYPTION_KEY
+            STRATUM_TAG=${{ github.ref_name }} docker compose up -d
+            ```
+
+            Images (multi-arch amd64/arm64):
+            - `ghcr.io/kaylaehman/stratum-backend:${{ github.ref_name }}`
+            - `ghcr.io/kaylaehman/stratum-frontend:${{ github.ref_name }}`

@@ -1,0 +1,16 @@
+# Build-from-source override. Use alongside docker-compose.yml when you want to
+# build local images instead of pulling the published GHCR releases:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Contributors and anyone running an unreleased commit want this file.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      # target: app-trivy   # bundle Trivy for zero-config CVE scanning (~150MB pull)
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
