@@ -140,13 +140,3 @@ func rawToDBContainers(cs []docker.ContainerInfo, nodeID string) []db.Container 
 	}
 	return out
 }
-
-// enumDocker enumerates all containers (running and stopped) on a node.
-// Kept for backward compatibility with existing callers (tests that inject a fake).
-func enumDocker(ctx context.Context, cl containerLister, nodeID string) ([]db.Container, error) {
-	cs, err := enumDockerRaw(ctx, cl)
-	if err != nil {
-		return nil, err
-	}
-	return rawToDBContainers(cs, nodeID), nil
-}
