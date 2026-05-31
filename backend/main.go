@@ -40,6 +40,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/proxy"
 	"github.com/kaylaehman/stratum/backend/proxmox"
 	"github.com/kaylaehman/stratum/backend/recreate"
+	"github.com/kaylaehman/stratum/backend/remediation"
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/cve"
@@ -185,6 +186,7 @@ func run(logger *slog.Logger) error {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
 	})
 	ssoSvc := sso.New(store, cipher)
+	remediationSvc := remediation.New(store, filesSvc.Exec)
 
 	// Container-troubleshooting skill library (reference data). Graceful: a
 	// missing/empty SKILLS_DIR yields an empty library, not a startup failure.
@@ -243,6 +245,7 @@ func run(logger *slog.Logger) error {
 		TwoFA:          twoFASvc,
 		Recreate:       recreateSvc,
 		AI:             aiSvc,
+		Remediation:    remediationSvc,
 		Certs:          certSvc,
 		Proxy:          proxySvc,
 		DNS:            dnsSvc,

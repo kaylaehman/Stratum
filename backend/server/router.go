@@ -141,6 +141,10 @@ func NewRouter(d *Deps) http.Handler {
 			// AI runbooks (read; create/update/delete audited below).
 			r.Get("/runbooks", d.Handlers.ListRunbooks)
 
+			// Agentic remediation (read; mutations audited below).
+			r.Get("/remediation", d.Handlers.ListProposals)
+			r.Get("/remediation/{id}", d.Handlers.GetProposal)
+
 			// Reverse proxy detection + rules (admin gate in handler; config audited below).
 			r.Get("/nodes/{id}/proxy", d.Handlers.NodeProxy)
 
@@ -291,6 +295,12 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/runbooks", d.Handlers.CreateRunbook)
 			audited.Put("/runbooks/{id}", d.Handlers.UpdateRunbook)
 			audited.Delete("/runbooks/{id}", d.Handlers.DeleteRunbook)
+
+			// Agentic remediation: generate / approve / reject / execute (all audited).
+			audited.Post("/remediation", d.Handlers.GenerateProposal)
+			audited.Post("/remediation/{id}/approve", d.Handlers.ApproveProposal)
+			audited.Post("/remediation/{id}/reject", d.Handlers.RejectProposal)
+			audited.Post("/remediation/{id}/execute", d.Handlers.ExecuteProposal)
 			audited.Post("/skills", d.Handlers.CreateSkill)
 			audited.Post("/skills/generate", d.Handlers.GenerateSkill)
 			audited.Put("/skills/{id}", d.Handlers.UpdateSkill)
