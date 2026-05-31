@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"time"
 
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/docker"
@@ -19,12 +21,16 @@ type Service struct {
 	store    db.Store
 	provider ClientProvider
 	scanner  *Scanner
+	logger   *slog.Logger
 }
 
 // New builds the service.
 func New(store db.Store, provider ClientProvider, scanner *Scanner) *Service {
-	return &Service{store: store, provider: provider, scanner: scanner}
+	return &Service{store: store, provider: provider, scanner: scanner, logger: slog.Default()}
 }
+
+// SetLogger replaces the logger (e.g., for structured test output).
+func (s *Service) SetLogger(l *slog.Logger) { s.logger = l }
 
 // Available reports whether the underlying scanner is installed.
 func (s *Service) Available() bool { return s.scanner.Available() }
@@ -135,15 +141,28 @@ func (s *Service) scanViaTarball(ctx context.Context, client *docker.Client, c d
 	return s.scanner.ScanTarball(ctx, tarPath)
 }
 
-// resolveDigest returns the image's repo digest, or its local image id when the
-// repo digest is unavailable (e.g. a locally-built image).
+// resolveDigest returns the image's repo digest, or the best available stable
+// key for the image when the repo digest is unavailable.
+//
+// Priority: (1) repo digest from Docker inspect (most stable, content-
+// addressable across hosts), (2) local image ID (content-addressable on this
+// host), (3) image reference/tag as last resort (not content-addressable but
+// better than an empty string).
+//
+// An empty string is never returned — an empty digest causes the frontend to
+// skip the detail query entirely (useCVEDetail guards on `digest.length > 0`),
+// so any container whose image_id column is NULL in the DB would show a
+// non-zero summary count with a permanently empty CVE detail panel.
 func (s *Service) resolveDigest(ctx context.Context, c db.Container) string {
 	if client, err := s.provider(ctx, c.NodeID); err == nil {
 		if d, err := client.LocalRepoDigest(ctx, c.ImageID); err == nil && d != "" {
 			return d
 		}
 	}
-	return c.ImageID
+	if c.ImageID != "" {
+		return c.ImageID
+	}
+	return c.Image
 }
 
 // ListScans returns the cached scan summaries.
@@ -154,4 +173,120 @@ func (s *Service) ListScans(ctx context.Context) ([]db.ImageScanRow, error) {
 // Vulns returns the detailed vulnerabilities for a scanned digest.
 func (s *Service) Vulns(ctx context.Context, imageDigest string) ([]db.CVEResultRow, error) {
 	return s.store.ListCVEResults(ctx, imageDigest)
+}
+
+// BulkScanResult is the per-container outcome of a bulk scan.
+type BulkScanResult struct {
+	ContainerID string `json:"container_id"`
+	Image       string `json:"image"`
+	Error       string `json:"error,omitempty"`
+}
+
+// ScanBulk scans each of the given containers sequentially (reusing the same
+// scan path as ScanContainer). It always returns the full result slice; per-
+// container errors are recorded but do not abort remaining scans.
+func (s *Service) ScanBulk(ctx context.Context, containers []db.Container) []BulkScanResult {
+	results := make([]BulkScanResult, len(containers))
+	for i, c := range containers {
+		r := BulkScanResult{ContainerID: c.ID, Image: c.Image}
+		if err := s.ScanContainer(ctx, c); err != nil {
+			r.Error = err.Error()
+		}
+		results[i] = r
+	}
+	return results
+}
+
+// CreateSchedule persists a new CVE schedule.
+func (s *Service) CreateSchedule(ctx context.Context, sched db.CveSchedule) error {
+	return s.store.CreateCveSchedule(ctx, sched)
+}
+
+// ListSchedules returns all configured CVE schedules.
+func (s *Service) ListSchedules(ctx context.Context) ([]db.CveSchedule, error) {
+	return s.store.ListCveSchedules(ctx)
+}
+
+// UpdateScheduleEnabled toggles a schedule's enabled flag.
+func (s *Service) UpdateScheduleEnabled(ctx context.Context, id string, enabled bool) error {
+	return s.store.UpdateCveScheduleEnabled(ctx, id, enabled)
+}
+
+// DeleteSchedule removes a CVE schedule by id.
+func (s *Service) DeleteSchedule(ctx context.Context, id string) error {
+	return s.store.DeleteCveSchedule(ctx, id)
+}
+
+// RunSchedules is the background loop that fires scheduled CVE scans. It
+// checks every minute whether a schedule is due and, if so, scans the
+// targeted containers. Blocks until ctx is cancelled.
+func (s *Service) RunSchedules(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.tickSchedules(ctx)
+		}
+	}
+}
+
+// tickSchedules is the body of one scheduler tick: loads all enabled
+// schedules, fires any that are due, and records their last-run time.
+func (s *Service) tickSchedules(ctx context.Context) {
+	schedules, err := s.store.ListCveSchedules(ctx)
+	if err != nil {
+		s.logger.Warn("cve: list schedules", "error", err)
+		return
+	}
+	for _, sched := range schedules {
+		if !sched.Enabled {
+			continue
+		}
+		interval := time.Duration(sched.IntervalSeconds) * time.Second
+		if sched.LastRunAt != nil && time.Since(*sched.LastRunAt) < interval {
+			continue
+		}
+		go s.runSchedule(ctx, sched)
+	}
+}
+
+// runSchedule fires one scheduled scan, updating last_run_at regardless of
+// per-container errors (so a persistent failure doesn't create a hot loop).
+func (s *Service) runSchedule(ctx context.Context, sched db.CveSchedule) {
+	now := time.Now()
+	if err := s.store.UpdateCveScheduleLastRun(ctx, sched.ID, now); err != nil {
+		s.logger.Warn("cve: update schedule last_run_at", "id", sched.ID, "error", err)
+	}
+
+	containers, err := s.containersForSchedule(ctx, sched)
+	if err != nil {
+		s.logger.Warn("cve: resolve schedule targets", "id", sched.ID, "error", err)
+		return
+	}
+	for _, c := range containers {
+		if err := s.ScanContainer(ctx, c); err != nil {
+			s.logger.Warn("cve: scheduled scan", "container", c.ID, "image", c.Image, "error", err)
+		}
+	}
+}
+
+// containersForSchedule resolves the containers that a schedule targets. For
+// target_type "node" it returns all containers on the node; for "container" it
+// returns the single container record.
+func (s *Service) containersForSchedule(ctx context.Context, sched db.CveSchedule) ([]db.Container, error) {
+	switch sched.TargetType {
+	case "node":
+		return s.store.ListContainersByNode(ctx, sched.TargetID)
+	case "container":
+		c, err := s.store.GetContainer(ctx, sched.TargetID)
+		if err != nil {
+			return nil, fmt.Errorf("cve: get container %s: %w", sched.TargetID, err)
+		}
+		return []db.Container{c}, nil
+	default:
+		return nil, fmt.Errorf("cve: unknown schedule target_type %q", sched.TargetType)
+	}
 }

@@ -108,7 +108,11 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/secrets/{id}/reveal":             true, // reveal is audited (who revealed what)
 		"POST /api/nodes/{id}/sshkeys/delete":       true,
 		"PUT /api/nodes/{id}/cron":                  true,
-		"POST /api/containers/{id}/cve-scan":        true,
+		"POST /api/containers/{id}/cve-scan":         true,
+		"POST /api/security/cve/bulk-scan":           true,
+		"POST /api/security/cve/schedules":           true,
+		"PUT /api/security/cve/schedules/{id}":       true,
+		"DELETE /api/security/cve/schedules/{id}":    true,
 		"POST /api/containers/{id}/update":          true,
 		"POST /api/containers/{id}/snapshot":        true,
 		"POST /api/containers/{id}/rollback/{snap}": true,

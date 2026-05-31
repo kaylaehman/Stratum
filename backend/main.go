@@ -315,6 +315,8 @@ func run(logger *slog.Logger) error {
 		}()
 	}
 
+	go cveSvc.RunSchedules(ctx) // scheduled CVE scans; stops on shutdown
+
 	return srv.Run(ctx)
 }
 
