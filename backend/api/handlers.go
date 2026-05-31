@@ -29,6 +29,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/proxy"
 	"github.com/kaylaehman/stratum/backend/recreate"
+	"github.com/kaylaehman/stratum/backend/remediation"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
@@ -68,6 +69,7 @@ type Handlers struct {
 	TwoFA          *twofa.Service
 	Recreate       *recreate.Service
 	AI             *ai.Service
+	Remediation    *remediation.Service
 	Certs          *certs.Service
 	Proxy          *proxy.Service
 	DNS            *dnspkg.Service

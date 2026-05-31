@@ -1711,3 +1711,42 @@ export interface SkillGenerateResult {
   provider: string
 }
 
+// Agentic Remediation types
+
+export type RemediationSource = 'diagnostic' | 'runbook' | 'ai'
+export type RemediationRisk = 'low' | 'medium' | 'high' | 'destructive'
+export type RemediationStatus = 'proposed' | 'approved' | 'rejected' | 'executed' | 'failed'
+
+export interface RemediationProposal {
+  id: string
+  source: RemediationSource
+  title: string
+  rationale: string
+  node_id: string
+  container_id?: string
+  commands: string[]
+  risk_level: RemediationRisk
+  status: RemediationStatus
+  created_by: string
+  approved_by?: string
+  stdout?: string
+  stderr?: string
+  exit_code?: number
+  created_at: string
+  approved_at?: string
+  executed_at?: string
+}
+
+export interface ProposalsResponse {
+  proposals: RemediationProposal[]
+}
+
+export interface GenerateProposalRequest {
+  source: RemediationSource
+  title: string
+  rationale?: string
+  node_id: string
+  container_id?: string
+  commands: string[]
+}
+

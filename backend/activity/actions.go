@@ -111,6 +111,13 @@ const (
 	ActionUptimeCreate = "uptime.create"
 	ActionUptimeUpdate = "uptime.update"
 	ActionUptimeDelete = "uptime.delete"
+
+	// Agentic remediation (lifecycle events)
+	ActionRemediationGenerated = "remediation.generated"
+	ActionRemediationApproved  = "remediation.approved"
+	ActionRemediationRejected  = "remediation.rejected"
+	ActionRemediationExecuted  = "remediation.executed"
+	ActionRemediationFailed    = "remediation.failed"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -130,6 +137,7 @@ const (
 	TargetAI              = "ai"
 	TargetSkill           = "skill"
 	TargetUptime          = "uptime_monitor"
+	TargetRemediation     = "remediation"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -243,6 +251,12 @@ var actionCatalog = []ActionInfo{
 	{ActionUptimeCreate, "Uptime monitor created", "uptime", TargetUptime},
 	{ActionUptimeUpdate, "Uptime monitor updated", "uptime", TargetUptime},
 	{ActionUptimeDelete, "Uptime monitor deleted", "uptime", TargetUptime},
+
+	{ActionRemediationGenerated, "Remediation proposal generated", "remediation", TargetRemediation},
+	{ActionRemediationApproved, "Remediation proposal approved", "remediation", TargetRemediation},
+	{ActionRemediationRejected, "Remediation proposal rejected", "remediation", TargetRemediation},
+	{ActionRemediationExecuted, "Remediation executed", "remediation", TargetRemediation},
+	{ActionRemediationFailed, "Remediation execution failed", "remediation", TargetRemediation},
 }
 
 var actionByName = func() map[string]ActionInfo {

@@ -542,6 +542,31 @@ type SecurityAck struct {
 	CreatedAt      time.Time
 }
 
+// RemediationProposal is a single agentic-remediation proposal generated from a
+// diagnostic result, runbook, or AI suggestion. The lifecycle is strictly
+// linear: proposed → approved/rejected → executed/failed. Commands contains
+// the exact shell commands to run on the target node; they are never run
+// without an explicit approval action.
+type RemediationProposal struct {
+	ID          string     `json:"id"`
+	Source      string     `json:"source"`       // diagnostic | runbook | ai
+	Title       string     `json:"title"`
+	Rationale   string     `json:"rationale"`
+	NodeID      string     `json:"node_id"`
+	ContainerID string     `json:"container_id,omitempty"`
+	Commands    []string   `json:"commands"`
+	RiskLevel   string     `json:"risk_level"`   // low | medium | high | destructive
+	Status      string     `json:"status"`        // proposed | approved | rejected | executed | failed
+	CreatedBy   string     `json:"created_by"`
+	ApprovedBy  string     `json:"approved_by,omitempty"`
+	Stdout      string     `json:"stdout,omitempty"`
+	Stderr      string     `json:"stderr,omitempty"`
+	ExitCode    *int       `json:"exit_code,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ApprovedAt  *time.Time `json:"approved_at,omitempty"`
+	ExecutedAt  *time.Time `json:"executed_at,omitempty"`
+}
+
 // Store is the repository seam. Handlers depend on this interface, never on
 // *sql.DB, so a future Postgres implementation is additive. All methods return
 // Go standard types (never driver-specific nullable wrappers).
@@ -759,6 +784,13 @@ type Store interface {
 	ListUptimeResults(ctx context.Context, monitorID string, from, to time.Time) ([]UptimeResult, error)
 	LatestUptimeResult(ctx context.Context, monitorID string) (UptimeResult, error)
 	PruneUptimeResultsBefore(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// Agentic remediation proposals
+	CreateProposal(ctx context.Context, p RemediationProposal) error
+	GetProposal(ctx context.Context, id string) (RemediationProposal, error)
+	ListProposals(ctx context.Context, nodeID string) ([]RemediationProposal, error)
+	UpdateProposalStatus(ctx context.Context, id, status, approvedBy string) error
+	UpdateProposalExecution(ctx context.Context, id, status, stdout, stderr string, exitCode int) error
 
 	Close() error
 }
