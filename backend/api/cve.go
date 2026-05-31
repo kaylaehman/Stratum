@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -69,11 +70,20 @@ func (h *Handlers) CVEStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // CVEDetail returns the vulnerability list for a scanned image digest.
+//
+// chi populates URL params from r.URL.RawPath when the path contains
+// percent-encoded characters (e.g. the frontend sends sha256%3Aabc for
+// sha256:abc via encodeURIComponent). We must URL-decode the param before
+// querying the DB, which stores the plain digest with a literal colon.
 func (h *Handlers) CVEDetail(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
-	digest := chi.URLParam(r, "digest")
+	rawDigest := chi.URLParam(r, "digest")
+	digest, err := url.PathUnescape(rawDigest)
+	if err != nil {
+		digest = rawDigest // malformed encoding — use raw value; query will simply return 0 results
+	}
 	vulns, err := h.CVE.Vulns(r.Context(), digest)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")

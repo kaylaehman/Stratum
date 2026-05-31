@@ -110,3 +110,7 @@ docs/superpowers/specs/
 .swarm/
 .hive-mind/
 ruvector.db
+
+# Playwright e2e artifacts
+frontend/test-results/
+frontend/playwright-report/

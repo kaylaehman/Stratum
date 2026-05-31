@@ -131,15 +131,19 @@ func TestResolveTarget(t *testing.T) {
 	}
 }
 
-// TestResolveTargetNameMatchScopedToNode verifies a service-name match never
-// crosses node boundaries (v1 scopes resolution to the current node).
-func TestResolveTargetNameMatchScopedToNode(t *testing.T) {
+// TestResolveTargetNameCrossNode verifies a service-name match falls through to
+// other nodes when no container with that name exists on the tunnel's node.
+func TestResolveTargetNameCrossNode(t *testing.T) {
 	containers := []db.Container{
 		{ID: "inv-other", NodeID: "node-2", Name: "jellyfin"},
 	}
-	// Resolving on node-1 against a container that only exists on node-2.
-	if got := resolveTarget("http://jellyfin:8096", "node-1", containers, nil); got != nil {
-		t.Errorf("resolveTarget cross-node = %+v, want nil (current-node scope)", got)
+	// Resolving on node-1; the only jellyfin container lives on node-2.
+	got := resolveTarget("http://jellyfin:8096", "node-1", containers, nil)
+	if got == nil {
+		t.Fatal("resolveTarget cross-node name = nil, want node-2 jellyfin match")
+	}
+	if got.NodeID != "node-2" || got.ContainerID != "inv-other" || got.MatchKind != MatchContainerName {
+		t.Errorf("got %+v, want node-2/inv-other/container_name", got)
 	}
 }
 
@@ -152,5 +156,90 @@ func TestResolveTargetNameMatchWithoutPorts(t *testing.T) {
 	got := resolveTarget("http://jellyfin:8096", "node-1", containers, nil)
 	if got == nil || got.ContainerID != "inv-jelly" || got.MatchKind != MatchContainerName {
 		t.Errorf("resolveTarget = %+v, want jellyfin container_name match", got)
+	}
+}
+
+// TestResolveTargetCrossNodeHostIP is the primary regression test for the bug:
+// a cloudflared tunnel on node-A with a rule pointing at http://192.168.20.9:5006
+// should resolve to the container on node-B whose host publishes port 5006 and
+// whose HostIP binding is 192.168.20.9.
+func TestResolveTargetCrossNodeHostIP(t *testing.T) {
+	const tunnelNode = "node-a" // cloudflared runs here
+	const targetNode = "node-b" // actual-budget runs here
+
+	containers := []db.Container{
+		{ID: "inv-tunnel-cf", NodeID: tunnelNode, Name: "cloudflared"},
+		{ID: "inv-budget", NodeID: targetNode, Name: "actual-budget"},
+	}
+	ports := []db.PortExposureRow{
+		// actual-budget on node-b publishes 5006 bound to the node's LAN IP.
+		{NodeID: targetNode, ContainerID: "inv-budget", HostIP: "192.168.20.9", HostPort: 5006, ContainerPort: 5006, Protocol: "tcp"},
+	}
+
+	got := resolveTarget("http://192.168.20.9:5006", tunnelNode, containers, ports)
+	if got == nil {
+		t.Fatal("resolveTarget cross-node host-IP = nil, want actual-budget on node-b")
+	}
+	if got.NodeID != targetNode {
+		t.Errorf("NodeID = %q, want %q", got.NodeID, targetNode)
+	}
+	if got.ContainerID != "inv-budget" {
+		t.Errorf("ContainerID = %q, want inv-budget", got.ContainerID)
+	}
+	if got.MatchKind != MatchHostIPPort {
+		t.Errorf("MatchKind = %q, want %q", got.MatchKind, MatchHostIPPort)
+	}
+}
+
+// TestResolveTargetCrossNodeHostIPViaNodeHost tests the fallback path where
+// the node registered with the IP as its Host field but the port binding uses
+// 0.0.0.0 (not the specific IP). resolveTargetWithNodes must map the IP to the
+// node via Node.Host and then match on host-port alone.
+func TestResolveTargetCrossNodeHostIPViaNodeHost(t *testing.T) {
+	const tunnelNode = "node-a"
+	const targetNode = "node-b"
+
+	containers := []db.Container{
+		{ID: "inv-budget", NodeID: targetNode, Name: "actual-budget"},
+	}
+	// Port binding uses 0.0.0.0, not the specific IP — common on Docker hosts.
+	ports := []db.PortExposureRow{
+		{NodeID: targetNode, ContainerID: "inv-budget", HostIP: "0.0.0.0", HostPort: 5006, ContainerPort: 5006, Protocol: "tcp"},
+	}
+	nodes := []db.Node{
+		{ID: tunnelNode, Host: "192.168.20.5"},
+		{ID: targetNode, Host: "192.168.20.9"}, // node registered with its LAN IP
+	}
+
+	got := resolveTargetWithNodes("http://192.168.20.9:5006", tunnelNode, containers, ports, nodes)
+	if got == nil {
+		t.Fatal("resolveTargetWithNodes node-host fallback = nil, want actual-budget on node-b")
+	}
+	if got.NodeID != targetNode || got.ContainerID != "inv-budget" || got.MatchKind != MatchHostIPPort {
+		t.Errorf("got %+v, want node-b/inv-budget/host_ip_port", got)
+	}
+}
+
+// TestResolveTargetLocalhostStillTunnelNode ensures loopback targets are NOT
+// redirected cross-node — they must still resolve on the tunnel's own node.
+func TestResolveTargetLocalhostStillTunnelNode(t *testing.T) {
+	const tunnelNode = "node-a"
+	const otherNode = "node-b"
+
+	containers := []db.Container{
+		{ID: "inv-a", NodeID: tunnelNode, Name: "svc"},
+		{ID: "inv-b", NodeID: otherNode, Name: "svc"},
+	}
+	ports := []db.PortExposureRow{
+		{NodeID: tunnelNode, ContainerID: "inv-a", HostIP: "0.0.0.0", HostPort: 8080, ContainerPort: 8080, Protocol: "tcp"},
+		{NodeID: otherNode, ContainerID: "inv-b", HostIP: "0.0.0.0", HostPort: 8080, ContainerPort: 8080, Protocol: "tcp"},
+	}
+
+	got := resolveTarget("http://localhost:8080", tunnelNode, containers, ports)
+	if got == nil {
+		t.Fatal("localhost resolve = nil, want inv-a on tunnel node")
+	}
+	if got.NodeID != tunnelNode || got.ContainerID != "inv-a" {
+		t.Errorf("got %+v, want node-a/inv-a (loopback must not cross nodes)", got)
 	}
 }

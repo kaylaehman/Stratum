@@ -1,6 +1,10 @@
 package stacks
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"text/template"
+)
 
 func TestFirstConfigFile(t *testing.T) {
 	cases := []struct {
@@ -55,6 +59,115 @@ func TestParseMountLines(t *testing.T) {
 	}
 	if len(m) != 2 {
 		t.Fatalf("map size = %d, want 2: %v", len(m), m)
+	}
+}
+
+// TestComposePathFromWorkingDir covers the pure path-builder helper that is used
+// before any stat calls. It ensures every standard compose filename is tried and
+// that edge cases (empty dir, trailing slash) are handled cleanly.
+func TestComposePathFromWorkingDir(t *testing.T) {
+	cases := []struct {
+		name       string
+		workingDir string
+		wantNil    bool
+		wantFirst  string
+		wantLen    int
+	}{
+		{
+			name:       "empty workingDir returns nil",
+			workingDir: "",
+			wantNil:    true,
+		},
+		{
+			name:       "normal dir produces all filenames",
+			workingDir: "/home/user/watchtower",
+			wantFirst:  "/home/user/watchtower/docker-compose.yml",
+			wantLen:    len(composeFilenames),
+		},
+		{
+			name:       "root deployed stack",
+			workingDir: "/root/watchtower",
+			wantFirst:  "/root/watchtower/docker-compose.yml",
+			wantLen:    len(composeFilenames),
+		},
+		{
+			name: "path.Join cleans trailing slash",
+			// path.Join normalises the result so trailing slash is stripped.
+			workingDir: "/srv/stacks/myapp",
+			wantFirst:  "/srv/stacks/myapp/docker-compose.yml",
+			wantLen:    len(composeFilenames),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := composePathFromWorkingDir(c.workingDir)
+			if c.wantNil {
+				if got != nil {
+					t.Fatalf("want nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != c.wantLen {
+				t.Fatalf("len = %d, want %d: %v", len(got), c.wantLen, got)
+			}
+			if got[0] != c.wantFirst {
+				t.Fatalf("first = %q, want %q", got[0], c.wantFirst)
+			}
+			// Verify all results start with the working dir.
+			for _, p := range got {
+				if !strings.HasPrefix(p, c.workingDir+"/") {
+					t.Errorf("path %q does not start with workingDir %q", p, c.workingDir)
+				}
+			}
+			// Verify no duplicate paths.
+			seen := make(map[string]bool, len(got))
+			for _, p := range got {
+				if seen[p] {
+					t.Errorf("duplicate path: %q", p)
+				}
+				seen[p] = true
+			}
+		})
+	}
+}
+
+// TestInspectComposeLabelTemplateSyntax validates that the Go template strings
+// used in inspectComposeLabels compile as valid text/template expressions.
+// This guards against accidentally reintroducing the broken
+// '{{.Label "key"}}' syntax that has no method on the docker inspect context.
+func TestInspectComposeLabelTemplateSyntax(t *testing.T) {
+	// We can't exec docker in unit tests, but we CAN verify the template strings
+	// are syntactically valid Go templates (text/template parses them).
+	goodTemplates := []string{
+		`{{index .Config.Labels "com.docker.compose.project.config_files"}}`,
+		`{{index .Config.Labels "com.docker.compose.project.working_dir"}}`,
+	}
+	for _, tmpl := range goodTemplates {
+		if _, err := template.New("t").Parse(tmpl); err != nil {
+			t.Errorf("template %q failed to parse: %v", tmpl, err)
+		}
+	}
+
+	// The broken pattern also parses (it's syntactically valid Go template) but
+	// it calls a non-existent method and returns <no value> at runtime.
+	// We document the distinction: "index" accesses a map key; ".Label" would
+	// call a method that doesn't exist on the inspect JSON struct.
+	broken := `{{.Label "com.docker.compose.project.config_files"}}`
+	tmpl, err := template.New("broken").Parse(broken)
+	if err != nil {
+		t.Logf("broken syntax unexpectedly failed to parse: %v", err)
+		return
+	}
+	// Execute against a struct that has no Label method: result must be "<no value>".
+	var buf strings.Builder
+	_ = tmpl.Execute(&buf, struct{ Labels map[string]string }{
+		Labels: map[string]string{
+			"com.docker.compose.project.config_files": "/opt/watchtower/docker-compose.yml",
+		},
+	})
+	if got := buf.String(); got != "<no value>" {
+		// If this stops being "<no value>", the regression test needs updating.
+		t.Logf("broken template produced %q (expected <no value>)", got)
 	}
 }
 

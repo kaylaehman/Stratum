@@ -146,6 +146,10 @@ func (s *Store) ListPortExposuresByContainer(ctx context.Context, containerID st
 	return s.queryPEs(ctx, `SELECT `+peColumns+` FROM port_exposures WHERE container_id = ?`, containerID)
 }
 
+func (s *Store) ListPortExposuresByNode(ctx context.Context, nodeID string) ([]appdb.PortExposureRow, error) {
+	return s.queryPEs(ctx, `SELECT `+peColumns+` FROM port_exposures WHERE node_id = ?`, nodeID)
+}
+
 func (s *Store) ListAllPortExposures(ctx context.Context) ([]appdb.PortExposureRow, error) {
 	return s.queryPEs(ctx, `SELECT `+peColumns+` FROM port_exposures`)
 }

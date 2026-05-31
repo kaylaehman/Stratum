@@ -90,7 +90,9 @@ func (s *Service) FindCompose(ctx context.Context, nodeID, projectName string) (
 	}
 
 	// 2. Fall back to guessing standard directories.
-	searchRoots := []string{"/opt", "/srv", "/home", "/var/lib", "/mnt"}
+	// /root is included for stacks deployed as root (common on single-user homelabs).
+	// /opt/stratum-stacks is the template-deploy default.
+	searchRoots := []string{"/opt", "/srv", "/home", "/root", "/var/lib", "/mnt", "/opt/stratum-stacks"}
 	for _, root := range searchRoots {
 		dir := path.Join(root, projectName)
 		for _, fname := range composeFilenames {
@@ -100,45 +102,125 @@ func (s *Service) FindCompose(ctx context.Context, nodeID, projectName string) (
 			}
 		}
 	}
-	// Also try /opt/stratum-stacks/<project> (the template deploy default).
-	for _, fname := range composeFilenames {
-		candidate := path.Join("/opt/stratum-stacks", projectName, fname)
-		if _, err := s.files.StatEntry(ctx, nodeID, candidate); err == nil {
-			return candidate, nil
-		}
-	}
 	return "", nil
 }
 
 // findComposeByLabel resolves the compose file from the project's running (or
-// stopped) containers via the `com.docker.compose.project.config_files` label.
-// It returns a host-reachable path or "" if it cannot determine/translate one.
+// stopped) containers via the `com.docker.compose.project.config_files` and
+// `com.docker.compose.project.working_dir` labels.
+//
+// BUG FIXED: the previous implementation used
+//
+//	docker ps --format '{{.Label "com.docker.compose.project.config_files"}}'
+//
+// Docker's ps --format Go-template context does NOT expose a .Label function
+// that accepts a string argument; it only exposes .Labels (a map) for use with
+// the index template function. The old template silently produced "<no value>"
+// for every container, so the entire label-based discovery path was a no-op.
+//
+// The fix uses docker inspect with {{index .Labels "key"}} which is the correct
+// Go-template accessor for a named label value, and it works on both old and new
+// Docker versions.
 func (s *Service) findComposeByLabel(ctx context.Context, nodeID, projectName string) (string, error) {
-	// One line per container carrying the project label: the config_files label
-	// value (comma-separated when compose was invoked with multiple -f files).
-	out, err := s.files.Exec(ctx, nodeID, "docker", "ps", "-a",
-		"--filter", "label=com.docker.compose.project="+projectName,
-		"--format", `{{.Label "com.docker.compose.project.config_files"}}`)
-	if err != nil {
-		return "", err
-	}
-	labelPath := firstConfigFile(out)
-	if labelPath == "" {
+	// Step 1: get the names of containers in this project so we can inspect them.
+	names := s.projectContainerNames(ctx, nodeID, projectName)
+	if len(names) == 0 {
 		return "", nil
 	}
 
-	// The label path is correct as-is when the stack was deployed from the host.
-	if _, err := s.files.StatEntry(ctx, nodeID, labelPath); err == nil {
-		return labelPath, nil
+	// Step 2: inspect the first container for both compose labels.
+	// docker inspect --format '{{index .Labels "key"}}' <name>
+	// Using index .Labels avoids the non-existent .Label function bug.
+	configFiles, workingDir := s.inspectComposeLabels(ctx, nodeID, names[0])
+
+	// Step 3: try config_files label path directly on host.
+	if labelPath := firstConfigFile(configFiles); labelPath != "" {
+		if _, err := s.files.StatEntry(ctx, nodeID, labelPath); err == nil {
+			return labelPath, nil
+		}
+		// Portainer-deployed: config_files path is inside the deployer container —
+		// translate through its mounts back to a host path.
+		if hostPath, ok := s.translateContainerComposePath(ctx, nodeID, projectName, labelPath); ok {
+			return hostPath, nil
+		}
 	}
 
-	// Otherwise the stack was likely deployed from inside a container (Portainer
-	// et al.): translate the in-container path back to a host path through the
-	// deploying container's mounts.
-	if hostPath, ok := s.translateContainerComposePath(ctx, nodeID, projectName, labelPath); ok {
-		return hostPath, nil
+	// Step 4: try working_dir + standard compose filenames.
+	if p := s.findComposeInWorkingDir(ctx, nodeID, workingDir); p != "" {
+		return p, nil
 	}
+
 	return "", nil
+}
+
+// projectContainerNames returns the names of containers belonging to the
+// compose project (running or stopped). It does NOT include Portainer — that
+// is only consulted later if a container-path translation is needed.
+func (s *Service) projectContainerNames(ctx context.Context, nodeID, projectName string) []string {
+	out, err := s.files.Exec(ctx, nodeID, "docker", "ps", "-a",
+		"--filter", "label=com.docker.compose.project="+projectName,
+		"--format", "{{.Names}}")
+	if err != nil {
+		return nil
+	}
+	return nonEmptyLines(out)
+}
+
+// inspectComposeLabels returns the raw string values of
+// com.docker.compose.project.config_files and
+// com.docker.compose.project.working_dir for the named container.
+// It uses "docker inspect --format '{{index .Labels "key"}}'" which is the
+// correct Go template accessor for a map entry — unlike the broken
+// "{{.Label "key"}}" form that does not exist on the ps formatter context.
+func (s *Service) inspectComposeLabels(ctx context.Context, nodeID, containerName string) (configFiles, workingDir string) {
+	// We run two separate inspect calls with simple {{index .Labels "..."}}
+	// templates rather than one complex template so each output is unambiguous.
+	if out, err := s.files.Exec(ctx, nodeID, "docker", "inspect",
+		"--format", `{{index .Config.Labels "com.docker.compose.project.config_files"}}`,
+		"--", containerName); err == nil {
+		configFiles = strings.TrimSpace(out)
+		if configFiles == "<no value>" {
+			configFiles = ""
+		}
+	}
+	if out, err := s.files.Exec(ctx, nodeID, "docker", "inspect",
+		"--format", `{{index .Config.Labels "com.docker.compose.project.working_dir"}}`,
+		"--", containerName); err == nil {
+		workingDir = strings.TrimSpace(out)
+		if workingDir == "<no value>" {
+			workingDir = ""
+		}
+	}
+	return configFiles, workingDir
+}
+
+// findComposeInWorkingDir probes for a compose file under workingDir using the
+// standard filename list. Returns "" if workingDir is empty or nothing exists.
+func (s *Service) findComposeInWorkingDir(ctx context.Context, nodeID, workingDir string) string {
+	if workingDir == "" {
+		return ""
+	}
+	for _, fname := range composeFilenames {
+		candidate := path.Join(workingDir, fname)
+		if _, err := s.files.StatEntry(ctx, nodeID, candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// composePathFromWorkingDir is a pure helper (no I/O) that constructs candidate
+// compose file paths for a given workingDir. Used in tests and as the
+// enumeration step before StatEntry calls.
+func composePathFromWorkingDir(workingDir string) []string {
+	if workingDir == "" {
+		return nil
+	}
+	out := make([]string, len(composeFilenames))
+	for i, fname := range composeFilenames {
+		out[i] = path.Join(workingDir, fname)
+	}
+	return out
 }
 
 // translateContainerComposePath maps an in-container compose path (e.g.
@@ -172,13 +254,10 @@ func (s *Service) translateContainerComposePath(ctx context.Context, nodeID, pro
 // composeRelatedContainerNames returns container names worth inspecting for a
 // mount that exposes the compose file: the project's containers first, then any
 // container that looks like Portainer (which is what deployed it).
+// Used only by translateContainerComposePath.
 func (s *Service) composeRelatedContainerNames(ctx context.Context, nodeID, projectName string) []string {
-	var names []string
-	if out, err := s.files.Exec(ctx, nodeID, "docker", "ps", "-a",
-		"--filter", "label=com.docker.compose.project="+projectName,
-		"--format", "{{.Names}}"); err == nil {
-		names = append(names, nonEmptyLines(out)...)
-	}
+	// Re-use projectContainerNames for the project slice; append Portainer separately.
+	names := s.projectContainerNames(ctx, nodeID, projectName)
 	if out, err := s.files.Exec(ctx, nodeID, "docker", "ps", "-a",
 		"--filter", "name=portainer",
 		"--format", "{{.Names}}"); err == nil {

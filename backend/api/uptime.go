@@ -157,7 +157,7 @@ func (h *Handlers) CreateUptimeMonitor(w http.ResponseWriter, r *http.Request) {
 		body.IntervalSeconds = 60
 	}
 	if body.TimeoutMs == 0 {
-		body.TimeoutMs = 5000
+		body.TimeoutMs = uptime.DefaultTimeoutMs
 	}
 	// Capability gate: node-scoped checks require a registered node.
 	if body.NodeID != nil {

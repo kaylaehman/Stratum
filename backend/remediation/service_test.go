@@ -66,6 +66,9 @@ func (s *stubStore) UpdateProposalExecution(_ context.Context, id, status, stdou
 // Embed a nil pointer to the real store; only the 5 remediation methods are
 // called in these tests so panics on other methods are intentional.
 func (s *stubStore) CreateUser(_ context.Context, _ db.User) error { panic("not used") }
+func (s *stubStore) ListPortExposuresByNode(_ context.Context, _ string) ([]db.PortExposureRow, error) {
+	panic("not used")
+}
 func (s *stubStore) GetUserByID(_ context.Context, _ string) (db.User, error) {
 	panic("not used")
 }

@@ -102,6 +102,66 @@ func TestCVEDetailReturnsVulns(t *testing.T) {
 	}
 }
 
+// TestCVEDetailPercentEncodedDigest is the regression test for the bug where
+// the frontend sends encodeURIComponent(digest) — turning "sha256:abc" into
+// "sha256%3Aabc" in the URL — and the handler was passing the still-encoded
+// string to the DB query, so cve_results rows were never found even though
+// counts > 0 on the image_scan row.
+func TestCVEDetailPercentEncodedDigest(t *testing.T) {
+	srv, token, store := newNodeTestServerWithStore(t)
+	ctx := context.Background()
+
+	// Digest as the scanner stores it — plain colon, no percent-encoding.
+	digest := "sha256:cafecafecafecafecafecafecafecafe"
+
+	if err := store.UpsertImageScan(ctx, appdb.ImageScanRow{
+		ImageDigest: digest,
+		Image:       "n8nio/n8n:latest",
+		ScannedAt:   time.Now(),
+		Critical:    5,
+		High:        5,
+		Medium:      13,
+		Low:         5,
+	}); err != nil {
+		t.Fatalf("seed image scan: %v", err)
+	}
+
+	if err := store.ReplaceCVEResults(ctx, digest, []appdb.CVEResultRow{
+		{ImageDigest: digest, CVEID: "CVE-2024-1111", Severity: "CRITICAL", Package: "libssl", InstalledVersion: "1.1.1", FixedVersion: "1.1.2", Title: "ssl vuln"},
+	}); err != nil {
+		t.Fatalf("seed cve results: %v", err)
+	}
+
+	c := &http.Client{}
+
+	// Simulate the frontend: encodeURIComponent("sha256:cafe...") → "sha256%3Acafe..."
+	encodedDigest := "sha256%3Acafecafecafecafecafecafecafecafe"
+	url := fmt.Sprintf("%s/api/security/cve/%s", srv.URL, encodedDigest)
+	resp, err := c.Do(authReq(t, http.MethodGet, url, token, nil))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CVEDetail (percent-encoded) = %d, want 200", resp.StatusCode)
+	}
+
+	var body struct {
+		Vulns []struct {
+			CVEID string `json:"cve_id"`
+		} `json:"vulns"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Vulns) != 1 {
+		t.Fatalf("got %d vulns, want 1 — percent-encoded digest was not decoded before DB lookup", len(body.Vulns))
+	}
+	if body.Vulns[0].CVEID != "CVE-2024-1111" {
+		t.Fatalf("got cve_id %q, want CVE-2024-1111", body.Vulns[0].CVEID)
+	}
+}
+
 // TestCVEDetailEmptyDigestNotFound verifies that querying an unknown/empty
 // digest returns an empty vulns array (not an error), matching the
 // frontend expectation for clean (no-CVE) images.
