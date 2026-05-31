@@ -19,19 +19,21 @@ type ClientProvider func(ctx context.Context, nodeID string) (*docker.Client, er
 // ContainerNode is one container in the topology, annotated with the networks it
 // belongs to and whether it is isolated or on the host network.
 type ContainerNode struct {
-	DockerID   string   `json:"docker_id"`
-	Name       string   `json:"name"`
-	Status     string   `json:"status"`
-	Networks   []string `json:"networks"`     // network names this container is attached to
-	Isolated   bool     `json:"isolated"`     // attached to no network
-	HostNetwork bool    `json:"host_network"` // attached to the "host" network
+	DockerID    string   `json:"docker_id"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"`
+	Networks    []string `json:"networks"`     // network names this container is attached to
+	Isolated    bool     `json:"isolated"`     // attached to no network
+	HostNetwork bool     `json:"host_network"` // attached to the "host" network
 }
 
 // Topology is one node's network graph data.
 type Topology struct {
-	NodeID     string               `json:"node_id"`
-	Networks   []docker.NetworkInfo `json:"networks"`
-	Containers []ContainerNode      `json:"containers"`
+	NodeID      string               `json:"node_id"`
+	NodeStatus  string               `json:"node_status"`  // poller-authoritative: "ok" | "unreachable" | "error" | "unknown"
+	DockerError string               `json:"docker_error"` // non-empty when the Docker daemon could not be reached
+	Networks    []docker.NetworkInfo `json:"networks"`
+	Containers  []ContainerNode      `json:"containers"`
 }
 
 // Service builds topology for docker nodes.
@@ -47,23 +49,49 @@ func New(store db.Store, provider ClientProvider) *Service {
 
 // ForNode returns the network topology for one node: its networks (with
 // endpoints) and its containers annotated with membership/isolation.
+// The node's authoritative reachability status is always read from the DB
+// (maintained by the poller) — never re-derived from the Docker dial here.
+// When the Docker daemon is unreachable but the node is otherwise reachable
+// (e.g. SSH-only or Docker not yet configured), the response carries an empty
+// topology with a descriptive docker_error instead of propagating an error.
 func (s *Service) ForNode(ctx context.Context, nodeID string) (Topology, error) {
+	node, err := s.store.GetNode(ctx, nodeID)
+	if err != nil {
+		return Topology{}, err
+	}
+	nodeStatus := node.Status
+	if nodeStatus == "" {
+		nodeStatus = "unknown"
+	}
+
+	base := Topology{
+		NodeID:     nodeID,
+		NodeStatus: nodeStatus,
+		Networks:   []docker.NetworkInfo{},
+		Containers: []ContainerNode{},
+	}
+
 	client, err := s.provider(ctx, nodeID)
 	if err != nil {
-		return Topology{}, err
+		base.DockerError = "docker_client_unavailable"
+		return base, nil
 	}
+
 	networks, err := client.ListNetworks(ctx)
 	if err != nil {
-		return Topology{}, err
+		base.DockerError = "docker_list_networks_failed"
+		return base, nil
 	}
+
 	containers, err := s.store.ListContainersByNode(ctx, nodeID)
 	if err != nil {
 		return Topology{}, err
 	}
 
-	cnodes := buildContainerNodes(networks, containers)
+	base.Containers = buildContainerNodes(networks, containers)
 	sort.Slice(networks, func(i, j int) bool { return networks[i].Name < networks[j].Name })
-	return Topology{NodeID: nodeID, Networks: networks, Containers: cnodes}, nil
+	base.Networks = networks
+	return base, nil
 }
 
 // buildContainerNodes annotates each container with the networks it belongs to
