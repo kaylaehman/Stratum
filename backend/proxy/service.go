@@ -194,26 +194,47 @@ func (s *Service) Status(ctx context.Context, nodeID string) (Status, error) {
 }
 
 // resolveRuleTargets fills rule.Resolved for each rule whose TargetURL maps to
-// a known container, using the node's container inventory + published-port
-// index (the same store data the ports audit uses — no live Docker calls).
-// Best-effort: store errors leave all rules unresolved (Resolved nil).
-func (s *Service) resolveRuleTargets(ctx context.Context, nodeID string, rules []Rule) {
+// a known container. It uses the full cross-node container inventory, the
+// cross-node published-port index, and the node list — all already cached in
+// the store — so resolution is store-only (no live Docker calls) and handles
+// tunnel targets that point at containers on different nodes (e.g. a
+// cloudflared rule "http://192.168.20.9:5006" whose container runs on another
+// host). Best-effort: store errors leave all rules unresolved (Resolved nil).
+func (s *Service) resolveRuleTargets(ctx context.Context, tunnelNodeID string, rules []Rule) {
 	if len(rules) == 0 {
 		return
 	}
-	containers, err := s.store.ListContainersByNode(ctx, nodeID)
+	// Fetch all nodes so resolveTargetWithNodes can map a target IP to a node
+	// whose Host field stores that IP (cross-node fallback).
+	nodes, err := s.store.ListNodes(ctx)
 	if err != nil {
-		return
+		nodes = nil // non-fatal; direct HostIP matches still work
 	}
-	// ListAllPortExposures returns every node's ports; resolveTarget filters by
-	// nodeID, so passing the full set is correct (and avoids a per-container
-	// fan-out of ListPortExposuresByContainer).
+
+	// Collect containers from every node. A single ListContainersByNode call per
+	// node is the only cross-node option the store exposes; the fan-out is cheap
+	// (inventory is small) and avoids adding a new Store method.
+	var containers []db.Container
+	for _, n := range nodes {
+		nc, nerr := s.store.ListContainersByNode(ctx, n.ID)
+		if nerr == nil {
+			containers = append(containers, nc...)
+		}
+	}
+	if len(containers) == 0 {
+		// Fallback: at least load the tunnel node's containers so name matches
+		// work even when ListNodes failed.
+		containers, _ = s.store.ListContainersByNode(ctx, tunnelNodeID)
+	}
+
+	// ListAllPortExposures already returns every node's ports.
 	ports, err := s.store.ListAllPortExposures(ctx)
 	if err != nil {
 		ports = nil // name matches still work without port data
 	}
+
 	for i := range rules {
-		rules[i].Resolved = resolveTarget(rules[i].TargetURL, nodeID, containers, ports)
+		rules[i].Resolved = resolveTargetWithNodes(rules[i].TargetURL, tunnelNodeID, containers, ports, nodes)
 	}
 }
 

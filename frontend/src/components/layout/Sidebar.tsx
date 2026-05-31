@@ -112,7 +112,6 @@ const navGroups: NavGroup[] = [
       { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
       { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
       { icon: <SquareTerminal size={14} />, label: 'Terminal', to: '/terminal', adminOnly: true },
-      { icon: <Zap size={14} />, label: 'Automations', to: '/automations', operatorOnly: true },
     ],
   },
   {
@@ -130,6 +129,7 @@ const navGroups: NavGroup[] = [
     label: 'Assist',
     children: [
       { icon: <Bot size={14} />, label: 'Assistant', to: '/chat', operatorOnly: true },
+      { icon: <Zap size={14} />, label: 'Automations', to: '/automations', operatorOnly: true },
       { icon: <Wrench size={14} />, label: 'Skills', to: '/skills' },
     ],
   },

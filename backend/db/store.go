@@ -655,6 +655,7 @@ type Store interface {
 	ListContainerSecurity(ctx context.Context) ([]ContainerSecurityRow, error)
 	SetPortExposures(ctx context.Context, containerID string, rows []PortExposureRow) error
 	ListPortExposuresByContainer(ctx context.Context, containerID string) ([]PortExposureRow, error)
+	ListPortExposuresByNode(ctx context.Context, nodeID string) ([]PortExposureRow, error)
 	ListAllPortExposures(ctx context.Context) ([]PortExposureRow, error)
 	InsertAck(ctx context.Context, a SecurityAck) error
 	DeleteAck(ctx context.Context, id string) error

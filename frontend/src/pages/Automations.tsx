@@ -16,11 +16,35 @@ interface IntervalOption {
 }
 
 const INTERVAL_OPTIONS: IntervalOption[] = [
+  { label: '5 min', seconds: 300 },
+  { label: '10 min', seconds: 600 },
   { label: '15 min', seconds: 900 },
+  { label: '30 min', seconds: 1800 },
   { label: '1 hour', seconds: 3600 },
   { label: '6 hours', seconds: 21600 },
   { label: '24 hours', seconds: 86400 },
+  { label: '7 days', seconds: 604800 },
 ]
+
+// humanizeInterval renders a raw second count as a readable duration
+// (e.g. 300 -> "5 min", 3600 -> "1 hour", 604800 -> "7 days") so the interval
+// selector never shows bare seconds.
+function humanizeInterval(seconds: number): string {
+  const named = INTERVAL_OPTIONS.find((o) => o.seconds === seconds)
+  if (named) return named.label
+  const units: [number, string][] = [
+    [86400, 'day'],
+    [3600, 'hour'],
+    [60, 'min'],
+  ]
+  for (const [size, unit] of units) {
+    if (seconds >= size && seconds % size === 0) {
+      const n = seconds / size
+      return `${n} ${unit}${unit !== 'min' && n !== 1 ? 's' : ''}`
+    }
+  }
+  return `${seconds}s`
+}
 
 // ---- Destructive automation keys ----
 
@@ -296,7 +320,7 @@ function AutomationCard({ automation, isAdmin, isOperator }: AutomationCardProps
                 {/* Keep any custom value that doesn't match options */}
                 {!INTERVAL_OPTIONS.some((o) => o.seconds === automation.interval_seconds) && (
                   <option value={automation.interval_seconds}>
-                    {automation.interval_seconds}s
+                    {humanizeInterval(automation.interval_seconds)}
                   </option>
                 )}
               </select>
@@ -400,7 +424,7 @@ export default function Automations() {
   return (
     <AppShell>
       <div
-        className="flex flex-col flex-1 min-h-0 h-full w-full max-w-full p-6"
+        className="flex flex-col flex-1 min-h-0 h-full w-full max-w-full p-6 pb-20"
         style={{ maxWidth: '900px', margin: '0 auto' }}
       >
         {/* Page header */}

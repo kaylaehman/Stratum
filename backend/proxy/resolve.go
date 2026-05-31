@@ -106,22 +106,30 @@ var loopbackHosts = map[string]bool{
 	"::":        true,
 }
 
-// resolveTarget matches a single rule's TargetURL against this node's container
+// resolveTarget matches a single rule's TargetURL against the container
 // inventory + published-port index. Returns nil when no confident match exists.
 //
 // Match precedence (first match wins):
-//   - localhost/loopback host + port → container on this node publishing that
-//     HostPort                                            → MatchLocalhostPort
-//   - non-IP hostname → container on this node named exactly host
-//     (Docker service/container name)                     → MatchContainerName
-//   - IP literal (non-loopback) + port → container on this node whose published
-//     binding HostIP == that IP and HostPort == port      → MatchHostIPPort
+//   - localhost/loopback host + port → container on the tunnel's own node
+//     publishing that HostPort                            → MatchLocalhostPort
+//   - non-IP hostname → container named exactly host, preferring the tunnel's
+//     node then any other node (Docker service/container name) → MatchContainerName
+//   - IP literal (non-loopback) + port → container on ANY node whose published
+//     binding HostIP == that IP and HostPort == port; when no exact HostIP
+//     match exists, falls back to a node whose Node.Host equals the IP
+//                                                        → MatchHostIPPort
 //
-// v1 limitation: matching is scoped to the CURRENT node only. The Cloudflared
-// "http://service:port" form virtually always refers to a container on the same
-// Docker host as the tunnel, and localhost/IP forms are host-local by
-// definition, so current-node scope resolves the realistic cases.
-func resolveTarget(targetURL, nodeID string, containers []db.Container, ports []db.PortExposureRow) *ResolvedTarget {
+// tunnelNodeID scopes loopback and name-match tie-breaking. allNodes is used
+// to resolve a non-loopback IP to its owning node when no HostIP binding
+// exactly matches (the node registered with a hostname, not an IP). Passing
+// allNodes as nil disables that fallback (tests that don't need it can omit).
+func resolveTarget(targetURL, tunnelNodeID string, containers []db.Container, ports []db.PortExposureRow) *ResolvedTarget {
+	return resolveTargetWithNodes(targetURL, tunnelNodeID, containers, ports, nil)
+}
+
+// resolveTargetWithNodes is the full implementation used by the service, which
+// supplies the node list for cross-node host-IP matching.
+func resolveTargetWithNodes(targetURL, tunnelNodeID string, containers []db.Container, ports []db.PortExposureRow, nodes []db.Node) *ResolvedTarget {
 	ep := parseTargetURL(targetURL)
 	if ep.host == "" {
 		return nil
@@ -132,18 +140,36 @@ func resolveTarget(targetURL, nodeID string, containers []db.Container, ports []
 
 	switch {
 	case loopbackHosts[host] && ep.port > 0:
-		if c := containerByPublishedPort(nodeID, ep.port, "", containers, ports); c != nil {
-			return &ResolvedTarget{NodeID: nodeID, ContainerID: c.ID, Name: c.Name, MatchKind: MatchLocalhostPort}
+		// Loopback always resolves on the tunnel's own node.
+		if c := containerByPublishedPort(tunnelNodeID, ep.port, "", containers, ports); c != nil {
+			return &ResolvedTarget{NodeID: tunnelNodeID, ContainerID: c.ID, Name: c.Name, MatchKind: MatchLocalhostPort}
 		}
 
 	case ip == nil: // a name, not an IP literal
-		if c := containerByName(nodeID, ep.host, containers); c != nil {
-			return &ResolvedTarget{NodeID: nodeID, ContainerID: c.ID, Name: c.Name, MatchKind: MatchContainerName}
+		// Prefer the tunnel's node; fall through to other nodes on no match.
+		if c := containerByName(tunnelNodeID, ep.host, containers); c != nil {
+			return &ResolvedTarget{NodeID: tunnelNodeID, ContainerID: c.ID, Name: c.Name, MatchKind: MatchContainerName}
+		}
+		// Cross-node name match: any other node.
+		for i := range containers {
+			if containers[i].NodeID != tunnelNodeID && strings.EqualFold(containers[i].Name, ep.host) {
+				return &ResolvedTarget{NodeID: containers[i].NodeID, ContainerID: containers[i].ID, Name: containers[i].Name, MatchKind: MatchContainerName}
+			}
 		}
 
 	case ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() && ep.port > 0:
-		if c := containerByPublishedPort(nodeID, ep.port, ep.host, containers, ports); c != nil {
-			return &ResolvedTarget{NodeID: nodeID, ContainerID: c.ID, Name: c.Name, MatchKind: MatchHostIPPort}
+		// Primary: find a port exposure row whose HostIP matches the literal IP.
+		// This works on any node; no tunnelNodeID restriction.
+		if c := containerByPublishedPortAnyNode(ep.port, ep.host, containers, ports); c != nil {
+			return &ResolvedTarget{NodeID: c.NodeID, ContainerID: c.ID, Name: c.Name, MatchKind: MatchHostIPPort}
+		}
+		// Fallback: the node registered with a hostname (not an IP), so HostIP
+		// may be 0.0.0.0. Find a node whose Host field equals the IP and match
+		// on host port only (any binding on that port on that node).
+		if nodeID := nodeIDByHost(ep.host, nodes); nodeID != "" {
+			if c := containerByPublishedPort(nodeID, ep.port, "", containers, ports); c != nil {
+				return &ResolvedTarget{NodeID: nodeID, ContainerID: c.ID, Name: c.Name, MatchKind: MatchHostIPPort}
+			}
 		}
 	}
 	return nil
@@ -189,4 +215,33 @@ func containerByID(nodeID, id string, containers []db.Container) *db.Container {
 		}
 	}
 	return nil
+}
+
+// containerByPublishedPortAnyNode is the cross-node variant of
+// containerByPublishedPort: it searches ALL nodes' port exposures for a
+// binding where HostPort == hostPort and HostIP == wantIP (exact IP match).
+// Returns the matching container, or nil.
+func containerByPublishedPortAnyNode(hostPort int, wantIP string, containers []db.Container, ports []db.PortExposureRow) *db.Container {
+	for _, p := range ports {
+		if p.HostPort != hostPort || p.HostIP != wantIP {
+			continue
+		}
+		if c := containerByID(p.NodeID, p.ContainerID, containers); c != nil {
+			return c
+		}
+	}
+	return nil
+}
+
+// nodeIDByHost returns the ID of the node whose Host field equals addr
+// (case-insensitive), or "" when no match exists. Used as a fallback when a
+// node registered with a hostname that later resolves to the target IP, or
+// simply registered with the IP directly. nodes may be nil (returns "").
+func nodeIDByHost(addr string, nodes []db.Node) string {
+	for _, n := range nodes {
+		if strings.EqualFold(n.Host, addr) {
+			return n.ID
+		}
+	}
+	return ""
 }

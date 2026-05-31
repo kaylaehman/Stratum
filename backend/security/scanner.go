@@ -109,7 +109,13 @@ func (sc *Scanner) EnsureFresh(ctx context.Context, nodeID string) error {
 // persistPorts merges scanned exposures with stored rows: existing rows keep
 // their id/first_seen/is_new (is_new is durable until acknowledged); new
 // exposures get is_new=1; gone exposures are dropped.
+//
+// Dedup strategy: a port is "already seen" if ANY row for the same node already
+// carries notified_at != nil for the same (host_ip, host_port, protocol) tuple.
+// This prevents re-alerting when a container is recreated (new container ID),
+// which would otherwise orphan the old rows and make the port appear brand-new.
 func (sc *Scanner) persistPorts(ctx context.Context, c db.Container, ports []PortExposure) error {
+	// Container-scoped lookup: preserves identity (ID, FirstSeen) across scans.
 	existing, err := sc.store.ListPortExposuresByContainer(ctx, c.ID)
 	if err != nil {
 		return err
@@ -118,6 +124,20 @@ func (sc *Scanner) persistPorts(ctx context.Context, c db.Container, ports []Por
 	for _, e := range existing {
 		byKey[portKey(e.HostIP, e.HostPort, e.Protocol)] = e
 	}
+
+	// Node-scoped lookup: detects ports already notified under a previous
+	// container ID (e.g. after a container recreate).
+	nodeRows, err := sc.store.ListPortExposuresByNode(ctx, c.NodeID)
+	if err != nil {
+		return err
+	}
+	notifiedOnNode := map[string]bool{}
+	for _, nr := range nodeRows {
+		if nr.NotifiedAt != nil {
+			notifiedOnNode[portKey(nr.HostIP, nr.HostPort, nr.Protocol)] = true
+		}
+	}
+
 	now := time.Now()
 	rows := make([]db.PortExposureRow, 0, len(ports))
 	for _, p := range ports {
@@ -128,12 +148,19 @@ func (sc *Scanner) persistPorts(ctx context.Context, c db.Container, ports []Por
 			LastSeen: now,
 		}
 		if prev, ok := byKey[k]; ok {
+			// Port row already exists under this container: preserve identity.
 			row.ID, row.FirstSeen, row.IsNew, row.NotifiedAt = prev.ID, prev.FirstSeen, prev.IsNew, prev.NotifiedAt
 		} else {
 			row.ID, row.FirstSeen, row.IsNew = uuid.NewString(), now, true
+			// If this (host_ip, host_port, protocol) was already notified on this
+			// node (under a different container ID), carry the sentinel forward so
+			// the notify guard below doesn't re-fire.
+			if notifiedOnNode[k] {
+				row.NotifiedAt = &now
+			}
 		}
-		// Fire a one-time notification for a newly-detected exposure (durably
-		// marked via notified_at so it never re-fires for the same port).
+		// Fire a one-time notification for a genuinely new exposure. The
+		// notified_at column persists the sentinel across restarts.
 		if row.IsNew && row.NotifiedAt == nil && sc.notify != nil {
 			sc.notify(ctx, "port.new", "New exposed port",
 				c.Name+" exposed "+p.HostIP+":"+itoaPort(p.HostPort)+"/"+p.Protocol+" ("+p.InterfaceClass+")")

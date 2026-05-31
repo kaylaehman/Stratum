@@ -1,9 +1,257 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useRef, useCallback } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { IncidentEntry, IncidentSeverity, IncidentSource } from '../../lib/api/incidents'
 import type { MetricsRange } from '../../lib/api/metrics'
 import { LineChart } from '../metrics/LineChart'
 import type { Series, SeriesPoint } from '../metrics/LineChart'
 import { RangeSelector } from '../metrics/RangeSelector'
+
+// Mirror the geometry constants from LineChart.tsx so the crosshair aligns.
+const CHART_PAD = { top: 8, right: 12, bottom: 24, left: 52 }
+const CHART_TOTAL_WIDTH = 520
+
+const BUCKET_MS = 60_000
+
+function fmtBucketTime(ms: number): string {
+  const d = new Date(ms)
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return `${date} ${time}`
+}
+
+const SEV_LABEL_COLOR: Record<string, string> = {
+  critical: 'var(--status-error)',
+  warning: 'var(--status-warn)',
+  info: 'var(--text-muted)',
+}
+
+interface BucketHover {
+  /** CSS px x-position within the wrapper div, used for crosshair + tooltip placement. */
+  px: number
+  /** Bucket start timestamp (ms). */
+  bucketT: number
+  /** Counts per source at this bucket. */
+  rows: { label: string; color: string; count: number }[]
+  /** Up to 5 raw incident entries that fall in this bucket. */
+  events: IncidentEntry[]
+}
+
+interface TimelineChartWithTooltipProps {
+  series: Series[]
+  entries: IncidentEntry[]
+  height: number
+  xDomainMs: [number, number]
+}
+
+function TimelineChartWithTooltip({
+  series,
+  entries,
+  height,
+  xDomainMs,
+}: TimelineChartWithTooltipProps) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [hover, setHover] = useState<BucketHover | null>(null)
+
+  const allTs = series.flatMap((s) => s.points.map((p) => p.t))
+  const hasData = allTs.length > 0
+
+  const [xMin, xMax] = xDomainMs
+  const xRange = Math.max(xMax - xMin, 1)
+  const plotW = CHART_TOTAL_WIDTH - CHART_PAD.left - CHART_PAD.right
+
+  const handleMove = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      const el = wrapRef.current
+      if (!el || !hasData) return
+      const rect = el.getBoundingClientRect()
+      if (rect.width === 0) return
+      const cssX = e.clientX - rect.left
+      const vbX = (cssX / rect.width) * CHART_TOTAL_WIDTH
+      const frac = (vbX - CHART_PAD.left) / plotW
+      const tHover = xMin + frac * xRange
+      const bucketT = Math.floor(tHover / BUCKET_MS) * BUCKET_MS
+
+      // Snap to the nearest bucket that actually has data.
+      let bestT = allTs[0]
+      let bestDist = Infinity
+      for (const t of allTs) {
+        const d = Math.abs(t - bucketT)
+        if (d < bestDist) { bestDist = d; bestT = t }
+      }
+      const snappedBucket = Math.floor(bestT / BUCKET_MS) * BUCKET_MS
+
+      const rows = series
+        .map((s) => {
+          const pt = s.points.find((p) => p.t === snappedBucket)
+          if (!pt) return null
+          return { label: s.label, color: s.color, count: Math.round(pt.v) }
+        })
+        .filter((r): r is { label: string; color: string; count: number } => r !== null)
+
+      const events = entries
+        .filter((ev) => {
+          const t = new Date(ev.timestamp).getTime()
+          return t >= snappedBucket && t < snappedBucket + BUCKET_MS
+        })
+        .slice(0, 5)
+
+      const snappedVbX = CHART_PAD.left + ((snappedBucket - xMin) / xRange) * plotW
+      const snappedCssX = (snappedVbX / CHART_TOTAL_WIDTH) * rect.width
+
+      setHover({ px: snappedCssX, bucketT: snappedBucket, rows, events })
+    },
+    [series, entries, allTs, hasData, plotW, xMin, xRange],
+  )
+
+  const handleLeave = useCallback(() => setHover(null), [])
+
+  const TIP_W = 220
+  let tipLeft = hover ? hover.px + 12 : 0
+  const wrapW = wrapRef.current?.getBoundingClientRect().width ?? 0
+  if (hover && wrapW > 0 && tipLeft + TIP_W > wrapW) {
+    tipLeft = Math.max(0, hover.px - TIP_W - 12)
+  }
+
+  return (
+    <div
+      ref={wrapRef}
+      className="w-full overflow-hidden"
+      style={{ position: 'relative' }}
+      onMouseMove={handleMove}
+      onMouseLeave={handleLeave}
+    >
+      <LineChart
+        series={series}
+        height={height}
+        yFormatter={(v) => String(Math.round(v))}
+        xDomainMs={xDomainMs}
+      />
+
+      {hover && (hover.rows.length > 0 || hover.events.length > 0) && (
+        <>
+          {/* Vertical crosshair */}
+          <div
+            style={{
+              position: 'absolute',
+              top: CHART_PAD.top,
+              left: `${hover.px}px`,
+              width: '1px',
+              height: `${height - CHART_PAD.top - CHART_PAD.bottom}px`,
+              backgroundColor: 'var(--accent)',
+              opacity: 0.5,
+              pointerEvents: 'none',
+            }}
+          />
+          {/* Tooltip */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '4px',
+              left: `${tipLeft}px`,
+              width: `${TIP_W}px`,
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '3px',
+              padding: '6px 8px',
+              pointerEvents: 'none',
+              zIndex: 5,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            }}
+          >
+            {/* Timestamp header */}
+            <div
+              className="font-mono"
+              style={{ color: 'var(--text-secondary)', fontSize: '11px', marginBottom: '4px' }}
+            >
+              {fmtBucketTime(hover.bucketT)}
+            </div>
+
+            {/* Per-source counts */}
+            {hover.rows.length > 0 && (
+              <div style={{ marginBottom: hover.events.length > 0 ? '6px' : 0 }}>
+                {hover.rows.map((r) => (
+                  <div
+                    key={r.label}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}
+                  >
+                    <span
+                      style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '1px',
+                        backgroundColor: r.color,
+                        display: 'inline-block',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      className="font-mono"
+                      style={{
+                        color: 'var(--text-secondary)',
+                        fontSize: '11px',
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {r.label}
+                    </span>
+                    <span className="font-mono" style={{ color: 'var(--text-primary)', fontSize: '11px' }}>
+                      {r.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Individual events in this bucket (up to 5) */}
+            {hover.events.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '5px' }}>
+                {hover.events.map((ev, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '5px',
+                      marginTop: i > 0 ? '3px' : 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        backgroundColor: SEV_LABEL_COLOR[ev.severity] ?? 'var(--text-muted)',
+                        flexShrink: 0,
+                        marginTop: '2px',
+                      }}
+                    />
+                    <span
+                      className="font-mono"
+                      style={{
+                        color: 'var(--text-secondary)',
+                        fontSize: '10px',
+                        lineHeight: '1.4',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}
+                    >
+                      {ev.summary}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 // Each source maps to a colour for the overlay chart.
 const SOURCE_SERIES_COLOR: Record<IncidentSource, string> = {
@@ -29,9 +277,6 @@ interface IncidentTimelineProps {
 export function IncidentTimeline({ entries, range, onRangeChange, from, to }: IncidentTimelineProps) {
   const fromMs = useMemo(() => (from ? new Date(from).getTime() : Date.now() - 86_400_000), [from])
   const toMs = useMemo(() => (to ? new Date(to).getTime() : Date.now()), [to])
-
-  // Bucket size: 1 minute.
-  const BUCKET_MS = 60_000
 
   const series = useMemo<Series[]>(() => {
     const buckets = new Map<IncidentSource, Map<number, number>>()
@@ -92,10 +337,10 @@ export function IncidentTimeline({ entries, range, onRangeChange, from, to }: In
         </div>
       </div>
 
-      <LineChart
+      <TimelineChartWithTooltip
         series={series}
+        entries={entries}
         height={140}
-        yFormatter={(v) => String(Math.round(v))}
         xDomainMs={[fromMs, toMs]}
       />
     </div>
