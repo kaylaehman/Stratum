@@ -1438,6 +1438,16 @@ export default function Templates() {
           )}
         </div>
 
+        {/* Page subtitle — explains what the template library is for. */}
+        {view.kind === 'list' && (
+          <p className="text-xs mb-6" style={{ color: 'var(--text-secondary)', maxWidth: '640px', lineHeight: 1.6 }}>
+            Templates are reusable, pre-built Docker Compose service definitions you can deploy to any
+            connected node. Define variable substitution tokens (e.g.{' '}
+            <code className="font-mono" style={{ color: 'var(--text-primary)' }}>{'{{DOMAIN}}'}</code>) to
+            fill in per-deployment, then deploy the stack without hand-writing YAML each time.
+          </p>
+        )}
+
         {/* Loading */}
         {isLoading && view.kind === 'list' && (
           <div className="flex items-center gap-2 py-8">

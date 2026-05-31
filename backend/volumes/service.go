@@ -186,6 +186,83 @@ func (s *Service) Remove(ctx context.Context, nodeID, name string) error {
 	return nil
 }
 
+// PruneResult is the outcome of attempting to remove one unused volume.
+type PruneResult struct {
+	NodeID string `json:"node_id"`
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+}
+
+// PruneUnused removes every volume the service classifies as "unused" on the
+// given node (or, when nodeID=="", on every docker-capable node). The candidate
+// set is recomputed server-side from a fresh listing — a client-supplied name
+// list is never trusted. Each removal is attempted independently: a volume that
+// flips to in-use between the listing and the delete yields OK:false with the
+// error, and the batch always continues. Non-force removals only (the daemon is
+// the final arbiter).
+func (s *Service) PruneUnused(ctx context.Context, nodeID string) ([]PruneResult, error) {
+	if nodeID != "" {
+		return s.pruneNode(ctx, nodeID), nil
+	}
+	nodes, err := s.store.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var results []PruneResult
+	for _, n := range nodes {
+		caps, _ := capabilities.Parse([]byte(n.CapabilitiesJSON))
+		if !caps.Docker {
+			continue
+		}
+		results = append(results, s.pruneNode(ctx, n.ID)...)
+	}
+	return results, nil
+}
+
+// pruneNode lists volumes on one node, filters to the unused set, and removes
+// each. A list error for the node surfaces as a single failed PruneResult so the
+// caller still sees what went wrong without aborting a multi-node prune.
+func (s *Service) pruneNode(ctx context.Context, nodeID string) []PruneResult {
+	vols, err := s.ListForNode(ctx, nodeID)
+	if err != nil {
+		return []PruneResult{{NodeID: nodeID, OK: false, Error: err.Error()}}
+	}
+	client, err := s.provider(ctx, nodeID)
+	if err != nil {
+		return []PruneResult{{NodeID: nodeID, OK: false, Error: err.Error()}}
+	}
+	remove := func(name string) error { return client.RemoveVolume(ctx, name, false) }
+	results := pruneVolumes(nodeID, vols, remove)
+	if len(results) > 0 {
+		s.mounts.Invalidate(nodeID)
+	}
+	return results
+}
+
+// pruneVolumes filters vols to the unused set and attempts a (non-force) removal
+// of each via remove. It is the pure core of pruneNode, separated so the
+// filter+collect+continue-on-error logic is unit-testable without a docker
+// client. A remove error is recorded as OK:false and never aborts the batch — a
+// volume that flips to in-use between the listing and the delete is handled here.
+func pruneVolumes(nodeID string, vols []VolumeView, remove func(name string) error) []PruneResult {
+	results := make([]PruneResult, 0)
+	for _, v := range vols {
+		if v.Status != StatusUnused {
+			continue
+		}
+		res := PruneResult{NodeID: nodeID, Name: v.Name}
+		if err := remove(v.Name); err != nil {
+			res.OK = false
+			res.Error = err.Error()
+		} else {
+			res.OK = true
+		}
+		results = append(results, res)
+	}
+	return results
+}
+
 // Sample records one size/refcount reading per volume on a node (called by the
 // daily sampler). Fires a volume.threshold notification for any volume that has
 // crossed the configured threshold.

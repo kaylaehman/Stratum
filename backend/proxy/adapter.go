@@ -29,7 +29,29 @@ type Rule struct {
 	SSLEnabled  bool   `json:"ssl_enabled"`
 	CertID      string `json:"cert_id,omitempty"`
 	AuthEnabled bool   `json:"auth_enabled"`
+	// Resolved is the container/resource this rule's TargetURL points at, when
+	// Stratum can match it against known container inventory + published ports.
+	// Nil when the target could not be resolved (external host, unknown port,
+	// or no matching container). Enables a UI deep-link to the target.
+	Resolved *ResolvedTarget `json:"resolved,omitempty"`
 }
+
+// ResolvedTarget identifies the container a proxy rule's TargetURL points at.
+// ContainerID is the inventory Container.ID used by the frontend deep-link
+// (/resources?node=<NodeID>&container=<ContainerID>).
+type ResolvedTarget struct {
+	NodeID      string `json:"node_id"`
+	ContainerID string `json:"container_id"` // inventory Container.ID (frontend deep-link id)
+	Name        string `json:"name"`
+	MatchKind   string `json:"match_kind"` // "container_name" | "localhost_port" | "host_ip_port"
+}
+
+// Match-kind values for ResolvedTarget.MatchKind.
+const (
+	MatchContainerName = "container_name"
+	MatchLocalhostPort = "localhost_port"
+	MatchHostIPPort    = "host_ip_port"
+)
 
 // CertInfo is a certificate surfaced by a proxy adapter (feeds Feature F4).
 type CertInfo struct {

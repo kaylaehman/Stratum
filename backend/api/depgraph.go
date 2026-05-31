@@ -10,6 +10,7 @@ import (
 
 	"github.com/kaylaehman/stratum/backend/capabilities"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 )
 
@@ -45,6 +46,14 @@ func (h *Handlers) NodeDependencyGraph(w http.ResponseWriter, r *http.Request) {
 		if _, rerr := h.Conn.Rebuild(ctx, nodeID); rerr == nil {
 			g, err = h.DepGraph.ForNode(ctx, nodeID)
 		}
+	}
+	if errors.Is(err, depgraph.ErrNoDockerClient) {
+		// Capability is present but there's no usable Docker transport (e.g.
+		// Docker inferred over SSH with no endpoint configured). The node is not
+		// unreachable — report the accurate reason instead of a 502.
+		h.Logger.Info("depgraph: no docker client for node", "node", nodeID, "error", err)
+		writeError(w, http.StatusConflict, "docker_not_available")
+		return
 	}
 	if err != nil {
 		h.Logger.Warn("depgraph: docker call failed", "node", nodeID, "error", err)

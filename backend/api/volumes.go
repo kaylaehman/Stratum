@@ -83,3 +83,69 @@ func (h *Handlers) RemoveVolume(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// pruneVolumeResult is the per-volume outcome in the prune response.
+type pruneVolumeResult struct {
+	NodeID string `json:"node_id"`
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+}
+
+// PruneUnusedVolumes removes every volume the service classifies as "unused" on
+// the target node (or all docker-capable nodes when node_id is omitted). The
+// candidate set is recomputed server-side — the client never supplies a name
+// list. Admin-gated + step-up + audited.
+func (h *Handlers) PruneUnusedVolumes(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
+
+	var body struct {
+		NodeID string `json:"node_id"`
+	}
+	// Tolerate an empty body (=> prune all docker-capable nodes). Only a
+	// malformed (non-empty, non-JSON) body is rejected.
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_body")
+			return
+		}
+	}
+
+	results, err := h.Volumes.PruneUnused(r.Context(), body.NodeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "prune_failed")
+		return
+	}
+
+	out := make([]pruneVolumeResult, 0, len(results))
+	removed, failed := 0, 0
+	for _, res := range results {
+		if res.OK {
+			removed++
+		} else {
+			failed++
+		}
+		out = append(out, pruneVolumeResult{NodeID: res.NodeID, Name: res.Name, OK: res.OK, Error: res.Error})
+	}
+
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = activity.ActionVolumePruneUnused
+		e.TargetType = ptr(activity.TargetVolume)
+		e.Detail = map[string]any{
+			"node_id":       body.NodeID,
+			"removed_count": removed,
+			"failed_count":  failed,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"results":       out,
+		"removed_count": removed,
+		"failed_count":  failed,
+	})
+}

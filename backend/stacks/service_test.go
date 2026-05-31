@@ -152,6 +152,26 @@ func TestSecretRefResolves(t *testing.T) {
 	}
 }
 
+// TestLifecycleRejectsInvalidAction locks the validation invariant: any action
+// outside {stop,start,restart} is rejected with ErrInvalidAction *before* the
+// service touches the filesystem or runs a command. Because validation is the
+// first thing Lifecycle does, a nil files dependency is safe for these cases —
+// reaching Exec/FindCompose on a rejected action would nil-panic and fail loudly.
+func TestLifecycleRejectsInvalidAction(t *testing.T) {
+	// Validation runs before any dependency is touched, so nil deps are safe here.
+	svc := stacks.New(nil, nil, nil)
+	bad := []string{"", "up", "down", "destroy", "STOP", "kill", "Restart"}
+	for _, action := range bad {
+		out, err := svc.Lifecycle(context.Background(), "n1", "proj", action)
+		if !errors.Is(err, stacks.ErrInvalidAction) {
+			t.Errorf("Lifecycle(action=%q) err = %v, want ErrInvalidAction", action, err)
+		}
+		if out != "" {
+			t.Errorf("Lifecycle(action=%q) output = %q, want empty", action, out)
+		}
+	}
+}
+
 func TestUpsertOverwrites(t *testing.T) {
 	fs := newFakeStore()
 	_ = fs.UpsertStackEnvVar(context.Background(), appdb.StackEnvRow{

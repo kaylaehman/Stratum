@@ -7,16 +7,43 @@ package depgraph
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/docker"
 	"github.com/kaylaehman/stratum/backend/mountindex"
+	"github.com/kaylaehman/stratum/backend/nodeconn"
 )
 
 // ClientProvider yields a docker client for a node.
 type ClientProvider func(ctx context.Context, nodeID string) (*docker.Client, error)
+
+// ErrNoDockerClient signals that no Docker client could be built for the node —
+// the node has the Docker capability but no usable transport (e.g. Docker
+// inferred over SSH with no TCP/TLS endpoint). It is NOT a reachability failure;
+// the API layer maps it to "docker_not_available" rather than "node_unreachable".
+var ErrNoDockerClient = errors.New("depgraph: no docker client for node")
+
+// errNoClient wraps the underlying provider error while marking it as
+// ErrNoDockerClient (so callers can errors.Is it) and preserving the cause for
+// logs.
+func errNoClient(cause error) error {
+	if cause == nil {
+		return ErrNoDockerClient
+	}
+	return fmt.Errorf("%w: %v", ErrNoDockerClient, cause)
+}
+
+// networkLister is the slice of the Docker client the depgraph service depends
+// on. *docker.Client satisfies it, so production wiring is unchanged; tests
+// inject a fake to assemble graphs (and to distinguish a genuinely unreachable
+// node from one whose Docker is merely unconfigured) without a live daemon.
+type networkLister interface {
+	ListNetworks(ctx context.Context) ([]docker.NetworkInfo, error)
+}
 
 // Node kinds.
 const (
@@ -57,11 +84,24 @@ type Service struct {
 	store    db.Store
 	provider ClientProvider
 	mounts   *mountindex.Index
+
+	// listerFor resolves the network lister for a node. Defaults to the provider
+	// (*docker.Client satisfies networkLister); only tests override it. Keeping a
+	// seam rather than changing ClientProvider leaves main.go wiring untouched.
+	listerFor func(ctx context.Context, nodeID string) (networkLister, error)
 }
 
 // New builds the service.
 func New(store db.Store, provider ClientProvider, mounts *mountindex.Index) *Service {
-	return &Service{store: store, provider: provider, mounts: mounts}
+	s := &Service{store: store, provider: provider, mounts: mounts}
+	s.listerFor = func(ctx context.Context, nodeID string) (networkLister, error) {
+		c, err := s.provider(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
+	return s
 }
 
 func containerNodeID(id string) string { return KindContainer + ":" + id }
@@ -76,14 +116,29 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) (Graph, error) {
 	if err != nil {
 		return Graph{}, err
 	}
-	client, err := s.provider(ctx, nodeID)
+	client, err := s.listerFor(ctx, nodeID)
 	if err != nil {
-		return Graph{}, err // node truly unreachable: no client
+		// No usable Docker client (e.g. Docker capability inferred over SSH with
+		// no TCP/TLS endpoint configured). This is NOT "node unreachable": the
+		// node may be fully up per the poller. Return ErrNoDockerClient so the
+		// API layer can answer accurately ("docker_not_available") instead of a
+		// misleading 502 node_unreachable. A genuine transport failure surfaces
+		// later from ListNetworks (and is retried), not here.
+		return Graph{}, errNoClient(err)
 	}
-	// Network listing is best-effort: a transient daemon error degrades to a
-	// graph with no network nodes/edges rather than failing the whole request
+	// Network listing: a TRANSPORT error (stale cached keep-alive after a daemon
+	// restart / idle reset) is propagated so the API can rebuild the client and
+	// retry — swallowing it is exactly why the dependency graph showed no
+	// networks while the poller still listed containers. A genuine application
+	// error degrades best-effort to a graph with no network nodes/edges
 	// (containers + volumes still render), matching the volume-edge path.
-	networks, _ := client.ListNetworks(ctx)
+	networks, nerr := client.ListNetworks(ctx)
+	if nerr != nil {
+		if nodeconn.IsTransportError(nerr) {
+			return Graph{}, nerr
+		}
+		networks = nil
+	}
 
 	var nodes []GraphNode
 	var edges []GraphEdge

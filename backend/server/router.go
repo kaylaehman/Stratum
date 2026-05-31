@@ -245,6 +245,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/security/acknowledge/{id}", d.Handlers.RevokeAcknowledgement)
 			audited.Post("/security/rescan", d.Handlers.Rescan)
 			audited.Delete("/nodes/{id}/volumes/{name}", d.Handlers.RemoveVolume)
+			audited.Post("/volumes/prune-unused", d.Handlers.PruneUnusedVolumes)
 			audited.Post("/containers/{id}/start", d.Handlers.StartContainer)
 			audited.Post("/containers/{id}/stop", d.Handlers.StopContainer)
 			audited.Post("/containers/{id}/restart", d.Handlers.RestartContainer)
@@ -259,6 +260,7 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/updates/rescan", d.Handlers.RescanUpdates)
 			// Stack edit + redeploy (audited; admin-gated in handler).
 			audited.Post("/nodes/{id}/stacks/{project}/deploy", d.Handlers.RedeployStack)
+			audited.Post("/nodes/{id}/stacks/{project}/lifecycle", d.Handlers.StackLifecycle)
 			audited.Put("/nodes/{id}/stacks/{project}/env/{key}", d.Handlers.SetStackEnvVar)
 			audited.Delete("/nodes/{id}/stacks/{project}/env/{key}", d.Handlers.DeleteStackEnvVar)
 			audited.Post("/templates", d.Handlers.CreateTemplate)
