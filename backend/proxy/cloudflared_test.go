@@ -217,3 +217,120 @@ func TestCloudflaredUseMountCandidatesFirst(t *testing.T) {
 		t.Errorf("expected mount candidate tried first, tried = %v", tried)
 	}
 }
+
+// TestProbeHostService verifies that ProbeHostService returns true when a
+// standard config path is readable (simulating a host-service install) and
+// false when no path is accessible or ReadFile is nil.
+func TestProbeHostService(t *testing.T) {
+	cf := &Cloudflared{}
+
+	// Host service present: /etc/cloudflared/config.yml is readable.
+	connPresent := Conn{
+		ReadFile: func(_ context.Context, p string) (io.ReadCloser, error) {
+			if p == "/etc/cloudflared/config.yml" {
+				return io.NopCloser(strings.NewReader(sampleConfig)), nil
+			}
+			return nil, io.ErrUnexpectedEOF
+		},
+	}
+	if !cf.ProbeHostService(context.Background(), connPresent) {
+		t.Error("ProbeHostService = false, want true when /etc/cloudflared/config.yml is present")
+	}
+
+	// Host service using /usr/local/etc path (macOS-style or manual install).
+	connLocalEtc := Conn{
+		ReadFile: func(_ context.Context, p string) (io.ReadCloser, error) {
+			if p == "/usr/local/etc/cloudflared/config.yml" {
+				return io.NopCloser(strings.NewReader(sampleConfig)), nil
+			}
+			return nil, io.ErrUnexpectedEOF
+		},
+	}
+	if !cf.ProbeHostService(context.Background(), connLocalEtc) {
+		t.Error("ProbeHostService = false, want true when /usr/local/etc/cloudflared/config.yml is present")
+	}
+
+	// No config file anywhere — service not installed.
+	connAbsent := Conn{
+		ReadFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}
+	if cf.ProbeHostService(context.Background(), connAbsent) {
+		t.Error("ProbeHostService = true, want false when no config path is accessible")
+	}
+
+	// No ReadFile at all.
+	if cf.ProbeHostService(context.Background(), Conn{}) {
+		t.Error("ProbeHostService = true, want false when ReadFile is nil")
+	}
+}
+
+// TestIsDashboardManaged verifies that IsDashboardManaged correctly identifies
+// token-based tunnels (no ingress block) vs config-file tunnels.
+func TestIsDashboardManaged(t *testing.T) {
+	cf := &Cloudflared{}
+
+	// Dashboard-managed: config present but no ingress block.
+	dashboardCfg := `
+tunnel: abc123
+credentials-file: /root/.cloudflared/abc123.json
+`
+	connDashboard := Conn{
+		ReadFile: func(_ context.Context, p string) (io.ReadCloser, error) {
+			if p == "/etc/cloudflared/config.yml" {
+				return io.NopCloser(strings.NewReader(dashboardCfg)), nil
+			}
+			return nil, io.ErrUnexpectedEOF
+		},
+	}
+	if !cf.IsDashboardManaged(context.Background(), connDashboard) {
+		t.Error("IsDashboardManaged = false, want true for tunnel with no ingress block")
+	}
+
+	// Config-file managed: ingress block present.
+	connIngress := Conn{
+		ReadFile: func(_ context.Context, p string) (io.ReadCloser, error) {
+			if p == "/etc/cloudflared/config.yml" {
+				return io.NopCloser(strings.NewReader(sampleConfig)), nil
+			}
+			return nil, io.ErrUnexpectedEOF
+		},
+	}
+	if cf.IsDashboardManaged(context.Background(), connIngress) {
+		t.Error("IsDashboardManaged = true, want false when ingress block is present")
+	}
+
+	// No config at all — conservative: not dashboard-managed (detection failed).
+	connAbsent := Conn{
+		ReadFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}
+	if cf.IsDashboardManaged(context.Background(), connAbsent) {
+		t.Error("IsDashboardManaged = true, want false when config file is not found")
+	}
+}
+
+// TestDefaultConfigPathsCoversExpectedLocations documents which paths are
+// probed and ensures none are accidentally removed.
+func TestDefaultConfigPathsCoversExpectedLocations(t *testing.T) {
+	paths := defaultConfigPaths()
+	required := []string{
+		"/etc/cloudflared/config.yml",
+		"/etc/cloudflared/config.yaml",
+		"/root/.cloudflared/config.yml",
+		"/root/.cloudflared/config.yaml",
+		"/usr/local/etc/cloudflared/config.yml",
+		"/usr/local/etc/cloudflared/config.yaml",
+	}
+	pathSet := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		pathSet[p] = true
+	}
+	for _, want := range required {
+		if !pathSet[want] {
+			t.Errorf("defaultConfigPaths missing required path %q", want)
+		}
+	}
+}

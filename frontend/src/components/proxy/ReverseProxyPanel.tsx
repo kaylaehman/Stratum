@@ -425,7 +425,12 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
   }
 
   // ── Has list capability: may need config, or may have rules ──
-  const needsConfig = !data.configured || (data.rule_error !== undefined && data.rule_error !== '')
+  // File-based adapters (cloudflared) never need the admin-endpoint config form —
+  // they read from the host filesystem. Only show the form for API-based adapters
+  // when they are unconfigured or in error.
+  const isFileBased = data.detected === 'cloudflared'
+  const needsConfig =
+    !isFileBased && (!data.configured || (data.rule_error !== undefined && data.rule_error !== ''))
   const showConfigForm = hasListCapability && needsConfig
 
   return (
@@ -439,8 +444,25 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         <CapabilityHint capabilities={data.capabilities} />
       </div>
 
-      {/* Rule-fetch error notice */}
-      {data.rule_error && (
+      {/* cloudflared: dashboard-managed tunnel — ingress is defined in the
+          Cloudflare Zero Trust dashboard, not in a local config file.         */}
+      {isFileBased && data.dashboard_managed && (
+        <p
+          className="font-mono text-xs mb-2"
+          style={{
+            color: 'var(--text-secondary)',
+            background: 'rgba(100,149,237,0.07)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '3px',
+            padding: '4px 8px',
+          }}
+        >
+          cloudflared tunnel detected — ingress managed in the Cloudflare dashboard. Rules are not available locally.
+        </p>
+      )}
+
+      {/* Rule-fetch error notice — for API-based adapters and SSH-not-configured */}
+      {data.rule_error && !data.dashboard_managed && (
         <p
           className="font-mono text-xs mb-2"
           style={{
@@ -453,11 +475,13 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         >
           {data.rule_error.toLowerCase().startsWith('admin endpoint not configured')
             ? 'Admin endpoint not configured — set one below to load rules.'
-            : `Couldn't reach the proxy admin API: ${data.rule_error}`}
+            : isFileBased
+              ? data.rule_error
+              : `Couldn't reach the proxy admin API: ${data.rule_error}`}
         </p>
       )}
 
-      {/* Config form when unconfigured or in error */}
+      {/* Config form when unconfigured or in error — API-based adapters only */}
       {showConfigForm && (
         <ConfigForm
           nodeId={nodeId}
@@ -487,7 +511,7 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         </>
       )}
 
-      {!showConfigForm && data.rules.length === 0 && !data.rule_error && (
+      {!showConfigForm && data.rules.length === 0 && !data.rule_error && !data.dashboard_managed && (
         <p className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
           No proxy rules found.
         </p>
