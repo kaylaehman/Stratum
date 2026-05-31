@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/kaylaehman/stratum/backend/agent"
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
@@ -181,6 +183,25 @@ func run(logger *slog.Logger) error {
 	certSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
 	})
+
+	// Agent mTLS transport. The CA cert path is required; the client cert/key
+	// are optional until the install-script provisioning step is implemented.
+	// A missing or invalid CA is non-fatal: agent capabilities remain disabled
+	// and SSH-only nodes continue to function unchanged.
+	var agentTLSCfg *tls.Config
+	if cfg.AgentCACertPath != "" {
+		var tlsErr error
+		agentTLSCfg, tlsErr = agent.ClientTLSConfig("", "", cfg.AgentCACertPath)
+		if tlsErr != nil {
+			logger.Warn("agent: TLS config build failed; agent streaming disabled",
+				"ca_cert", cfg.AgentCACertPath, "error", tlsErr)
+		}
+	} else {
+		logger.Info("agent: AGENT_CA_CERT_PATH not set; agent streaming disabled")
+	}
+	agentMgr := agent.NewManager(store, agentTLSCfg, logger)
+	agentOrch := agent.NewOrchestrator(store, agentMgr, agentTLSCfg, logger)
+
 	fileWatchSvc := filewatch.New(store, filesSvc.Exec)
 	fileWatchSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
@@ -273,6 +294,13 @@ func run(logger *slog.Logger) error {
 	go chatSvc.Run(ctx)                             // inbound chat-command poller (no-op until enabled+configured)
 	go uptimeSvc.Run(ctx)                           // uptime monitor checker loop
 	go uptimeSvc.RunPrune(ctx, 90*24*time.Hour)     // prune results older than 90 days
+	// Agent streaming: probe existing nodes for agent reachability, then start
+	// the watch-file orchestrator. Both are no-ops when agentTLSCfg is nil
+	// (AGENT_CA_CERT_PATH not configured), so SSH-only nodes are unaffected.
+	go func() {
+		agent.UpdateAgentCapabilities(ctx, store, agentTLSCfg, logger)
+		agentOrch.Run(ctx)
+	}()
 
 	// Best-effort warm the Trivy vulnerability DB so the first user scan isn't
 	// slow. Non-fatal and time-bounded: offline deploys (no egress to the
