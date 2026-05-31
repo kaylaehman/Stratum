@@ -255,6 +255,7 @@ func run(logger *slog.Logger) error {
 		Recreate:    recreateSvc,
 		Backups:     backupSvc,
 		Remediation: remediationSvc,
+		Files:       filesSvc,
 	})
 	automationEngine := automation.New(store, activity.NewStore(store), webhookDispatcher, automationHandlers, logger)
 
