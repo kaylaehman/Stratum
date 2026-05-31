@@ -121,8 +121,21 @@ func (h *Handlers) RedeployStack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_body")
 		return
 	}
-	if body.ComposePath == "" {
-		writeError(w, http.StatusBadRequest, "compose_path_required")
+
+	// SECURITY: never trust the client-supplied compose_path. Re-resolve the
+	// canonical path server-side from the (sanitized) project name and use that
+	// for all reads/writes/exec. A client path, if sent, must match exactly.
+	composePath, err := h.Stacks.FindCompose(r.Context(), nodeID, project)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "find_compose_failed")
+		return
+	}
+	if composePath == "" {
+		writeError(w, http.StatusBadRequest, "compose_not_found")
+		return
+	}
+	if body.ComposePath != "" && body.ComposePath != composePath {
+		writeError(w, http.StatusBadRequest, "compose_path_not_allowed")
 		return
 	}
 
@@ -146,7 +159,7 @@ func (h *Handlers) RedeployStack(w http.ResponseWriter, r *http.Request) {
 	composeYAML := []byte(body.ComposeYAML)
 	if len(composeYAML) == 0 {
 		// Re-read the existing YAML when the client didn't provide updated content.
-		existing, readErr := h.Stacks.ReadCompose(r.Context(), nodeID, body.ComposePath)
+		existing, readErr := h.Stacks.ReadCompose(r.Context(), nodeID, composePath)
 		if readErr != nil {
 			writeError(w, http.StatusBadGateway, "read_compose_failed")
 			return
@@ -157,7 +170,7 @@ func (h *Handlers) RedeployStack(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stackDeployTimeout)
 	defer cancel()
 
-	out, deployErr := h.Stacks.Deploy(ctx, nodeID, body.ComposePath, composeYAML, mergedEnv)
+	out, deployErr := h.Stacks.Deploy(ctx, nodeID, composePath, composeYAML, mergedEnv)
 
 	// Audit regardless of outcome so failures are traceable.
 	auditStack(r, activity.ActionStackDeploy, nodeID, project, deployErr)

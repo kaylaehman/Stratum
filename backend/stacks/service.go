@@ -66,6 +66,11 @@ func New(store db.Store, files *fs.Service, cipher *crypto.Cipher) *Service {
 // whose last path segment matches the project name, then probes the standard
 // filenames. Returns "" when nothing is found (degraded gracefully).
 func (s *Service) FindCompose(ctx context.Context, nodeID, projectName string) (string, error) {
+	// SECURITY: the project name comes from a URL param. Sanitize before it is
+	// ever joined into a filesystem path so a value like "../../etc" cannot
+	// escape the search roots (path.Join would otherwise resolve the traversal).
+	// Legitimate compose project names are already restricted to [a-z0-9_-].
+	projectName = sanitizeProject(projectName)
 	searchRoots := []string{"/opt", "/srv", "/home", "/var/lib", "/mnt"}
 	for _, root := range searchRoots {
 		dir := path.Join(root, projectName)
