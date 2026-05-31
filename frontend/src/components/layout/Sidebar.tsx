@@ -412,7 +412,7 @@ export function Sidebar() {
   return (
     <nav
       ref={navRef}
-      className="w-52 shrink-0 flex flex-col pt-2 pb-4 overflow-y-auto"
+      className="w-52 shrink-0 flex flex-col pt-2 pb-4 overflow-y-auto h-full"
       style={{
         backgroundColor: 'var(--bg-surface)',
         borderRight: '1px solid var(--border-subtle)',

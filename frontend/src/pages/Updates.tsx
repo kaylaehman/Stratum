@@ -292,8 +292,9 @@ function SummaryBar({ updates }: { updates: ImageUpdate[] }) {
   const upToDate = updates.filter((u) => u.status === 'up_to_date').length
   const unknown = updates.filter((u) => u.status === 'unknown').length
 
+  // flex-wrap lets the count spans stack on narrow screens instead of overflowing
   return (
-    <div className="flex items-center gap-4 mb-5">
+    <div className="flex items-center gap-4 mb-5 flex-wrap">
       <span
         className="text-xs font-medium"
         style={{ color: available > 0 ? 'var(--status-warn)' : 'var(--text-muted)' }}
@@ -449,8 +450,9 @@ export default function Updates() {
 
   return (
     <AppShell>
+      {/* max-w-full prevents page-level horizontal overflow on narrow viewports */}
       <div
-        className="flex flex-col flex-1 min-h-0 h-full w-full p-6"
+        className="flex flex-col flex-1 min-h-0 h-full w-full max-w-full p-6"
         style={{ maxWidth: '1100px', margin: '0 auto' }}
       >
         {/* Page header */}
