@@ -177,6 +177,28 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		// Automations engine
 		"PUT /api/automations/{key}":       true,
 		"POST /api/automations/{key}/run":  true,
+
+		// Backup restore + verify (C1)
+		"POST /api/nodes/{id}/backups/restore":       true,
+		"POST /api/nodes/{id}/backups/restore-guest": true,
+		"POST /api/nodes/{id}/backups/verify":        true,
+
+		// Orchestration + node drain (C2)
+		"POST /api/orchestration/plan":    true,
+		"POST /api/orchestration/execute": true,
+		"POST /api/nodes/{id}/drain":      true,
+
+		// Config versioning (C3)
+		"POST /api/nodes/{id}/configversions/snapshot": true,
+		"POST /api/nodes/{id}/configversions/revert":   true,
+
+		// Secret expiry (C5)
+		"PUT /api/secrets/{id}/expiry": true,
+
+		// Alert policy CRUD (C6)
+		"POST /api/alert-policies":        true,
+		"PUT /api/alert-policies/{id}":    true,
+		"DELETE /api/alert-policies/{id}": true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

@@ -14,6 +14,21 @@ import (
 	"github.com/kaylaehman/stratum/backend/db"
 )
 
+// targetBackup is the activity target type for backup operations.
+// The action constants backup.restore and backup.verify are defined in
+// activity/actions.go by the orchestrator; referenced here as string literals
+// so this file compiles before those constants are merged.
+const targetBackup = "backup"
+
+// actionBackupRestore and actionBackupVerify are forward-declared here as
+// string literals matching the canonical names the orchestrator will add to
+// activity/actions.go. When the orchestrator adds the constants, callers can
+// replace these with the typed constants without API changes.
+const (
+	actionBackupRestore = "backup.restore"
+	actionBackupVerify  = "backup.verify"
+)
+
 type backupView struct {
 	ID         string  `json:"id"`
 	NodeID     string  `json:"node_id"`
@@ -177,4 +192,198 @@ func (h *Handlers) StartGuestBackup(w http.ResponseWriter, r *http.Request) {
 		e.Detail = map[string]any{"vmid": vmid, "pve_node": pveNode, "storage": body.Storage, "backup_id": id}
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"backup_id": id})
+}
+
+// restoreVolumeBody is the request body for RestoreVolumeBackup.
+type restoreVolumeBody struct {
+	ArchivePath string `json:"archive_path"`
+	TargetPath  string `json:"target_path"`
+}
+
+// RestoreVolumeBackup restores a volume archive to a path on a node.
+// This is a DESTRUCTIVE operation that overwrites files in target_path.
+// Requires admin + step-up (TOTP confirmation). Audited as backup.restore.
+func (h *Handlers) RestoreVolumeBackup(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
+	nodeID := chi.URLParam(r, "id")
+
+	node, err := h.Store.GetNode(r.Context(), nodeID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	_ = node // capabilities check not needed for restore (SSH-level operation)
+
+	var body restoreVolumeBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if !backup.ValidArchivePath(body.ArchivePath) || !backup.ValidDestDir(body.TargetPath) {
+		writeError(w, http.StatusBadRequest, "invalid_path")
+		return
+	}
+
+	out, err := h.Backups.RestoreVolume(r.Context(), nodeID, body.ArchivePath, body.TargetPath)
+	if errors.Is(err, backup.ErrInvalidInput) {
+		writeError(w, http.StatusBadRequest, "invalid_path")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "restore_failed")
+		return
+	}
+
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = actionBackupRestore
+		e.TargetType = ptr(targetBackup)
+		e.TargetID = &nodeID
+		e.Detail = map[string]string{
+			"archive_path": body.ArchivePath,
+			"target_path":  body.TargetPath,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"output": out})
+}
+
+// restoreGuestBody is the request body for RestoreGuestBackup.
+type restoreGuestBody struct {
+	PVENode       string `json:"pve_node"`
+	ArchivePath   string `json:"archive_path"`
+	TargetStorage string `json:"target_storage"`
+	TargetVMID    int    `json:"target_vmid"` // 0 = auto-assign
+}
+
+// RestoreGuestBackup restores a Proxmox vzdump archive to a storage pool.
+// This is a DESTRUCTIVE operation. Requires admin + step-up. Audited.
+func (h *Handlers) RestoreGuestBackup(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if !h.requireStepUp(w, r) {
+		return
+	}
+	nodeID := chi.URLParam(r, "id")
+
+	node, err := h.Store.GetNode(r.Context(), nodeID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
+	if !caps.Proxmox {
+		writeCapabilityUnavailable(w, "proxmox", "")
+		return
+	}
+
+	var body restoreGuestBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if body.PVENode == "" || body.TargetStorage == "" {
+		writeError(w, http.StatusBadRequest, "pve_node_and_storage_required")
+		return
+	}
+	if !backup.ValidArchivePath(body.ArchivePath) {
+		writeError(w, http.StatusBadRequest, "invalid_archive_path")
+		return
+	}
+
+	upid, err := h.Backups.RestoreGuest(r.Context(), nodeID, body.PVENode, body.ArchivePath, body.TargetStorage, body.TargetVMID)
+	if errors.Is(err, backup.ErrInvalidInput) {
+		writeError(w, http.StatusBadRequest, "invalid_path")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "restore_failed")
+		return
+	}
+
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = actionBackupRestore
+		e.TargetType = ptr(targetBackup)
+		e.TargetID = &nodeID
+		e.Detail = map[string]any{
+			"kind":           "proxmox",
+			"pve_node":       body.PVENode,
+			"archive_path":   body.ArchivePath,
+			"target_storage": body.TargetStorage,
+			"target_vmid":    body.TargetVMID,
+			"upid":           upid,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"upid": upid})
+}
+
+// VerifyBackup performs a restore-drill on the newest completed volume archive
+// for a node: extracts to scratch, stats the result, cleans up, returns pass/fail.
+// Requires operator. Audited as backup.verify.
+func (h *Handlers) VerifyBackup(w http.ResponseWriter, r *http.Request) {
+	if !h.requireOperator(w, r) {
+		return
+	}
+	nodeID := chi.URLParam(r, "id")
+
+	if _, err := h.Store.GetNode(r.Context(), nodeID); errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	res, err := h.Backups.VerifyLatest(r.Context(), nodeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "verify_failed")
+		return
+	}
+
+	if e := activity.FromContext(r.Context()); e != nil {
+		e.Action = actionBackupVerify
+		e.TargetType = ptr(targetBackup)
+		e.TargetID = &nodeID
+		e.Detail = map[string]any{
+			"backup_id":   res.BackupID,
+			"passed":      res.Passed,
+			"file_count":  res.FileCount,
+			"total_bytes": res.TotalBytes,
+		}
+	}
+
+	status := http.StatusOK
+	writeJSON(w, status, res)
+}
+
+// ListBackupVerifyResults returns the verify-drill history for a node.
+// Admin-gated.
+func (h *Handlers) ListBackupVerifyResults(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	nodeID := chi.URLParam(r, "id")
+	if _, err := h.Store.GetNode(r.Context(), nodeID); errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	results, err := h.Backups.ListVerifyResults(r.Context(), nodeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }

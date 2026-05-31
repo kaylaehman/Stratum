@@ -14,16 +14,25 @@ import (
 	"github.com/kaylaehman/stratum/backend/db"
 )
 
-// Service stores and reveals secrets.
+// Service stores and reveals secrets. Expiry and Scanner are optional
+// sub-services wired after construction via SetExpiry / SetScanner.
 type Service struct {
-	store  db.Store
-	cipher *crypto.Cipher
+	store   db.Store
+	cipher  *crypto.Cipher
+	Expiry  *ExpiryService
+	Scanner *ScannerService
 }
 
 // New wires the store and the value cipher.
 func New(store db.Store, cipher *crypto.Cipher) *Service {
 	return &Service{store: store, cipher: cipher}
 }
+
+// SetExpiry attaches the expiry/rotation sub-service.
+func (s *Service) SetExpiry(e *ExpiryService) { s.Expiry = e }
+
+// SetScanner attaches the plaintext-secret scanner sub-service.
+func (s *Service) SetScanner(sc *ScannerService) { s.Scanner = sc }
 
 // SetSecret seals value and upserts it under (groupID, key).
 func (s *Service) SetSecret(ctx context.Context, groupID, key, value string) error {

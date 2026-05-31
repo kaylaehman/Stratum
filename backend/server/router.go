@@ -223,8 +223,27 @@ func NewRouter(d *Deps) http.Handler {
 			// Script library list (CRUD/run are audited below).
 			r.Get("/scripts", d.Handlers.ListScripts)
 
-			// Backup history (admin-gated; start is audited below).
+			// Backup history + verify results (admin-gated; start/restore/verify are audited below).
 			r.Get("/backups", d.Handlers.ListBackups)
+			r.Get("/nodes/{id}/backups/verify", d.Handlers.ListBackupVerifyResults)
+
+			// Config versions + drift (admin-gated; snapshot/revert are audited below).
+			r.Get("/nodes/{id}/configversions", d.Handlers.ConfigVersionHistory)
+			r.Get("/nodes/{id}/configversions/drift", d.Handlers.ConfigVersionDrift)
+
+			// Capacity forecast (admin-gated; read-only).
+			r.Get("/nodes/{id}/forecast", d.Handlers.NodeForecast)
+
+			// Secret expiry list + node scan (admin-gated; set-expiry is audited below).
+			r.Get("/secrets/expiring", d.Handlers.ListExpiringSecrets)
+			r.Get("/secrets/scan", d.Handlers.ScanNodeSecrets)
+
+			// Alert policies + delivery log (admin-gated; CRUD is audited below).
+			r.Get("/alert-policies", d.Handlers.ListAlertPolicies)
+			r.Get("/alert-deliveries", d.Handlers.ListAlertDeliveries)
+
+			// DR export (admin-gated; format via ?format=json|yaml|md).
+			r.Get("/dr-export", d.Handlers.DRExport)
 
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
@@ -359,6 +378,28 @@ func NewRouter(d *Deps) http.Handler {
 			// Automation mutations (audited).
 			audited.Put("/automations/{key}", d.Handlers.UpdateAutomation)
 			audited.Post("/automations/{key}/run", d.Handlers.RunAutomation)
+
+			// Backup restore + verify (audited; destructive ops require step-up in handler).
+			audited.Post("/nodes/{id}/backups/restore", d.Handlers.RestoreVolumeBackup)
+			audited.Post("/nodes/{id}/backups/restore-guest", d.Handlers.RestoreGuestBackup)
+			audited.Post("/nodes/{id}/backups/verify", d.Handlers.VerifyBackup)
+
+			// Orchestration (audited).
+			audited.Post("/orchestration/plan", d.Handlers.OrchestrationPlan)
+			audited.Post("/orchestration/execute", d.Handlers.OrchestrationExecute)
+			audited.Post("/nodes/{id}/drain", d.Handlers.NodeDrain)
+
+			// Config versioning (audited).
+			audited.Post("/nodes/{id}/configversions/snapshot", d.Handlers.ConfigVersionSnapshot)
+			audited.Post("/nodes/{id}/configversions/revert", d.Handlers.ConfigVersionRevert)
+
+			// Secret expiry (audited).
+			audited.Put("/secrets/{id}/expiry", d.Handlers.SetSecretExpiry)
+
+			// Alert policy CRUD (audited).
+			audited.Post("/alert-policies", d.Handlers.CreateAlertPolicy)
+			audited.Put("/alert-policies/{id}", d.Handlers.UpdateAlertPolicy)
+			audited.Delete("/alert-policies/{id}", d.Handlers.DeleteAlertPolicy)
 		})
 	})
 

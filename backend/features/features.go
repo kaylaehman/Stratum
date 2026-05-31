@@ -24,6 +24,9 @@ type Flag struct {
 // and on by default; the two not-yet-implemented features default off.
 var catalog = []Flag{
 	{Key: "feature.automations", Label: "Automations", Default: true, Description: "Autonomous automation engine (8 configurable automations)."},
+	{Key: "feature.config_versions", Label: "Config Versions", Default: true, Description: "Track config file version history and detect drift."},
+	{Key: "feature.config_git", Label: "Config Git Backend", Default: false, Description: "Push config snapshots to a remote git repository (not yet implemented)."},
+	{Key: "feature.alert_policies", Label: "Alert Policies", Default: true, Description: "Route and suppress alerts via configurable policies."},
 	{Key: "feature.reverse_proxy", Label: "Reverse Proxy", Default: true, Description: "Detect and view reverse-proxy rules per node."},
 	{Key: "feature.dns_management", Label: "DNS Management", Default: true, Description: "Detect and view DNS records per node."},
 	{Key: "feature.cert_management", Label: "Certificate Monitoring", Default: true, Description: "Scan and alert on TLS certificate expiry."},

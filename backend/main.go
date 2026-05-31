@@ -22,16 +22,20 @@ import (
 	"github.com/kaylaehman/stratum/backend/prommetrics"
 	"github.com/kaylaehman/stratum/backend/agent"
 	"github.com/kaylaehman/stratum/backend/ai"
+	"github.com/kaylaehman/stratum/backend/alertpolicy"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/automation"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/config"
+	"github.com/kaylaehman/stratum/backend/configversion"
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/kaylaehman/stratum/backend/drexport"
+	"github.com/kaylaehman/stratum/backend/forecast"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
@@ -40,6 +44,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/kaylaehman/stratum/backend/orchestration"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/proxy"
 	"github.com/kaylaehman/stratum/backend/proxmox"
@@ -172,6 +177,9 @@ func run(logger *slog.Logger) error {
 		}
 		return clients.Proxmox, nil
 	})
+	// Wire verify store into backup service.
+	backupSvc.SetVerifyStore(store)
+
 	twoFASvc := twofa.New(store, cipher)
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
 	stacksSvc := stacks.New(store, filesSvc, cipher)
@@ -212,6 +220,43 @@ func run(logger *slog.Logger) error {
 	})
 	ssoSvc := sso.New(store, cipher)
 	remediationSvc := remediation.New(store, filesSvc.Exec)
+
+	// Orchestration service.
+	orchestrationSvc := orchestration.NewService(store, conn, depGraphSvc, logger)
+
+	// Config versioning service.
+	configVersionReadFn := func(ctx context.Context, nodeID, path string) ([]byte, error) {
+		content, tooLarge, _, err := filesSvc.Preview(ctx, nodeID, path)
+		if err != nil {
+			return nil, err
+		}
+		if tooLarge {
+			return nil, configversion.ErrContentTooLarge
+		}
+		return content, nil
+	}
+	configVersionWriteFn := func(ctx context.Context, nodeID, path string, content []byte) error {
+		return filesSvc.Write(ctx, nodeID, path, content, nil)
+	}
+	configVersionSvc := configversion.New(store, configVersionReadFn, configVersionWriteFn, false)
+
+	// Capacity forecast service (7-day lookback).
+	forecastSvc := forecast.New(store, 7*24*time.Hour)
+
+	// Secret expiry + scanner sub-services.
+	secretExpiry := secrets.NewExpiry(store)
+	secretExpiry.SetNotify(func(ctx context.Context, trigger, title, text string) {
+		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+	})
+	secretScanner := secrets.NewScannerService(&fsFileReader{filesSvc})
+	secretSvc.SetExpiry(secretExpiry)
+	secretSvc.SetScanner(secretScanner)
+
+	// Alert policy service.
+	alertPolicySvc := alertpolicy.New(store)
+
+	// DR export service.
+	drExportSvc := drexport.New(store, dnsSvc, proxySvc, volumeSvc)
 
 	// Container-troubleshooting skill library (reference data). Graceful: a
 	// missing/empty SKILLS_DIR yields an empty library, not a startup failure.
@@ -256,6 +301,10 @@ func run(logger *slog.Logger) error {
 		Backups:     backupSvc,
 		Remediation: remediationSvc,
 		Files:       filesSvc,
+		Forecast:    forecastSvc,
+		Notify: func(ctx context.Context, trigger, title, text string) {
+			webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+		},
 	})
 	automationEngine := automation.New(store, activity.NewStore(store), webhookDispatcher, automationHandlers, logger)
 
@@ -296,6 +345,11 @@ func run(logger *slog.Logger) error {
 		Skills:         skillLib,
 		Uptime:         uptimeSvc,
 		Automation:     automationEngine,
+		Orchestration:  orchestrationSvc,
+		ConfigVersions: configVersionSvc,
+		Forecast:       forecastSvc,
+		AlertPolicy:    alertPolicySvc,
+		DRExportSvc:    drExportSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -315,6 +369,18 @@ func run(logger *slog.Logger) error {
 	go chatSvc.Run(ctx)                             // inbound chat-command poller (no-op until enabled+configured)
 	go uptimeSvc.Run(ctx)                           // uptime monitor checker loop
 	go automationEngine.Run(ctx)                    // automation engine tick loop (60s); stops on shutdown
+	go func() {
+		t := time.NewTicker(24 * time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = secretExpiry.Check(ctx)
+			}
+		}
+	}()
 	go uptimeSvc.RunPrune(ctx, 90*24*time.Hour)     // prune results older than 90 days
 	// Agent streaming: probe existing nodes for agent reachability, then start
 	// the watch-file orchestrator. Both are no-ops when agentTLSCfg is nil
@@ -360,6 +426,33 @@ func uploadMaxBytes() int64 {
 		}
 	}
 	return fs.DefaultUploadMax
+}
+
+// fsFileReader adapts *fs.Service to the secrets.FileReader interface so the
+// scanner can read files without importing the full fs.Service type.
+type fsFileReader struct{ svc *fs.Service }
+
+func (a *fsFileReader) ReadFile(ctx context.Context, nodeID, filePath string) (string, error) {
+	content, tooLarge, _, err := a.svc.Preview(ctx, nodeID, filePath)
+	if err != nil {
+		return "", err
+	}
+	if tooLarge {
+		return "", fmt.Errorf("file too large: %s", filePath)
+	}
+	return string(content), nil
+}
+
+func (a *fsFileReader) ListDir(ctx context.Context, nodeID, dirPath string) ([]string, error) {
+	entries, _, err := a.svc.List(ctx, nodeID, dirPath)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name
+	}
+	return names, nil
 }
 
 // maybeSeedAdmin creates the first admin from STRATUM_ADMIN_USER/PASSWORD when

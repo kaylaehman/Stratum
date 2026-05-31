@@ -462,3 +462,60 @@ func (c *Client) GuestPowerAction(ctx context.Context, node, kind string, vmid i
 	}
 	return body.Data, nil
 }
+
+// vzdumpRestoreBody is the request body for a vzdump restore call.
+type vzdumpRestoreBody struct {
+	Archive string `json:"archive"`
+	Storage string `json:"storage"`
+	VMID    int    `json:"vmid,omitempty"` // 0 = auto-assign
+	Force   int    `json:"force"`          // 1 = overwrite existing VMID
+}
+
+// VzdumpRestore initiates a restore of a vzdump archive to a Proxmox storage
+// pool and returns the task UPID. archivePath is the path to the .vma / .tar.gz
+// archive as known to the Proxmox node. targetVMID of 0 lets Proxmox pick the
+// next available ID. Callers must call WaitTask to block until completion.
+func (c *Client) VzdumpRestore(ctx context.Context, pveNode, archivePath, targetStorage string, targetVMID int) (string, error) {
+	body := vzdumpRestoreBody{
+		Archive: archivePath,
+		Storage: targetStorage,
+		VMID:    targetVMID,
+	}
+	if targetVMID > 0 {
+		body.Force = 1
+	}
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("proxmox: marshal restore body: %w", err)
+	}
+
+	// Proxmox restore endpoint lives under /nodes/{node}/qemu (or lxc) but
+	// the generic /nodes/{node}/vzdump/extract is not available for restores;
+	// the conventional path is POST /nodes/{node}/qemu (VMID in body). For
+	// maximum compat we target the qemu endpoint and include the archive path.
+	url := c.endpoint + "/api2/json/nodes/" + pveNode + "/qemu"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(b)))
+	if err != nil {
+		return "", fmt.Errorf("proxmox: build restore request: %w", err)
+	}
+	req.Header.Set("Authorization", "PVEAPIToken="+c.tokenID+"="+c.secret)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("proxmox: restore request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("proxmox: restore returned status %d", resp.StatusCode)
+	}
+
+	var vr vzdumpResponse
+	if err := json.NewDecoder(resp.Body).Decode(&vr); err != nil {
+		return "", fmt.Errorf("proxmox: decode restore response: %w", err)
+	}
+	return vr.Data, nil
+}

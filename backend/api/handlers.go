@@ -9,17 +9,21 @@ import (
 
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/ai"
+	"github.com/kaylaehman/stratum/backend/alertpolicy"
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/automation"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/chatbot"
+	"github.com/kaylaehman/stratum/backend/configversion"
 	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/depgraph"
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
+	"github.com/kaylaehman/stratum/backend/drexport"
 	"github.com/kaylaehman/stratum/backend/features"
 	"github.com/kaylaehman/stratum/backend/filewatch"
+	"github.com/kaylaehman/stratum/backend/forecast"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/inventory"
@@ -27,6 +31,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/kaylaehman/stratum/backend/orchestration"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/proxy"
 	"github.com/kaylaehman/stratum/backend/recreate"
@@ -83,6 +88,11 @@ type Handlers struct {
 	Skills         *skills.Library
 	Uptime         *uptime.Service
 	Automation     *automation.Engine
+	Orchestration  *orchestration.Service
+	ConfigVersions *configversion.Service
+	Forecast       *forecast.Service
+	AlertPolicy    *alertpolicy.Service
+	DRExportSvc    *drexport.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

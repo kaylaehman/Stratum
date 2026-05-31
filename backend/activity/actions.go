@@ -135,6 +135,27 @@ const (
 	// Automations engine (Wave 6)
 	ActionAutomationConfig = "automation.config"
 	ActionAutomationRun    = "automation.run"
+
+	// Backup restore + verify (C1)
+	ActionBackupRestore = "backup.restore"
+	ActionBackupVerify  = "backup.verify"
+
+	// Orchestration + node drain (C2)
+	ActionOrchestrationExecute = "orchestration.execute"
+	ActionNodeDrain             = "node.drain"
+
+	// Config versioning (C3)
+	ActionConfigSnapshot = "config.snapshot"
+	ActionConfigRevert   = "config.revert"
+
+	// Secret expiry (C5)
+	ActionSecretSetExpiry = "secret.set_expiry"
+
+	// Alert policy config (C6)
+	ActionAlertPolicyConfig = "alertpolicy.config"
+
+	// DR export (C7)
+	ActionDRExport = "dr.export"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -157,6 +178,10 @@ const (
 	TargetRemediation     = "remediation"
 	TargetStack           = "stack"
 	TargetAutomation      = "automation"
+	TargetOrchestration   = "orchestration"
+	TargetConfigVersion   = "config_version"
+	TargetAlertPolicy     = "alert_policy"
+	TargetDR              = "dr_manifest"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -289,6 +314,21 @@ var actionCatalog = []ActionInfo{
 
 	{ActionAutomationConfig, "Automation configured", "automation", TargetAutomation},
 	{ActionAutomationRun, "Automation ran", "automation", TargetAutomation},
+
+	{ActionBackupRestore, "Backup restored", "backup", TargetNode},
+	{ActionBackupVerify, "Backup verified (restore drill)", "backup", TargetNode},
+
+	{ActionOrchestrationExecute, "Orchestration plan executed", "orchestration", TargetOrchestration},
+	{ActionNodeDrain, "Node drained", "node", TargetNode},
+
+	{ActionConfigSnapshot, "Config version snapshot taken", "config", TargetConfigVersion},
+	{ActionConfigRevert, "Config version reverted", "config", TargetConfigVersion},
+
+	{ActionSecretSetExpiry, "Secret expiry set", "secret", TargetSecret},
+
+	{ActionAlertPolicyConfig, "Alert policy configured", "alertpolicy", TargetAlertPolicy},
+
+	{ActionDRExport, "DR manifest exported", "dr", TargetDR},
 }
 
 var actionByName = func() map[string]ActionInfo {

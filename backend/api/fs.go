@@ -97,11 +97,17 @@ func (h *Handlers) FSWriteFile(w http.ResponseWriter, r *http.Request) {
 			ifUnmod = &t
 		}
 	}
-	if err := h.Files.Write(r.Context(), chi.URLParam(r, "id"), filePath, body, ifUnmod); err != nil {
+	nodeID := chi.URLParam(r, "id")
+	if err := h.Files.Write(r.Context(), nodeID, filePath, body, ifUnmod); err != nil {
 		writeFSError(w, err)
 		return
 	}
 	enrichFSActivity(r, "fs.write", filePath)
+	// Nil-safe config snapshot hook: auto-version files written through the UI.
+	if h.ConfigVersions != nil {
+		u, _ := middleware.UserFromContext(r.Context())
+		_, _ = h.ConfigVersions.SnapshotContent(r.Context(), nodeID, filePath, body, u.ID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
