@@ -4,12 +4,14 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/secrets"
 )
 
 type secretKeyView struct {
@@ -197,4 +199,90 @@ func auditSecret(r *http.Request, action, id string, detail map[string]string) {
 			e.Detail = detail
 		}
 	}
+}
+
+type setExpiryBody struct {
+	ExpiresAt *time.Time `json:"expires_at"` // null clears the expiry
+}
+
+type expiryView struct {
+	SecretID  string     `json:"secret_id"`
+	Key       string     `json:"key"`
+	GroupID   string     `json:"group_id"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	RotatedAt *time.Time `json:"rotated_at,omitempty"`
+	Status    string     `json:"status"`
+}
+
+// SetSecretExpiry sets or clears expires_at on a secret. Admin-gated + audited.
+func (h *Handlers) SetSecretExpiry(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var body setExpiryBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if err := h.Secrets.Expiry.SetExpiry(r.Context(), id, body.ExpiresAt); errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "set_failed")
+		return
+	}
+	detail := map[string]string{}
+	if body.ExpiresAt != nil {
+		detail["expires_at"] = body.ExpiresAt.Format(time.RFC3339)
+	} else {
+		detail["expires_at"] = "cleared"
+	}
+	auditSecret(r, "secret.set_expiry", id, detail)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListExpiringSecrets returns all secrets within the warn window or already
+// expired. Admin-gated; never returns encrypted values.
+func (h *Handlers) ListExpiringSecrets(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	rows, err := h.Secrets.Expiry.ListExpiring(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	now := time.Now()
+	out := make([]expiryView, len(rows))
+	for i, row := range rows {
+		out[i] = expiryView{
+			SecretID:  row.SecretID,
+			Key:       row.Key,
+			GroupID:   row.GroupID,
+			ExpiresAt: row.ExpiresAt,
+			RotatedAt: row.RotatedAt,
+			Status:    string(secrets.ComputeStatus(row, now)),
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"secrets": out})
+}
+
+// ScanNodeSecrets scans a node's compose/env files for plaintext secrets.
+// Query param: node (node ID). Admin-gated; findings never include values.
+func (h *Handlers) ScanNodeSecrets(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	nodeID := r.URL.Query().Get("node")
+	if nodeID == "" {
+		writeError(w, http.StatusBadRequest, "node_required")
+		return
+	}
+	findings, err := h.Secrets.Scanner.Scan(r.Context(), nodeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "scan_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"findings": findings})
 }

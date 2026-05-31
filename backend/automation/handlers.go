@@ -15,6 +15,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/diagnostic"
 	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/kaylaehman/stratum/backend/forecast"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/metrics"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
@@ -25,7 +26,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/volumes"
 )
 
-// Deps holds all service references required to build the 13 handlers.
+// Deps holds all service references required to build the 15 handlers.
 // All fields that are nil cause the relevant handler to return "skipped".
 type Deps struct {
 	Store       db.Store
@@ -37,6 +38,8 @@ type Deps struct {
 	Backups     *backup.Service
 	Remediation *remediation.Service
 	Files       *fs.Service
+	Forecast    *forecast.Service
+	Notify      func(ctx context.Context, trigger, title, text string)
 }
 
 // BuildHandlers constructs the full handler map. Each handler closes over the
@@ -56,6 +59,8 @@ func BuildHandlers(store db.Store, deps Deps) map[string]Handler {
 		"run_runbooks_on_alert":     runRunbooksOnAlertHandler(store, deps.Remediation),
 		"patch_critical_cves":       patchCriticalCVEsHandler(store, deps.CVE, deps.Recreate, deps.Conn),
 		"prune_disk_pressure":       pruneDiskPressureHandler(store, deps.Files),
+		"verify_backup":             verifyBackupHandler(store, deps.Backups, deps.Notify),
+		"capacity_warn":             capacityWarnHandler(store, deps.Forecast, deps.Notify),
 	}
 }
 
@@ -1004,6 +1009,105 @@ func queryDiskFreePct(ctx context.Context, filesSvc *fs.Service, nodeID string) 
 		return 100.0 - usedPct, nil
 	}
 	return 0, fmt.Errorf("prune_disk_pressure: could not parse df output")
+}
+
+// verifyBackupHandler performs a restore-drill on the newest volume backup per
+// node. Notifies via webhook on failure. Skips nodes with no completed backups.
+func verifyBackupHandler(store db.Store, backupSvc *backup.Service, notify func(ctx context.Context, trigger, title, text string)) Handler {
+	return func(ctx context.Context) (string, error) {
+		if backupSvc == nil {
+			return "skipped: backup service unavailable", nil
+		}
+		nodes, err := store.ListNodes(ctx)
+		if err != nil {
+			return "", fmt.Errorf("list nodes: %w", err)
+		}
+		passed, failed, skipped := 0, 0, 0
+		var errs []string
+		for _, n := range nodes {
+			res, err := backupSvc.VerifyLatest(ctx, n.ID)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("node %s: infra error: %v", n.ID, err))
+				failed++
+				continue
+			}
+			if res.BackupID == "" {
+				skipped++
+				continue
+			}
+			if res.Passed {
+				passed++
+			} else {
+				failed++
+				msg := fmt.Sprintf("node %s: verify failed: %s (archive %s)", n.ID, res.Error, res.ArchivePath)
+				errs = append(errs, msg)
+				if notify != nil {
+					notify(ctx, "backup.verify_failed", "Backup verification failed", msg)
+				}
+			}
+		}
+		detail := fmt.Sprintf("passed %d, failed %d, skipped %d (no backup)", passed, failed, skipped)
+		if len(errs) > 0 {
+			detail += "; details: " + strings.Join(errs, "; ")
+			return detail, fmt.Errorf("%d backup verification failure(s)", failed)
+		}
+		return detail, nil
+	}
+}
+
+// capacityWarnHandler checks capacity projections for all nodes and notifies
+// when any container is projected to exhaust a resource within horizon_days.
+func capacityWarnHandler(store db.Store, forecastSvc *forecast.Service, notify func(ctx context.Context, trigger, title, text string)) Handler {
+	return func(ctx context.Context) (string, error) {
+		if forecastSvc == nil {
+			return "skipped: forecast service unavailable", nil
+		}
+		horizonDays := capacityHorizonFromDB(ctx, store)
+		horizonSecs := horizonDays * 24 * 3600
+
+		nodes, err := store.ListNodes(ctx)
+		if err != nil {
+			return "", fmt.Errorf("list nodes: %w", err)
+		}
+		warned, checked := 0, 0
+		for _, n := range nodes {
+			projections, err := forecastSvc.ForNode(ctx, n.ID)
+			if err != nil {
+				continue
+			}
+			for cID, projs := range projections {
+				for _, p := range projs {
+					if p.EtaSeconds < 0 || p.EtaSeconds > float64(horizonSecs) {
+						continue
+					}
+					checked++
+					msg := fmt.Sprintf("node %s container %s: %s projected to reach threshold in %.0f hours (slope %.2e/s)",
+						n.ID, cID, p.Metric, p.EtaSeconds/3600, p.Slope)
+					if notify != nil {
+						notify(ctx, "capacity.warn", "Capacity warning", msg)
+					}
+					warned++
+				}
+			}
+		}
+		return fmt.Sprintf("checked %d projections, warned on %d approaching threshold within %d days", checked, warned, horizonDays), nil
+	}
+}
+
+func capacityHorizonFromDB(ctx context.Context, store db.Store) int {
+	const defaultHorizon = 7
+	row, err := store.GetAutomation(ctx, "capacity_warn")
+	if err != nil {
+		return defaultHorizon
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(row.ConfigJSON), &m); err != nil {
+		return defaultHorizon
+	}
+	if v, ok := m["horizon_days"].(float64); ok && v > 0 {
+		return int(v)
+	}
+	return defaultHorizon
 }
 
 // allowedProjectsFromDB reads the "projects" array from a key's stored config.

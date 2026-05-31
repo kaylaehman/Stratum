@@ -141,6 +141,23 @@ var catalog = []Entry{
 		DefaultIntervalSeconds: 3600,
 		DefaultConfig:          map[string]any{"min_free_pct": float64(10)},
 	},
+	{
+		Key:         "verify_backup",
+		Label:       "Verify latest backup",
+		Description: "Perform a restore-drill on the newest completed volume backup for each node. Notifies via webhook on failure.",
+		Category:    CategoryMaintenance,
+		DefaultIntervalSeconds: 86400, // daily
+		DefaultConfig:          map[string]any{},
+	},
+	{
+		Key:   "capacity_warn",
+		Label: "Capacity warning",
+		Description: "Check capacity projections for all nodes and send a webhook alert when any container is projected to " +
+			"exhaust CPU, memory, or disk writes within horizon_days (default 7).",
+		Category:               CategoryMaintenance,
+		DefaultIntervalSeconds: 3600, // hourly
+		DefaultConfig:          map[string]any{"horizon_days": float64(7)},
+	},
 }
 
 // Catalog returns the full ordered entry set (read-only).

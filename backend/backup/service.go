@@ -39,10 +39,11 @@ const backupTimeout = time.Hour
 
 // Service starts and records volume and Proxmox guest backups.
 type Service struct {
-	store   db.Store
-	exec    ExecFunc
-	proxmox ProxmoxFunc  // may be nil; guest backup returns error if nil
-	notify  NotifyFunc   // may be nil; notifications are best-effort
+	store       db.Store
+	verifyStore db.BackupRestoreStore // may be nil; verify results are best-effort
+	exec        ExecFunc
+	proxmox     ProxmoxFunc // may be nil; guest backup returns error if nil
+	notify      NotifyFunc  // may be nil; notifications are best-effort
 }
 
 // New wires the store + SSH exec. proxmoxFn may be nil in tests that only
@@ -50,6 +51,11 @@ type Service struct {
 func New(store db.Store, exec ExecFunc) *Service {
 	return &Service{store: store, exec: exec}
 }
+
+// SetVerifyStore wires the narrow restore-verify persistence store.
+// Called during server startup. When nil, verify results are not persisted
+// (still returned to the caller).
+func (s *Service) SetVerifyStore(vs db.BackupRestoreStore) { s.verifyStore = vs }
 
 // SetProxmox wires the Proxmox client provider. Called during server startup
 // after the nodeconn.Manager is available.
