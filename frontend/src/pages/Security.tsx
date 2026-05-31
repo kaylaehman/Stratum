@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { ShieldAlert, AlertTriangle, RefreshCw, Check, Network, Loader } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
@@ -9,7 +9,10 @@ import {
   useAcknowledgeFlag,
   useRescan,
 } from '../lib/api/security'
+import { useIncidentTimeline } from '../lib/api/incidents'
+import type { IncidentEntry } from '../lib/api/incidents'
 import { PostureCard } from '../components/security/PostureCard'
+import { EventDetailDrawer } from '../components/security/EventDetailDrawer'
 import type {
   FlaggedContainer,
   SecurityFlag,
@@ -122,8 +125,12 @@ function FlagRow({ flag, onAcknowledge, isPending }: FlagRowProps) {
               opacity: isPending ? 0.6 : 1,
             }}
           >
-            <Check size={10} />
-            Acknowledge
+            {isPending ? (
+              <Loader size={10} className="animate-spin" />
+            ) : (
+              <Check size={10} />
+            )}
+            {isPending ? 'Acknowledging…' : 'Acknowledge'}
           </button>
         )}
       </div>
@@ -307,6 +314,104 @@ function ListenerRow({ listener, nodes }: ListenerRowProps) {
   )
 }
 
+// ---- Event row (incidents list on security page) ----
+
+const INCIDENT_SEVERITY_COLOR: Record<string, string> = {
+  critical: 'var(--status-error)',
+  warning: 'var(--status-warn)',
+  info: 'var(--text-muted)',
+}
+
+const INCIDENT_SOURCE_COLOR: Record<string, string> = {
+  activity: 'var(--accent)',
+  container: '#6c8ebf',
+  metric: '#d48d00',
+  file_event: '#7b9e5f',
+}
+
+const INCIDENT_SOURCE_LABEL: Record<string, string> = {
+  activity: 'activity',
+  container: 'container',
+  metric: 'metric',
+  file_event: 'file',
+}
+
+interface EventRowProps {
+  entry: IncidentEntry
+  onClick: () => void
+}
+
+function EventRow({ entry, onClick }: EventRowProps) {
+  const sevColor = INCIDENT_SEVERITY_COLOR[entry.severity] ?? 'var(--text-muted)'
+  const srcColor = INCIDENT_SOURCE_COLOR[entry.source] ?? 'var(--text-muted)'
+  const srcLabel = INCIDENT_SOURCE_LABEL[entry.source] ?? entry.source
+
+  const ts = new Date(entry.timestamp)
+  const timeStr = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const dateStr = ts.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-3 px-3 py-2.5 w-full text-left"
+      style={{
+        background: 'transparent',
+        border: 'none',
+        borderBottom: '1px solid var(--border-subtle)',
+        cursor: 'pointer',
+      }}
+    >
+      {/* Severity dot */}
+      <span
+        title={entry.severity}
+        style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: sevColor, flexShrink: 0 }}
+      />
+
+      {/* Timestamp */}
+      <div className="shrink-0" style={{ minWidth: 88 }}>
+        <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
+          {timeStr}
+        </span>
+        <span className="text-xs font-mono ml-1" style={{ color: 'var(--text-muted)' }}>
+          {dateStr}
+        </span>
+      </div>
+
+      {/* Source badge */}
+      <span
+        className="font-mono text-xs px-1.5 py-0.5 shrink-0"
+        style={{
+          color: srcColor,
+          backgroundColor: 'var(--bg-elevated)',
+          border: `1px solid ${srcColor}`,
+          borderRadius: '3px',
+          opacity: 0.9,
+        }}
+      >
+        {srcLabel}
+      </span>
+
+      {/* Summary */}
+      <span
+        className="text-xs truncate flex-1"
+        style={{ color: 'var(--text-primary)' }}
+        title={entry.summary}
+      >
+        {entry.summary}
+      </span>
+
+      {/* Severity label */}
+      <span
+        className="font-mono text-xs shrink-0"
+        style={{ color: sevColor, minWidth: 52, textAlign: 'right' }}
+      >
+        {entry.severity}
+      </span>
+    </button>
+  )
+}
+
 // ---- Section header ----
 
 function SectionHeader({ label, count }: { label: string; count?: number }) {
@@ -357,12 +462,28 @@ export default function Security() {
   const nodes = tree?.nodes ?? []
 
   const [postureNodeId, setPostureNodeId] = useState('')
+  const [selectedEvent, setSelectedEvent] = useState<IncidentEntry | null>(null)
 
   const { data: privileged, isLoading: privLoading } = usePrivileged(isAdmin)
   const { data: ports, isLoading: portsLoading } = usePorts(isAdmin)
   const { mutate: rescan, isPending: rescanning } = useRescan()
 
-  const isLoading = meLoading || privLoading || portsLoading
+  // Load recent incidents (last 24h) for the events section.
+  // useMemo keeps the filter object reference stable so React Query doesn't
+  // treat each render as a new query key.
+  const incidentFilters = useMemo(
+    () => ({
+      from: new Date(Date.now() - 24 * 3_600_000).toISOString(),
+      to: new Date().toISOString(),
+    }),
+     
+    [],
+  )
+  const { data: incidentData, isLoading: incidentsLoading } = useIncidentTimeline(
+    isAdmin ? incidentFilters : {},
+  )
+
+  const isLoading = meLoading || privLoading || portsLoading || (isAdmin && incidentsLoading)
 
   // The backend marshals empty Go slices as JSON null, so ports.ports /
   // ports.non_docker_listeners can be null even when the object is present.
@@ -603,6 +724,53 @@ export default function Security() {
                 external access is not required.
               </span>
             </div>
+
+            {/* Section 3: Recent events (last 24 h) */}
+            <div className="mt-8 mb-8">
+              <SectionHeader
+                label="Recent Events"
+                count={incidentData?.entries.length ?? 0}
+              />
+              {!incidentData || incidentData.entries.length === 0 ? (
+                <div
+                  className="px-3 py-4 text-xs"
+                  style={{
+                    color: 'var(--text-muted)',
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '3px',
+                  }}
+                >
+                  No events in the last 24 hours.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '3px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {incidentData.entries.map((entry, i) => (
+                    <EventRow
+                      key={`${entry.timestamp}-${entry.source}-${i}`}
+                      entry={entry}
+                      onClick={() => setSelectedEvent(entry)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Event detail drawer */}
+            {selectedEvent && (
+              <EventDetailDrawer
+                entry={selectedEvent}
+                nodes={nodes}
+                onClose={() => setSelectedEvent(null)}
+              />
+            )}
           </>
         )}
       </div>

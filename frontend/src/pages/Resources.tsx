@@ -852,6 +852,11 @@ function DetailPane() {
  * tree data has loaded, selects the target item and expands its ancestors so it
  * is visible. Runs at most once per unique target (tracked by a ref so a
  * subsequent navigation to /resources without params doesn't re-fire).
+ *
+ * Supports a lone `?container=<id>` (no `?node=`) — scans all nodes in the tree
+ * to find which one owns the container, then selects and expands it. This allows
+ * bookmark deep-links built with resourceLink(undefined, containerId) to resolve
+ * correctly without knowing the node id in advance.
  */
 function useResourceDeepLink() {
   const [params, setParams] = useSearchParams()
@@ -859,12 +864,31 @@ function useResourceDeepLink() {
   const { setSelected, setExpanded } = useTreeStore()
   const appliedRef = useRef<string | null>(null)
 
-  const nodeId = params.get('node')
+  const nodeIdParam = params.get('node')
   const containerId = params.get('container')
-  const targetKey = nodeId ? `${nodeId}:${containerId ?? ''}` : null
+
+  // A target key that identifies this unique deep-link request.
+  const targetKey = nodeIdParam
+    ? `${nodeIdParam}:${containerId ?? ''}`
+    : containerId
+      ? `lone-container:${containerId}`
+      : null
 
   useEffect(() => {
-    if (!nodeId || !data || appliedRef.current === targetKey) return
+    if (!targetKey || !data || appliedRef.current === targetKey) return
+
+    // Determine the effective node. When only a containerId is provided, scan
+    // all nodes to find the one that owns this container.
+    let nodeId = nodeIdParam
+    if (!nodeId && containerId) {
+      const ownerNode = data.nodes.find((n) =>
+        n.containers.some((c) => c.id === containerId),
+      )
+      if (!ownerNode) return
+      nodeId = ownerNode.id
+    }
+
+    if (!nodeId) return
 
     const node = data.nodes.find((n) => n.id === nodeId)
     if (!node) return
@@ -892,7 +916,7 @@ function useResourceDeepLink() {
 
     // Strip the query params from the URL so refreshing doesn't re-apply.
     setParams({}, { replace: true })
-  }, [nodeId, containerId, data, targetKey, setSelected, setExpanded, setParams])
+  }, [nodeIdParam, containerId, data, targetKey, setSelected, setExpanded, setParams])
 }
 
 export default function Resources() {

@@ -104,3 +104,9 @@ docs/superpowers/specs/
 
 # Agent worktrees (live, per-session; never commit)
 .claude/worktrees/
+
+# Ruflo / claude-flow agent scratch artifacts
+.claude-flow/
+.swarm/
+.hive-mind/
+ruvector.db
