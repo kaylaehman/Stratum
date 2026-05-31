@@ -3,6 +3,7 @@ package stacks_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	appdb "github.com/kaylaehman/stratum/backend/db"
@@ -73,6 +74,22 @@ func TestSanitizeProject(t *testing.T) {
 	for _, tc := range cases {
 		if got := stacks.SanitizeProject(tc.in); got != tc.want {
 			t.Errorf("SanitizeProject(%q) = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestSanitizeProjectNeutralizesTraversal locks the security invariant relied on
+// by FindCompose (which path.Join's the project name): the sanitized result must
+// never contain a path separator or dot, so it cannot escape the search root.
+func TestSanitizeProjectNeutralizesTraversal(t *testing.T) {
+	payloads := []string{
+		"../../etc/passwd", "..\\..\\windows", "/etc/shadow",
+		"a/../../b", "....//....//etc", ".",
+	}
+	for _, p := range payloads {
+		got := stacks.SanitizeProject(p)
+		if strings.ContainsAny(got, `/\.`) {
+			t.Errorf("SanitizeProject(%q) = %q; still contains a path separator or dot", p, got)
 		}
 	}
 }
