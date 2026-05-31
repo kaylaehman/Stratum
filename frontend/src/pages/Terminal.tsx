@@ -70,11 +70,13 @@ export default function TerminalPage() {
                   outline: 'none',
                 }}
               >
-                {(nodes ?? []).map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.name} ({n.host})
-                  </option>
-                ))}
+                {[...(nodes ?? [])]
+                  .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+                  .map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.name} ({n.host})
+                    </option>
+                  ))}
               </select>
 
               {/* Reconnect */}

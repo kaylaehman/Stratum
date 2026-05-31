@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { HardDrive, Trash2, Loader, AlertTriangle, Database } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
@@ -202,10 +203,11 @@ function ConfirmDialog({ volumeName, nodeName, onConfirm, onCancel, isPending, i
 interface VolumeRowProps {
   volume: VolumeView
   nodeName: string
+  nodeId: string
   isAdmin: boolean
 }
 
-function VolumeRow({ volume, nodeName, isAdmin }: VolumeRowProps) {
+function VolumeRow({ volume, nodeName, nodeId, isAdmin }: VolumeRowProps) {
   const [confirming, setConfirming] = useState(false)
   const [inlineError, setInlineError] = useState<string | null>(null)
   const { mutate: removeVolume, isPending } = useRemoveVolume()
@@ -250,9 +252,14 @@ function VolumeRow({ volume, nodeName, isAdmin }: VolumeRowProps) {
         </td>
         <td
           className="px-3 py-2 text-xs"
-          style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}
+          style={{ borderBottom: '1px solid var(--border-subtle)' }}
         >
-          {nodeName}
+          <Link
+            to={`/resources?node=${nodeId}`}
+            style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}
+          >
+            {nodeName}
+          </Link>
         </td>
         <td
           className="px-3 py-2 font-mono text-xs uppercase"
@@ -438,6 +445,7 @@ export default function Volumes() {
                         key={`${vol.node_id}:${vol.name}`}
                         volume={vol}
                         nodeName={nodeName(vol.node_id)}
+                        nodeId={vol.node_id}
                         isAdmin={isAdmin}
                       />
                     ))}

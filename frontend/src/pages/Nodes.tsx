@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Server, Box, Terminal, Plus, RefreshCw, Pencil, Trash2, Check, X, Loader } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { AddNodeWizard } from '../components/nodes/AddNodeWizard'
@@ -280,14 +281,18 @@ function NodeRow({ node, onEditDocker }: { node: NodeView; onEditDocker: (node: 
         borderBottom: '1px solid var(--border-subtle)',
       }}
     >
-      {/* Type + Name */}
+      {/* Type + Name — links to the node in the resource tree */}
       <td className="px-3 py-2 align-middle" style={{ whiteSpace: 'nowrap' }}>
-        <div className="flex items-center gap-2">
+        <Link
+          to={`/resources?node=${node.id}`}
+          className="flex items-center gap-2"
+          style={{ textDecoration: 'none' }}
+        >
           <NodeTypeIcon type={node.type} />
           <span className="text-xs font-mono" style={{ color: 'var(--text-primary)' }}>
             {node.name}
           </span>
-        </div>
+        </Link>
         <div className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-muted)' }}>
           {node.type}
         </div>
