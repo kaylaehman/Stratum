@@ -52,6 +52,32 @@ export function useAcknowledgeFlag() {
   return useMutation({
     mutationFn: (req: AcknowledgeRequest) =>
       apiPost<unknown>('/api/security/acknowledge', req),
+    onMutate: async (req: AcknowledgeRequest) => {
+      await queryClient.cancelQueries({ queryKey: privilegedKey() })
+      const previous = queryClient.getQueryData<PrivilegedResponse>(privilegedKey())
+      queryClient.setQueryData<PrivilegedResponse>(privilegedKey(), (old) => {
+        if (!old) return old
+        return {
+          containers: old.containers.map((c) => {
+            if (c.container_id !== req.container_id) return c
+            return {
+              ...c,
+              flags: c.flags.map((f) =>
+                f.type === req.flag_type && f.key === req.flag_key
+                  ? { ...f, acknowledged: true }
+                  : f,
+              ),
+            }
+          }),
+        }
+      })
+      return { previous }
+    },
+    onError: (_err, _req, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(privilegedKey(), context.previous)
+      }
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: privilegedKey() })
       void queryClient.invalidateQueries({ queryKey: securityBadgesKey() })
