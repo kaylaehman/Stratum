@@ -32,6 +32,11 @@ var ErrAlreadyTerminal = errors.New("remediation: proposal is already in a termi
 // valid from the current status.
 var ErrInvalidTransition = errors.New("remediation: invalid status transition")
 
+// ErrSelfApproval is returned when the approver is the same user who created
+// the proposal. Separation of duties: a second pair of eyes must approve any
+// host command before it can be executed.
+var ErrSelfApproval = errors.New("remediation: a proposal cannot be approved by its creator")
+
 // GenerateRequest is the input for creating a new proposal.
 type GenerateRequest struct {
 	Source      string   // diagnostic | runbook | ai
@@ -102,6 +107,10 @@ func (s *Service) Approve(ctx context.Context, id, approvedBy string) (db.Remedi
 	}
 	if p.Status != StatusProposed {
 		return db.RemediationProposal{}, ErrInvalidTransition
+	}
+	// Separation of duties: the creator may not approve their own proposal.
+	if approvedBy != "" && approvedBy == p.CreatedBy {
+		return db.RemediationProposal{}, ErrSelfApproval
 	}
 	if err := s.store.UpdateProposalStatus(ctx, id, StatusApproved, approvedBy); err != nil {
 		return db.RemediationProposal{}, err
