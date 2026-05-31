@@ -132,6 +132,10 @@ func (h *Handlers) ApproveProposal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated, err := h.Remediation.Approve(r.Context(), id, user.ID)
+	if errors.Is(err, remediation.ErrSelfApproval) {
+		writeError(w, http.StatusForbidden, "self_approval_forbidden")
+		return
+	}
 	if errors.Is(err, remediation.ErrAlreadyTerminal) {
 		writeError(w, http.StatusConflict, "already_terminal")
 		return

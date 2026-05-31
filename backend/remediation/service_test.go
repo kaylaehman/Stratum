@@ -303,6 +303,27 @@ func (s *stubStore) SetBookmarkOrder(_ context.Context, _ string, _ []string) er
 }
 func (s *stubStore) Close() error { return nil }
 
+// Uptime methods (added when the uptime feature extended db.Store) — unused here.
+func (s *stubStore) CreateUptimeMonitor(_ context.Context, _ db.UptimeMonitor) error { panic("not used") }
+func (s *stubStore) GetUptimeMonitor(_ context.Context, _ string) (db.UptimeMonitor, error) {
+	panic("not used")
+}
+func (s *stubStore) ListUptimeMonitors(_ context.Context) ([]db.UptimeMonitor, error) {
+	panic("not used")
+}
+func (s *stubStore) UpdateUptimeMonitor(_ context.Context, _ db.UptimeMonitor) error { panic("not used") }
+func (s *stubStore) DeleteUptimeMonitor(_ context.Context, _ string) error           { panic("not used") }
+func (s *stubStore) InsertUptimeResult(_ context.Context, _ db.UptimeResult) error   { panic("not used") }
+func (s *stubStore) ListUptimeResults(_ context.Context, _ string, _, _ time.Time) ([]db.UptimeResult, error) {
+	panic("not used")
+}
+func (s *stubStore) LatestUptimeResult(_ context.Context, _ string) (db.UptimeResult, error) {
+	panic("not used")
+}
+func (s *stubStore) PruneUptimeResultsBefore(_ context.Context, _ time.Time) (int64, error) {
+	panic("not used")
+}
+
 // --- tests -------------------------------------------------------------------
 
 func TestGenerate_CreatesProposal(t *testing.T) {
@@ -350,6 +371,27 @@ func TestApprove_RequiresProposedStatus(t *testing.T) {
 	_, err = svc.Approve(ctx, p.ID, "admin-1")
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("second Approve err = %v; want ErrInvalidTransition", err)
+	}
+}
+
+func TestApprove_RejectsSelfApproval(t *testing.T) {
+	store := newStubStore()
+	svc := New(store, nil)
+	ctx := context.Background()
+
+	p, _ := svc.Generate(ctx, GenerateRequest{
+		Source: SourceAI, Title: "t", NodeID: "n", Commands: []string{"echo ok"},
+	}, "alice")
+
+	// The creator may not approve their own proposal (separation of duties).
+	_, err := svc.Approve(ctx, p.ID, "alice")
+	if !errors.Is(err, ErrSelfApproval) {
+		t.Fatalf("self-approve err = %v; want ErrSelfApproval", err)
+	}
+
+	// A different user can approve it.
+	if _, err := svc.Approve(ctx, p.ID, "bob"); err != nil {
+		t.Errorf("approve by other user: %v", err)
 	}
 }
 
