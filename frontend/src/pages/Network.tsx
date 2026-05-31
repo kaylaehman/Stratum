@@ -207,16 +207,18 @@ function WarnBanner({ message }: { message: string }) {
 
 export default function Network() {
   const { data: tree } = useTree()
-  const dockerNodes = useMemo(
-    () => (tree?.nodes ?? []).filter((n) => n.capabilities.docker),
-    [tree],
-  )
+
+  // Show ALL registered nodes in the selector — Docker capability is checked
+  // per-node by the backend and communicated back via topology.docker_error.
+  // Filtering to `capabilities.docker` here was the root cause of SSH-only and
+  // Proxmox nodes being silently excluded from the view.
+  const allNodes = useMemo(() => tree?.nodes ?? [], [tree])
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [graphSelection, setGraphSelection] = useState<GraphSelection>(null)
 
-  // Auto-select first docker node once tree loads
-  const activeNodeId = selectedNodeId ?? dockerNodes[0]?.id ?? null
+  // Auto-select first node once tree loads
+  const activeNodeId = selectedNodeId ?? allNodes[0]?.id ?? null
 
   const { data: topology, isLoading, error } = useNodeTopology(activeNodeId)
 
@@ -233,17 +235,33 @@ export default function Network() {
     return false
   }
 
+  // Derive a user-visible error message. With the updated backend, 502 is only
+  // returned for genuine store errors, not for Docker transport failures.
+  // Node-level unreachability is communicated via topology.node_status, and
+  // Docker-specific failures via topology.docker_error — both at HTTP 200.
   function errorMessage(): string | null {
     if (!error) return null
     if (error instanceof ApiError) {
-      if (error.status === 409) return 'No Docker available on this node.'
-      if (error.status === 502) return 'Node is unreachable.'
       if (error.status === 404) return 'Node not found.'
+      if (error.status === 500) return 'Server error loading topology.'
     }
     return 'Failed to load network topology.'
   }
 
+  // Warn when the topology loaded but the node is not reachable (poller-set).
+  function reachabilityWarning(): string | null {
+    if (!topology) return null
+    if (topology.node_status === 'unreachable') {
+      return 'Node is unreachable. Topology data may be stale.'
+    }
+    if (topology.docker_error) {
+      return 'Docker daemon is unavailable on this node. Network topology cannot be loaded.'
+    }
+    return null
+  }
+
   const errMsg = errorMessage()
+  const reachWarn = reachabilityWarning()
 
   return (
     <AppShell>
@@ -264,7 +282,7 @@ export default function Network() {
           </div>
 
           {/* Node selector */}
-          {dockerNodes.length > 0 && (
+          {allNodes.length > 0 && (
             <div className="flex items-center gap-2">
               <SectionLabel>Node</SectionLabel>
               <select
@@ -283,7 +301,7 @@ export default function Network() {
                   outline: 'none',
                 }}
               >
-                {dockerNodes.map((n) => (
+                {allNodes.map((n) => (
                   <option key={n.id} value={n.id}>
                     {n.name}
                   </option>
@@ -293,9 +311,9 @@ export default function Network() {
           )}
         </div>
 
-        {/* No docker nodes warning */}
-        {dockerNodes.length === 0 && !isLoading && (
-          <WarnBanner message="No Docker-capable nodes registered. Add a standalone or Proxmox node with Docker enabled." />
+        {/* No nodes registered */}
+        {allNodes.length === 0 && !isLoading && (
+          <WarnBanner message="No nodes registered. Add a standalone, Proxmox, or SSH node to get started." />
         )}
 
         {/* Loading */}
@@ -308,8 +326,13 @@ export default function Network() {
           </div>
         )}
 
-        {/* API error */}
+        {/* Hard API error (node not found / server error) */}
         {errMsg && <ErrorBanner message={errMsg} />}
+
+        {/* Soft reachability / Docker warning — topology response loaded but
+            the node is down or Docker is unavailable. Show the warning above
+            the (empty) graph so the user understands why it's blank. */}
+        {reachWarn && <WarnBanner message={reachWarn} />}
 
         {/* Main layout: graph + detail panel */}
         {topology && !errMsg && (

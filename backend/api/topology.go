@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 )
@@ -20,21 +19,21 @@ import (
 // docker.newHTTPClient) handles a fully hung TCP connection before this fires.
 const topologyTimeout = 45 * time.Second
 
-// NodeTopology returns the Docker network topology for a node (read-only).
+// NodeTopology returns the network topology for a node (read-only).
+// The node-level reachability status is always sourced from the DB (owned by
+// the poller) and returned in the response body, so the frontend never has to
+// infer reachability from a Docker transport failure.
+// A 502 is only returned when the DB itself cannot be queried or the node
+// record is not found — not when Docker is merely unavailable.
 func (h *Handlers) NodeTopology(w http.ResponseWriter, r *http.Request) {
 	nodeID := chi.URLParam(r, "id")
-	node, err := h.Store.GetNode(r.Context(), nodeID)
+	_, err := h.Store.GetNode(r.Context(), nodeID)
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
-		return
-	}
-	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
-	if !caps.Docker {
-		writeError(w, http.StatusConflict, "docker_not_available")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), topologyTimeout)
@@ -50,8 +49,10 @@ func (h *Handlers) NodeTopology(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		h.Logger.Warn("topology: docker call failed", "node", nodeID, "error", err)
-		writeError(w, http.StatusBadGateway, "node_unreachable")
+		// Only a genuine store error reaches here (Docker failures are absorbed
+		// into topo.DockerError by the service layer).
+		h.Logger.Warn("topology: service call failed", "node", nodeID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	writeJSON(w, http.StatusOK, topo)

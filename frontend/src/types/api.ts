@@ -736,6 +736,10 @@ export interface TopologyContainer {
 
 export interface TopologyResponse {
   node_id: string
+  /** Poller-authoritative node reachability: "ok" | "unreachable" | "error" | "unknown" */
+  node_status: NodeStatus
+  /** Non-empty when the Docker daemon could not be reached, even if the node itself is reachable. */
+  docker_error?: string
   networks: TopologyNetwork[]
   containers: TopologyContainer[]
 }
