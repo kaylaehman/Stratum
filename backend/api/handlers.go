@@ -10,6 +10,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/auth"
+	"github.com/kaylaehman/stratum/backend/automation"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
 	"github.com/kaylaehman/stratum/backend/chatbot"
@@ -81,6 +82,7 @@ type Handlers struct {
 	SSO            *sso.Service
 	Skills         *skills.Library
 	Uptime         *uptime.Service
+	Automation     *automation.Engine
 	Logger         *slog.Logger
 	StartedAt      time.Time
 

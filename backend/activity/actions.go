@@ -131,6 +131,10 @@ const (
 	ActionRemediationRejected  = "remediation.rejected"
 	ActionRemediationExecuted  = "remediation.executed"
 	ActionRemediationFailed    = "remediation.failed"
+
+	// Automations engine (Wave 6)
+	ActionAutomationConfig = "automation.config"
+	ActionAutomationRun    = "automation.run"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -152,6 +156,7 @@ const (
 	TargetUptime          = "uptime_monitor"
 	TargetRemediation     = "remediation"
 	TargetStack           = "stack"
+	TargetAutomation      = "automation"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -281,6 +286,9 @@ var actionCatalog = []ActionInfo{
 	{ActionRemediationRejected, "Remediation proposal rejected", "remediation", TargetRemediation},
 	{ActionRemediationExecuted, "Remediation executed", "remediation", TargetRemediation},
 	{ActionRemediationFailed, "Remediation execution failed", "remediation", TargetRemediation},
+
+	{ActionAutomationConfig, "Automation configured", "automation", TargetAutomation},
+	{ActionAutomationRun, "Automation ran", "automation", TargetAutomation},
 }
 
 var actionByName = func() map[string]ActionInfo {

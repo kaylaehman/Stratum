@@ -34,6 +34,7 @@ import Infrastructure from './pages/Infrastructure'
 import Stacks from './pages/Stacks'
 import Incidents from './pages/Incidents'
 import Uptime from './pages/Uptime'
+import Automations from './pages/Automations'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -268,6 +269,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Settings />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/automations"
+          element={
+            <AuthGuard>
+              <Automations />
             </AuthGuard>
           }
         />

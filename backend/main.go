@@ -24,6 +24,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
+	"github.com/kaylaehman/stratum/backend/automation"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/config"
 	"github.com/kaylaehman/stratum/backend/crypto"
@@ -244,6 +245,19 @@ func run(logger *slog.Logger) error {
 	// Import the uptime triggers package so its init() registers the trigger.
 	// The import happens via the uptime package itself (triggers.go init).
 
+	// Automations engine: build handler map and wire the engine.
+	automationHandlers := automation.BuildHandlers(store, automation.Deps{
+		Store:       store,
+		Conn:        conn,
+		Security:    securityScanner,
+		CVE:         cveSvc,
+		Volumes:     volumeSvc,
+		Recreate:    recreateSvc,
+		Backups:     backupSvc,
+		Remediation: remediationSvc,
+	})
+	automationEngine := automation.New(store, activity.NewStore(store), webhookDispatcher, automationHandlers, logger)
+
 	handlers := &api.Handlers{
 		Store:          store,
 		Activity:       activity.NewStore(store),
@@ -280,6 +294,7 @@ func run(logger *slog.Logger) error {
 		SSO:            ssoSvc,
 		Skills:         skillLib,
 		Uptime:         uptimeSvc,
+		Automation:     automationEngine,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -298,6 +313,7 @@ func run(logger *slog.Logger) error {
 	go metricsSampler.Run(ctx)                      // 15s resource-timeline sampler
 	go chatSvc.Run(ctx)                             // inbound chat-command poller (no-op until enabled+configured)
 	go uptimeSvc.Run(ctx)                           // uptime monitor checker loop
+	go automationEngine.Run(ctx)                    // automation engine tick loop (60s); stops on shutdown
 	go uptimeSvc.RunPrune(ctx, 90*24*time.Hour)     // prune results older than 90 days
 	// Agent streaming: probe existing nodes for agent reachability, then start
 	// the watch-file orchestrator. Both are no-ops when agentTLSCfg is nil
