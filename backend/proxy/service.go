@@ -173,6 +173,10 @@ func (s *Service) Status(ctx context.Context, nodeID string) (Status, error) {
 			slog.Warn("proxy: could not list rules", "adapter", adapter.Name(), "node_id", nodeID, "error", lerr)
 		} else {
 			st.Rules = rules
+			// Resolve each rule's TargetURL to a known container so the UI can
+			// deep-link from a route to the resource it serves. Best-effort and
+			// store-only; leaves Resolved nil when no confident match exists.
+			s.resolveRuleTargets(ctx, nodeID, st.Rules)
 			// For cloudflared: check if this is a dashboard-managed tunnel so the
 			// UI can display an informative state rather than an empty table.
 			if cf, ok := adapter.(*Cloudflared); ok && len(rules) == 0 {
@@ -187,6 +191,30 @@ func (s *Service) Status(ctx context.Context, nodeID string) (Status, error) {
 		}
 	}
 	return st, nil
+}
+
+// resolveRuleTargets fills rule.Resolved for each rule whose TargetURL maps to
+// a known container, using the node's container inventory + published-port
+// index (the same store data the ports audit uses — no live Docker calls).
+// Best-effort: store errors leave all rules unresolved (Resolved nil).
+func (s *Service) resolveRuleTargets(ctx context.Context, nodeID string, rules []Rule) {
+	if len(rules) == 0 {
+		return
+	}
+	containers, err := s.store.ListContainersByNode(ctx, nodeID)
+	if err != nil {
+		return
+	}
+	// ListAllPortExposures returns every node's ports; resolveTarget filters by
+	// nodeID, so passing the full set is correct (and avoids a per-container
+	// fan-out of ListPortExposuresByContainer).
+	ports, err := s.store.ListAllPortExposures(ctx)
+	if err != nil {
+		ports = nil // name matches still work without port data
+	}
+	for i := range rules {
+		rules[i].Resolved = resolveTarget(rules[i].TargetURL, nodeID, containers, ports)
+	}
 }
 
 // isFileBased reports whether an adapter reads its rules from the host

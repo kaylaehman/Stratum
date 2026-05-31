@@ -28,7 +28,8 @@ const (
 	ActionSecurityAcknowledge = "security.acknowledge"
 	ActionSecurityAckRevoke   = "security.revoke_acknowledge"
 
-	ActionVolumeRemove = "volume.remove"
+	ActionVolumeRemove      = "volume.remove"
+	ActionVolumePruneUnused = "volume.prune_unused"
 
 	ActionContainerStart       = "container.start"
 	ActionContainerStop        = "container.stop"
@@ -119,6 +120,11 @@ const (
 	// Stack edit + redeploy (stacks-edit feature)
 	ActionStackDeploy = "stack.deploy"
 
+	// Stack lifecycle (whole-project stop/start/restart)
+	ActionStackStop    = "stack.stop"
+	ActionStackStart   = "stack.start"
+	ActionStackRestart = "stack.restart"
+
 	// Agentic remediation (lifecycle events)
 	ActionRemediationGenerated = "remediation.generated"
 	ActionRemediationApproved  = "remediation.approved"
@@ -183,6 +189,7 @@ var actionCatalog = []ActionInfo{
 	{ActionSecurityAckRevoke, "Security acknowledgement revoked", "security", TargetAcknowledgement},
 
 	{ActionVolumeRemove, "Volume removed", "volume", TargetVolume},
+	{ActionVolumePruneUnused, "Unused volumes pruned", "volume", TargetVolume},
 
 	{ActionVMStart, "VM/LXC started", "vm", TargetVM},
 	{ActionVMStop, "VM/LXC stopped (force)", "vm", TargetVM},
@@ -265,6 +272,9 @@ var actionCatalog = []ActionInfo{
 	{ActionUptimeDelete, "Uptime monitor deleted", "uptime", TargetUptime},
 
 	{ActionStackDeploy, "Compose stack redeployed", "stack", TargetStack},
+	{ActionStackStop, "Compose stack stopped", "stack", TargetStack},
+	{ActionStackStart, "Compose stack started", "stack", TargetStack},
+	{ActionStackRestart, "Compose stack restarted", "stack", TargetStack},
 
 	{ActionRemediationGenerated, "Remediation proposal generated", "remediation", TargetRemediation},
 	{ActionRemediationApproved, "Remediation proposal approved", "remediation", TargetRemediation},

@@ -32,7 +32,7 @@ var composeFilenames = []string{
 // vault; the plaintext is never carried inside this struct at rest.
 type EnvVar struct {
 	Key      string `json:"key"`
-	Value    string `json:"value,omitempty"`    // plaintext — only present after Reveal
+	Value    string `json:"value,omitempty"`     // plaintext — only present after Reveal
 	SecretID string `json:"secret_id,omitempty"` // set when backed by the secrets vault
 	Masked   bool   `json:"masked"`              // true when backed by a secret
 }
@@ -137,6 +137,44 @@ func (s *Service) Deploy(
 	out, err := s.files.Exec(ctx, nodeID, "docker", cmdArgs...)
 	if err != nil {
 		return out, fmt.Errorf("compose up: %w", err)
+	}
+	return out, nil
+}
+
+// ErrInvalidAction is returned by Lifecycle for an action outside the allowed set.
+var ErrInvalidAction = fmt.Errorf("stacks: invalid lifecycle action")
+
+// lifecycleActions is the allowed set for Lifecycle; anything else is rejected.
+var lifecycleActions = map[string]bool{"stop": true, "start": true, "restart": true}
+
+// Lifecycle runs a whole-project compose lifecycle action (stop/start/restart)
+// against the named project on a node. The project name is sanitized before use.
+// It prefers `docker compose -p <project> <action>`, adding `-f <path>` when the
+// compose file can be located on disk (so the action targets the on-disk project
+// definition). Returns the combined command output.
+//
+// TODO: when no compose file is found and `docker compose -p` cannot resolve the
+// project (e.g. it was started without compose), fall back to acting on the set
+// of containers carrying the com.docker.compose.project label. Not implemented
+// here because the common case (stacks deployed via this platform) always has a
+// compose file or a labelled compose project the daemon can resolve by name.
+func (s *Service) Lifecycle(ctx context.Context, nodeID, project, action string) (string, error) {
+	if !lifecycleActions[action] {
+		return "", ErrInvalidAction
+	}
+	project = sanitizeProject(project)
+
+	cmdArgs := []string{"compose", "-p", project}
+	// Best-effort: if we can find the compose file, target it explicitly so the
+	// action operates on the on-disk project definition regardless of cwd.
+	if composePath, err := s.FindCompose(ctx, nodeID, project); err == nil && composePath != "" {
+		cmdArgs = append(cmdArgs, "-f", composePath)
+	}
+	cmdArgs = append(cmdArgs, action)
+
+	out, err := s.files.Exec(ctx, nodeID, "docker", cmdArgs...)
+	if err != nil {
+		return out, fmt.Errorf("compose %s: %w", action, err)
 	}
 	return out, nil
 }

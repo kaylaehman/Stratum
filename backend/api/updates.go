@@ -2,10 +2,12 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/updates"
 )
 
 type updateView struct {
@@ -35,6 +37,77 @@ func toUpdateView(r db.ImageUpdateRow) updateView {
 	}
 }
 
+// unknownBucket is one entry in the summary's per-category breakdown of unknown
+// rows. ExampleReason is the first reason string seen for that category (handy
+// for a UI tooltip).
+type unknownBucket struct {
+	Category      string `json:"category"`
+	Count         int    `json:"count"`
+	ExampleReason string `json:"example_reason"`
+}
+
+// updatesSummary aggregates the update rows so the UI can show counts and
+// explain why the "unknown" rows are unknown without re-deriving categories
+// client-side. dominant_* describe the highest-count category among unknown
+// rows (empty string / 0 when there are no unknowns).
+type updatesSummary struct {
+	Total                   int             `json:"total"`
+	UpToDate                int             `json:"up_to_date"`
+	UpdateAvailable         int             `json:"update_available"`
+	Unknown                 int             `json:"unknown"`
+	DominantUnknownCategory string          `json:"dominant_unknown_category"`
+	DominantUnknownCount    int             `json:"dominant_unknown_count"`
+	UnknownBreakdown        []unknownBucket `json:"unknown_breakdown"`
+}
+
+// summarizeUpdates computes the aggregate summary from the persisted rows.
+func summarizeUpdates(rows []db.ImageUpdateRow) updatesSummary {
+	s := updatesSummary{Total: len(rows), UnknownBreakdown: []unknownBucket{}}
+
+	// category -> count, and category -> first reason seen.
+	counts := map[string]int{}
+	example := map[string]string{}
+
+	for _, row := range rows {
+		switch row.Status {
+		case updates.StatusUpToDate:
+			s.UpToDate++
+		case updates.StatusUpdateAvailable:
+			s.UpdateAvailable++
+		case updates.StatusUnknown:
+			s.Unknown++
+			cat := updates.Category(row.UnknownReason)
+			counts[cat]++
+			if _, ok := example[cat]; !ok {
+				example[cat] = row.UnknownReason
+			}
+		}
+	}
+
+	for cat, n := range counts {
+		s.UnknownBreakdown = append(s.UnknownBreakdown, unknownBucket{
+			Category:      cat,
+			Count:         n,
+			ExampleReason: example[cat],
+		})
+	}
+	// Sort by count desc, then category asc for stable output.
+	sort.Slice(s.UnknownBreakdown, func(i, j int) bool {
+		a, b := s.UnknownBreakdown[i], s.UnknownBreakdown[j]
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		return a.Category < b.Category
+	})
+
+	if len(s.UnknownBreakdown) > 0 {
+		s.DominantUnknownCategory = s.UnknownBreakdown[0].Category
+		s.DominantUnknownCount = s.UnknownBreakdown[0].Count
+	}
+
+	return s
+}
+
 // Updates lists image update-availability across docker nodes (read-only).
 // Seeds the cache on demand (TTL-bounded).
 func (h *Handlers) Updates(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +121,10 @@ func (h *Handlers) Updates(w http.ResponseWriter, r *http.Request) {
 	for i, row := range rows {
 		out[i] = toUpdateView(row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"updates": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"updates": out,
+		"summary": summarizeUpdates(rows),
+	})
 }
 
 // RescanUpdates forces a fresh registry check of all docker nodes. Admin-gated

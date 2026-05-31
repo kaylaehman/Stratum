@@ -3,12 +3,14 @@ package topology
 import (
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"testing"
 
 	appdb "github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
 	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/kaylaehman/stratum/backend/nodeconn"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -38,6 +40,28 @@ var errProviderFail = errors.New("docker client unavailable")
 // providerFailing always returns an error (no Docker endpoint configured).
 func providerFailing(_ context.Context, _ string) (*docker.Client, error) {
 	return nil, errProviderFail
+}
+
+// fakeLister is a networkLister that returns canned networks (or an error),
+// letting the topology service be exercised without a live Docker daemon.
+type fakeLister struct {
+	networks []docker.NetworkInfo
+	err      error
+}
+
+func (f fakeLister) ListNetworks(context.Context) ([]docker.NetworkInfo, error) {
+	return f.networks, f.err
+}
+
+// withLister swaps the service's network-lister seam so a test can inject a
+// working or failing fake.
+func withLister(s *Service, l networkLister, err error) {
+	s.listerFor = func(context.Context, string) (networkLister, error) {
+		if err != nil {
+			return nil, err
+		}
+		return l, nil
+	}
 }
 
 // ── ForNode: node_status passthrough ─────────────────────────────────────────
@@ -116,6 +140,102 @@ func TestForNode_OkNodeWithDockerError(t *testing.T) {
 	}
 	if topo.DockerError == "" {
 		t.Error("docker_error must be non-empty to explain why topology is empty")
+	}
+}
+
+// TestForNode_NetworksReturnedForStandalone proves the core Bug-1 fix: a
+// standalone-style node with a WORKING docker client returns its networks
+// (bridge + user-defined), with container membership annotated — not an empty
+// topology.
+func TestForNode_NetworksReturnedForStandalone(t *testing.T) {
+	st := testStore(t, appdb.Node{
+		ID: "n1", Name: "test", Type: "standalone", Host: "h", Port: 22,
+		AuthMethod: "ssh_key", CredentialsEncrypted: []byte{1}, Status: "ok",
+	})
+	// One container present in inventory so membership can be annotated.
+	if err := st.UpsertContainer(context.Background(), appdb.Container{
+		ID: "c-internal-1", NodeID: "n1", DockerID: "deadbeefcafe0001",
+		Name: "web", Status: "running",
+	}); err != nil {
+		t.Fatalf("UpsertContainer: %v", err)
+	}
+
+	nets := []docker.NetworkInfo{
+		{ID: "net-bridge", Name: "bridge", Driver: "bridge"},
+		{ID: "net-app", Name: "app-net", Driver: "bridge",
+			Endpoints: []docker.NetworkEndpoint{{ContainerID: "deadbeefcafe0001", Name: "web"}}},
+	}
+	svc := New(st, providerFailing) // provider unused: lister seam overridden below
+	withLister(svc, fakeLister{networks: nets}, nil)
+
+	topo, err := svc.ForNode(context.Background(), "n1")
+	if err != nil {
+		t.Fatalf("ForNode returned unexpected error: %v", err)
+	}
+	if topo.DockerError != "" {
+		t.Errorf("docker_error = %q, want empty (working client)", topo.DockerError)
+	}
+	if len(topo.Networks) != 2 {
+		t.Fatalf("got %d networks, want 2 (bridge + app-net)", len(topo.Networks))
+	}
+	// Sorted by name: app-net, bridge.
+	if topo.Networks[0].Name != "app-net" || topo.Networks[1].Name != "bridge" {
+		t.Errorf("network order = [%s %s], want [app-net bridge]",
+			topo.Networks[0].Name, topo.Networks[1].Name)
+	}
+	if len(topo.Containers) != 1 {
+		t.Fatalf("got %d containers, want 1", len(topo.Containers))
+	}
+	web := topo.Containers[0]
+	if len(web.Networks) != 1 || web.Networks[0] != "app-net" {
+		t.Errorf("web networks = %v, want [app-net]", web.Networks)
+	}
+	if web.Isolated {
+		t.Error("web should not be isolated: it is on app-net")
+	}
+}
+
+// TestForNode_TransportErrorPropagates proves a stale-connection transport
+// error from ListNetworks is RETURNED (so the API layer rebuilds + retries),
+// not swallowed into DockerError — the exact reason networks came back empty
+// while the poller still showed containers.
+func TestForNode_TransportErrorPropagates(t *testing.T) {
+	st := testStore(t, appdb.Node{
+		ID: "n1", Name: "test", Type: "standalone", Host: "h", Port: 22,
+		AuthMethod: "ssh_key", CredentialsEncrypted: []byte{1}, Status: "ok",
+	})
+	svc := New(st, providerFailing)
+	withLister(svc, fakeLister{err: io.EOF}, nil) // EOF => transport error
+
+	_, err := svc.ForNode(context.Background(), "n1")
+	if err == nil {
+		t.Fatal("ForNode should propagate a transport error so the API can retry")
+	}
+	if !nodeconn.IsTransportError(err) {
+		t.Errorf("propagated error is not a transport error: %v", err)
+	}
+}
+
+// TestForNode_AppErrorYieldsDockerErrorNotPanic proves a non-transport
+// ListNetworks failure degrades to an empty topology with DockerError set,
+// never a panic or a propagated Go error.
+func TestForNode_AppErrorYieldsDockerErrorNotPanic(t *testing.T) {
+	st := testStore(t, appdb.Node{
+		ID: "n1", Name: "test", Type: "standalone", Host: "h", Port: 22,
+		AuthMethod: "ssh_key", CredentialsEncrypted: []byte{1}, Status: "ok",
+	})
+	svc := New(st, providerFailing)
+	withLister(svc, fakeLister{err: errors.New("permission denied")}, nil)
+
+	topo, err := svc.ForNode(context.Background(), "n1")
+	if err != nil {
+		t.Fatalf("ForNode should not propagate a non-transport error: %v", err)
+	}
+	if topo.DockerError != "docker_list_networks_failed" {
+		t.Errorf("docker_error = %q, want docker_list_networks_failed", topo.DockerError)
+	}
+	if len(topo.Networks) != 0 {
+		t.Errorf("networks should be empty on app error, got %d", len(topo.Networks))
 	}
 }
 

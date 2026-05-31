@@ -84,10 +84,10 @@ func (h *Handlers) GetStackCompose(w http.ResponseWriter, r *http.Request) {
 
 // redeployBody is the request body for POST /api/nodes/:id/stacks/:project/deploy.
 type redeployBody struct {
-	ComposePath string           `json:"compose_path"` // must match found path or be allowlisted
-	ComposeYAML string           `json:"compose_yaml"` // updated YAML; if empty, existing file is used
-	EnvVars     []stacks.EnvVar  `json:"env_vars"`     // merged env; secrets referenced by id
-	SecretGroups []string         `json:"secret_groups"` // group IDs whose keys are injected wholesale
+	ComposePath  string          `json:"compose_path"`  // must match found path or be allowlisted
+	ComposeYAML  string          `json:"compose_yaml"`  // updated YAML; if empty, existing file is used
+	EnvVars      []stacks.EnvVar `json:"env_vars"`      // merged env; secrets referenced by id
+	SecretGroups []string        `json:"secret_groups"` // group IDs whose keys are injected wholesale
 }
 
 // RedeployStack writes the updated compose YAML and runs `docker compose up -d`.
@@ -186,6 +186,84 @@ func (h *Handlers) RedeployStack(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"output": out,
 	})
+}
+
+// stackLifecycleTimeout bounds a whole-project stop/start/restart.
+const stackLifecycleTimeout = 5 * time.Minute
+
+// StackLifecycle runs a whole-project compose lifecycle action (stop/start/
+// restart) on a node. Operator-gated (matches container start/stop/restart) +
+// audited. Docker capability required; degrades to 409 on SSH-only nodes.
+func (h *Handlers) StackLifecycle(w http.ResponseWriter, r *http.Request) {
+	if !h.requireOperator(w, r) {
+		return
+	}
+
+	nodeID := chi.URLParam(r, "id")
+	project := chi.URLParam(r, "project")
+
+	var body struct {
+		Action string `json:"action"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	switch body.Action {
+	case "stop", "start", "restart":
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_action")
+		return
+	}
+
+	node, err := h.Store.GetNode(r.Context(), nodeID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
+	if !caps.Docker {
+		writeError(w, http.StatusConflict, "docker_not_available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stackLifecycleTimeout)
+	defer cancel()
+
+	out, lifecycleErr := h.Stacks.Lifecycle(ctx, nodeID, project, body.Action)
+
+	auditStack(r, stackLifecycleAction(body.Action), nodeID, project, lifecycleErr)
+
+	if lifecycleErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error":  "stack_lifecycle_failed",
+			"output": out,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"action":  body.Action,
+		"project": project,
+		"output":  out,
+	})
+}
+
+// stackLifecycleAction maps a lifecycle action to its audit action constant.
+func stackLifecycleAction(action string) string {
+	switch action {
+	case "stop":
+		return activity.ActionStackStop
+	case "start":
+		return activity.ActionStackStart
+	case "restart":
+		return activity.ActionStackRestart
+	default:
+		return activity.ActionStackDeploy // unreachable: action is validated upstream
+	}
 }
 
 // ListStackEnvVars returns the env var keys (never values) for a (node, project).

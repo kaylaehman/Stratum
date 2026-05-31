@@ -929,8 +929,19 @@ export default function CVE() {
 
   return (
     <AppShell>
+      {/*
+        Page root is a flex column whose children stack vertically. It must NOT be
+        height-locked: AppShell's <main> is the scroll container (overflow-auto), so
+        this column has to grow to its full content height and let <main> scroll.
+        Previously `h-full` pinned the column to the viewport height; because the
+        stacked sections are shrinkable flex items, the tall lower sections (the
+        "Image Scans" table) got compressed/clipped and were unreachable without
+        zooming out. Dropping `h-full` (and the now-pointless `flex-1 min-h-0`,
+        which only matter for a height-constrained column) lets the page scroll
+        naturally and keeps Image Scans reachable.
+      */}
       <div
-        className="flex flex-col flex-1 min-h-0 h-full w-full p-6"
+        className="flex flex-col w-full p-6"
         style={{ maxWidth: '960px', margin: '0 auto' }}
       >
         {/* Page header */}

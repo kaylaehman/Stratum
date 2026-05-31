@@ -11,10 +11,20 @@ import (
 
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/kaylaehman/stratum/backend/nodeconn"
 )
 
 // ClientProvider yields a docker client for a node.
 type ClientProvider func(ctx context.Context, nodeID string) (*docker.Client, error)
+
+// networkLister is the slice of the Docker client the topology service depends
+// on. *docker.Client satisfies it (its ListNetworks has this exact signature),
+// so production wiring is unchanged; tests inject a fake to prove networks are
+// returned (and that transport errors propagate for the API-layer retry)
+// without a live daemon.
+type networkLister interface {
+	ListNetworks(ctx context.Context) ([]docker.NetworkInfo, error)
+}
 
 // ContainerNode is one container in the topology, annotated with the networks it
 // belongs to and whether it is isolated or on the host network.
@@ -40,11 +50,26 @@ type Topology struct {
 type Service struct {
 	store    db.Store
 	provider ClientProvider
+
+	// listerFor resolves the network lister for a node. It defaults to the
+	// provider (returning the concrete *docker.Client, which satisfies
+	// networkLister). Only tests override it, to inject a working/failing fake
+	// without a live daemon. Keeping it a seam — rather than changing the public
+	// ClientProvider signature — leaves main.go wiring untouched.
+	listerFor func(ctx context.Context, nodeID string) (networkLister, error)
 }
 
 // New builds the service.
 func New(store db.Store, provider ClientProvider) *Service {
-	return &Service{store: store, provider: provider}
+	s := &Service{store: store, provider: provider}
+	s.listerFor = func(ctx context.Context, nodeID string) (networkLister, error) {
+		c, err := s.provider(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
+	return s
 }
 
 // ForNode returns the network topology for one node: its networks (with
@@ -71,14 +96,27 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) (Topology, error) 
 		Containers: []ContainerNode{},
 	}
 
-	client, err := s.provider(ctx, nodeID)
+	client, err := s.listerFor(ctx, nodeID)
 	if err != nil {
+		// No usable Docker client for this node (e.g. Docker capability inferred
+		// over SSH with no TCP/TLS endpoint configured). The node may still be
+		// fully reachable per the poller — degrade to an empty topology with a
+		// descriptive marker rather than failing the request.
 		base.DockerError = "docker_client_unavailable"
 		return base, nil
 	}
 
 	networks, err := client.ListNetworks(ctx)
 	if err != nil {
+		// A transport-level failure (stale cached keep-alive connection after a
+		// daemon restart / idle reset) MUST be propagated so the API layer can
+		// rebuild the cached client and retry. Swallowing it into DockerError
+		// here is exactly why networks came back empty while the poller — which
+		// refreshes on its own cycle — still showed containers. Only a genuine
+		// application/protocol error degrades to an empty topology.
+		if nodeconn.IsTransportError(err) {
+			return Topology{}, err
+		}
 		base.DockerError = "docker_list_networks_failed"
 		return base, nil
 	}
