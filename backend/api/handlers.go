@@ -32,6 +32,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/remediation"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
+	"github.com/kaylaehman/stratum/backend/stacks"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/skills"
 	"github.com/kaylaehman/stratum/backend/sso"
@@ -68,6 +69,7 @@ type Handlers struct {
 	Backups        *backup.Service
 	TwoFA          *twofa.Service
 	Recreate       *recreate.Service
+	Stacks         *stacks.Service
 	AI             *ai.Service
 	Remediation    *remediation.Service
 	Certs          *certs.Service

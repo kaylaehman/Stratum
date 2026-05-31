@@ -289,6 +289,11 @@ func (s *stubStore) ListSecretKeysByGroup(_ context.Context, _ string) ([]db.Sec
 }
 func (s *stubStore) GetSecret(_ context.Context, _ string) (db.SecretRow, error) { panic("not used") }
 func (s *stubStore) DeleteSecret(_ context.Context, _ string) error               { panic("not used") }
+func (s *stubStore) UpsertStackEnvVar(_ context.Context, _ db.StackEnvRow) error  { panic("not used") }
+func (s *stubStore) ListStackEnvVars(_ context.Context, _, _ string) ([]db.StackEnvRow, error) {
+	panic("not used")
+}
+func (s *stubStore) DeleteStackEnvVar(_ context.Context, _, _, _ string) error    { panic("not used") }
 func (s *stubStore) CreateTemplate(_ context.Context, _ db.Template) error        { panic("not used") }
 func (s *stubStore) ListTemplates(_ context.Context) ([]db.Template, error)       { panic("not used") }
 func (s *stubStore) GetTemplate(_ context.Context, _ string) (db.Template, error) { panic("not used") }

@@ -116,6 +116,9 @@ const (
 	ActionUptimeUpdate = "uptime.update"
 	ActionUptimeDelete = "uptime.delete"
 
+	// Stack edit + redeploy (stacks-edit feature)
+	ActionStackDeploy = "stack.deploy"
+
 	// Agentic remediation (lifecycle events)
 	ActionRemediationGenerated = "remediation.generated"
 	ActionRemediationApproved  = "remediation.approved"
@@ -142,6 +145,7 @@ const (
 	TargetSkill           = "skill"
 	TargetUptime          = "uptime_monitor"
 	TargetRemediation     = "remediation"
+	TargetStack           = "stack"
 )
 
 // ActionInfo describes one action for the filter UI: a stable name, a
@@ -259,6 +263,8 @@ var actionCatalog = []ActionInfo{
 	{ActionUptimeCreate, "Uptime monitor created", "uptime", TargetUptime},
 	{ActionUptimeUpdate, "Uptime monitor updated", "uptime", TargetUptime},
 	{ActionUptimeDelete, "Uptime monitor deleted", "uptime", TargetUptime},
+
+	{ActionStackDeploy, "Compose stack redeployed", "stack", TargetStack},
 
 	{ActionRemediationGenerated, "Remediation proposal generated", "remediation", TargetRemediation},
 	{ActionRemediationApproved, "Remediation proposal approved", "remediation", TargetRemediation},
