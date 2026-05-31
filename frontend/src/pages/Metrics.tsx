@@ -279,8 +279,10 @@ function ChartWithTooltip({ series, height, yFormatter, spikes, spikeToMs }: Cha
   }
 
   return (
+    // w-full + overflow-hidden ensures the SVG scales to its container and doesn't overflow horizontally
     <div
       ref={wrapRef}
+      className="w-full overflow-hidden"
       style={{ position: 'relative' }}
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}
@@ -465,8 +467,9 @@ export default function Metrics() {
         <ContainerSeries key={`${id}:${range}`} containerId={id} range={range} onData={handleData} />
       ))}
 
+      {/* max-w-full prevents page-level horizontal overflow on narrow viewports */}
       <div
-        className="flex flex-col flex-1 min-h-0 h-full w-full p-6"
+        className="flex flex-col flex-1 min-h-0 h-full w-full max-w-full p-6"
         style={{ maxWidth: '1200px', margin: '0 auto' }}
       >
         {/* Page header */}
@@ -486,12 +489,15 @@ export default function Metrics() {
           <RangeSelector value={range} onChange={setRange} />
         </div>
 
-        <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-          {/* Left sidebar: container picker */}
+        {/*
+          On mobile (<md) the sidebar and charts stack vertically.
+          On md+ they sit side-by-side: sidebar fixed at 220px, charts take the rest.
+        */}
+        <div className="flex flex-col md:flex-row gap-5 items-start">
+          {/* Left sidebar: container picker — full width on mobile, fixed 220px on md+ */}
           <div
+            className="w-full md:w-[220px] md:shrink-0"
             style={{
-              width: '220px',
-              flexShrink: 0,
               backgroundColor: 'var(--bg-surface)',
               border: '1px solid var(--border-subtle)',
               borderRadius: '3px',
@@ -507,8 +513,8 @@ export default function Metrics() {
             <ContainerPicker selectedIds={selectedIds} onChange={setSelectedIds} />
           </div>
 
-          {/* Main chart area */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Main chart area — min-w-0 prevents flex children from overflowing */}
+          <div className="flex-1 min-w-0 w-full">
             {selectedIds.length === 0 ? (
               <div
                 style={{

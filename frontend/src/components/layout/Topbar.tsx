@@ -1,13 +1,15 @@
-import { LogOut, Search } from 'lucide-react'
+import { LogOut, Search, Menu } from 'lucide-react'
 import type { User } from '../../types/api'
 
 interface TopbarProps {
   user: User | null
   onLogout: () => void
   onSearchOpen?: () => void
+  /** Called when the hamburger button is tapped (mobile only). */
+  onMenuToggle?: () => void
 }
 
-export function Topbar({ user, onLogout, onSearchOpen }: TopbarProps) {
+export function Topbar({ user, onLogout, onSearchOpen, onMenuToggle }: TopbarProps) {
   return (
     <header
       className="h-11 flex items-center px-4 gap-4 shrink-0"
@@ -16,8 +18,26 @@ export function Topbar({ user, onLogout, onSearchOpen }: TopbarProps) {
         borderBottom: '1px solid var(--border-subtle)',
       }}
     >
-      {/* Brand — logo includes the wordmark, no adjacent text needed. */}
-      <div className="flex items-center w-52 shrink-0">
+      {/* Hamburger — visible only below md */}
+      <button
+        type="button"
+        onClick={onMenuToggle}
+        className="md:hidden flex items-center justify-center shrink-0 -ml-1"
+        aria-label="Open navigation"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--text-secondary)',
+          cursor: 'pointer',
+          padding: '4px',
+          borderRadius: '3px',
+        }}
+      >
+        <Menu size={18} />
+      </button>
+
+      {/* Brand — logo block is w-52 on desktop; auto-width on mobile to save space. */}
+      <div className="flex items-center w-auto md:w-52 shrink-0">
         <img src="/logo.png?v=2" alt="Stratum" height={28} style={{ height: 28, width: 'auto', display: 'block' }} />
       </div>
 

@@ -578,8 +578,9 @@ export default function Volumes() {
 
   return (
     <AppShell>
+      {/* max-w-full prevents page-level horizontal overflow on narrow viewports */}
       <div
-        className="flex flex-col flex-1 min-h-0 h-full w-full p-6"
+        className="flex flex-col flex-1 min-h-0 h-full w-full max-w-full p-6"
         style={{ maxWidth: '1100px', margin: '0 auto' }}
       >
         {/* Page header */}
@@ -594,8 +595,8 @@ export default function Volumes() {
             </h1>
           </div>
 
-          {/* Toolbar — filter + bulk prune */}
-          <div className="flex items-center gap-2">
+          {/* Toolbar — filter + bulk prune; flex-wrap so buttons stack on narrow screens */}
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Unused-only toggle */}
             <button
               type="button"

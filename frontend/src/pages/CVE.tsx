@@ -940,8 +940,9 @@ export default function CVE() {
         which only matter for a height-constrained column) lets the page scroll
         naturally and keeps Image Scans reachable.
       */}
+      {/* w-full + max-w-full prevents the column from exceeding viewport width on mobile */}
       <div
-        className="flex flex-col w-full p-6"
+        className="flex flex-col w-full max-w-full p-6"
         style={{ maxWidth: '960px', margin: '0 auto' }}
       >
         {/* Page header */}
@@ -1069,8 +1070,8 @@ export default function CVE() {
               <SchedulesPanel isAdmin={isAdmin} />
             </div>
 
-            {/* Scans table */}
-            <div className="mb-3 flex items-center gap-3">
+            {/* Scans table — header row wraps on narrow screens */}
+            <div className="mb-3 flex items-center gap-3 flex-wrap">
               <div
                 className="flex items-center gap-2"
                 style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: '6px', flex: 1 }}

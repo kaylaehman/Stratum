@@ -295,7 +295,8 @@ function ListenerRow({ listener, nodes }: ListenerRowProps) {
       className="flex items-center gap-4 px-3 py-2"
       style={{ borderBottom: '1px solid var(--border-subtle)' }}
     >
-      <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', width: '100px', flexShrink: 0 }}>
+      {/* minWidth instead of fixed width so it shrinks on very narrow viewports */}
+      <span className="font-mono text-xs" style={{ color: 'var(--text-muted)', minWidth: '80px', flexShrink: 0 }}>
         {nodeName}
       </span>
       <span className="font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
@@ -493,7 +494,8 @@ export default function Security() {
 
   return (
     <AppShell>
-      <div className="flex flex-col flex-1 min-h-0 h-full w-full p-6" style={{ maxWidth: '900px', margin: '0 auto' }}>
+      {/* max-w-full prevents page-level horizontal overflow on narrow viewports */}
+      <div className="flex flex-col flex-1 min-h-0 h-full w-full max-w-full p-6" style={{ maxWidth: '900px', margin: '0 auto' }}>
         {/* Page header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
@@ -744,12 +746,13 @@ export default function Security() {
                   No events in the last 24 hours.
                 </div>
               ) : (
+                // overflowX: auto so long event rows scroll within the card, not the page
                 <div
                   style={{
                     backgroundColor: 'var(--bg-surface)',
                     border: '1px solid var(--border-subtle)',
                     borderRadius: '3px',
-                    overflow: 'hidden',
+                    overflowX: 'auto',
                   }}
                 >
                   {incidentData.entries.map((entry, i) => (
