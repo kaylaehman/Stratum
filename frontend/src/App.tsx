@@ -33,6 +33,7 @@ import TerminalPage from './pages/Terminal'
 import Infrastructure from './pages/Infrastructure'
 import Stacks from './pages/Stacks'
 import Incidents from './pages/Incidents'
+import Uptime from './pages/Uptime'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -139,6 +140,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Incidents />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/uptime"
+          element={
+            <AuthGuard>
+              <Uptime />
             </AuthGuard>
           }
         />

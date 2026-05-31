@@ -170,6 +170,11 @@ func NewRouter(d *Deps) http.Handler {
 			// Incident timeline (read-only; merges activity, containers, metrics, file events).
 			r.Get("/incidents/timeline", d.Handlers.IncidentTimeline)
 
+			// Uptime monitors (read; CRUD is audited below).
+			r.Get("/uptime/monitors", d.Handlers.ListUptimeMonitors)
+			r.Get("/uptime/monitors/{id}", d.Handlers.GetUptimeMonitor)
+			r.Get("/uptime/monitors/{id}/history", d.Handlers.UptimeMonitorHistory)
+
 			// Image update detection (read-only; cross-node).
 			r.Get("/updates", d.Handlers.Updates)
 
@@ -301,6 +306,11 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/sessions/{id}", d.Handlers.RevokeOwnSession)
 			audited.Delete("/sessions/expired", d.Handlers.PruneExpiredSessions)
 			audited.Post("/auth/change-password", d.Handlers.ChangeOwnPassword)
+
+			// Uptime monitor mutations (audited).
+			audited.Post("/uptime/monitors", d.Handlers.CreateUptimeMonitor)
+			audited.Put("/uptime/monitors/{id}", d.Handlers.UpdateUptimeMonitor)
+			audited.Delete("/uptime/monitors/{id}", d.Handlers.DeleteUptimeMonitor)
 		})
 	})
 

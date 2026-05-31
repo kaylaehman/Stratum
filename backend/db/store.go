@@ -294,6 +294,32 @@ type Runbook struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+// UptimeMonitor is a configured endpoint health check (Feature: uptime monitoring).
+// NodeID is nil for backend-originated checks.
+type UptimeMonitor struct {
+	ID              string
+	Name            string
+	Type            string // http | tcp | icmp
+	Target          string
+	IntervalSeconds int
+	TimeoutMs       int
+	Expected        string
+	Enabled         bool
+	NodeID          *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// UptimeResult is one recorded outcome of an uptime check.
+type UptimeResult struct {
+	ID             string
+	MonitorID      string
+	CheckedAt      time.Time
+	Status         string // up | down | degraded
+	ResponseTimeMs int
+	Error          string
+}
+
 // CustomSkill is a user-authored troubleshooting skill, stored as the verbatim
 // YAML the operator wrote (parsed into the in-memory library at load time). ID
 // is the skill's own id parsed from that YAML.
@@ -722,6 +748,17 @@ type Store interface {
 	ListBookmarksByUser(ctx context.Context, userID string) ([]Bookmark, error)
 	DeleteBookmark(ctx context.Context, id, userID string) error
 	SetBookmarkOrder(ctx context.Context, userID string, orderedIDs []string) error
+
+	// Uptime monitors + results
+	CreateUptimeMonitor(ctx context.Context, m UptimeMonitor) error
+	GetUptimeMonitor(ctx context.Context, id string) (UptimeMonitor, error)
+	ListUptimeMonitors(ctx context.Context) ([]UptimeMonitor, error)
+	UpdateUptimeMonitor(ctx context.Context, m UptimeMonitor) error
+	DeleteUptimeMonitor(ctx context.Context, id string) error
+	InsertUptimeResult(ctx context.Context, r UptimeResult) error
+	ListUptimeResults(ctx context.Context, monitorID string, from, to time.Time) ([]UptimeResult, error)
+	LatestUptimeResult(ctx context.Context, monitorID string) (UptimeResult, error)
+	PruneUptimeResultsBefore(ctx context.Context, cutoff time.Time) (int64, error)
 
 	Close() error
 }

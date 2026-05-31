@@ -37,6 +37,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
+	"github.com/kaylaehman/stratum/backend/uptime"
 	"github.com/kaylaehman/stratum/backend/volumes"
 	"github.com/kaylaehman/stratum/backend/webhooks"
 )
@@ -75,6 +76,7 @@ type Handlers struct {
 	FileWatch      *filewatch.Service
 	SSO            *sso.Service
 	Skills         *skills.Library
+	Uptime         *uptime.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
