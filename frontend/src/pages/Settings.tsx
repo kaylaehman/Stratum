@@ -1,4 +1,5 @@
 import { useState, Fragment } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ShieldCheck,
   Copy,
@@ -1847,46 +1848,174 @@ function ChatIntegrationSection() {
   )
 }
 
+// ── Section navigation ────────────────────────────────────────────────────────
+
+type SectionId =
+  | 'account'
+  | 'sessions'
+  | 'users'
+  | 'ai'
+  | 'memory'
+  | 'features'
+  | 'chat'
+
+interface NavSection {
+  id: SectionId
+  label: string
+  adminOnly?: boolean
+}
+
+const ALL_SECTIONS: NavSection[] = [
+  { id: 'account',  label: 'Account' },
+  { id: 'sessions', label: 'Sessions' },
+  { id: 'users',    label: 'Users',    adminOnly: true },
+  { id: 'ai',       label: 'AI Assistant', adminOnly: true },
+  { id: 'memory',   label: 'Memory & Runbooks' },
+  { id: 'features', label: 'Features' },
+  { id: 'chat',     label: 'Chat Integration', adminOnly: true },
+]
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Settings() {
   const user = useAuthStore((s) => s.user)
   const { isAdmin } = useCan()
 
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const visibleSections = ALL_SECTIONS.filter(s => !s.adminOnly || isAdmin)
+  const defaultSection = visibleSections[0]?.id ?? 'account'
+
+  const rawSection = searchParams.get('section') as SectionId | null
+  const activeId: SectionId =
+    rawSection && visibleSections.some(s => s.id === rawSection)
+      ? rawSection
+      : defaultSection
+
+  function selectSection(id: SectionId) {
+    setSearchParams({ section: id }, { replace: true })
+  }
+
+  // ── nav-item style ─────────────────────────────────────────────────────────
+  function navItem(id: SectionId): React.CSSProperties {
+    const active = id === activeId
+    return {
+      display: 'block',
+      width: '100%',
+      textAlign: 'left',
+      padding: '7px 12px',
+      fontSize: '0.75rem',
+      fontWeight: active ? 600 : 400,
+      color: active ? 'var(--accent)' : 'var(--text-secondary)',
+      background: active
+        ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
+        : 'transparent',
+      border: 'none',
+      borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+      borderRadius: '0 3px 3px 0',
+      cursor: 'pointer',
+      transition: 'background 0.1s, color 0.1s',
+      whiteSpace: 'nowrap',
+    }
+  }
+
   return (
     <AppShell>
-      <div style={{ maxWidth: '640px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-        {/* Page header */}
-        <div>
-          <h1 className="text-base font-semibold" style={{ color: 'var(--text-primary)', margin: 0 }}>
-            Settings
-          </h1>
-          {user && (
-            <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
-              Signed in as <span style={{ color: 'var(--text-secondary)' }}>{user.username}</span>
-              {' · '}
-              <RoleBadge role={user.role} />
-            </p>
+      {/* ── page header ───────────────────────────────────────────────────── */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 className="text-base font-semibold" style={{ color: 'var(--text-primary)', margin: 0 }}>
+          Settings
+        </h1>
+        {user && (
+          <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+            Signed in as <span style={{ color: 'var(--text-secondary)' }}>{user.username}</span>
+            {' · '}
+            <RoleBadge role={user.role} />
+          </p>
+        )}
+      </div>
+
+      {/* ── mobile: dropdown nav ─────────────────────────────────────────── */}
+      <div className="sm:hidden" style={{ marginBottom: '16px' }}>
+        <select
+          value={activeId}
+          onChange={e => selectSection(e.target.value as SectionId)}
+          style={{
+            width: '100%',
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-primary)',
+            borderRadius: '3px',
+            padding: '7px 10px',
+            fontSize: '0.8rem',
+            cursor: 'pointer',
+          }}
+        >
+          {visibleSections.map(s => (
+            <option key={s.id} value={s.id}>{s.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* ── desktop: sidebar + content ───────────────────────────────────── */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '24px',
+          alignItems: 'flex-start',
+        }}
+      >
+        {/* Left rail — hidden on mobile (replaced by dropdown above) */}
+        <nav
+          className="hidden sm:flex"
+          style={{
+            flexDirection: 'column',
+            minWidth: '148px',
+            flexShrink: 0,
+            position: 'sticky',
+            top: '16px',
+            gap: '2px',
+          }}
+          aria-label="Settings sections"
+        >
+          {visibleSections.map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => selectSection(s.id)}
+              style={navItem(s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Section content */}
+        <div style={{ flex: 1, minWidth: 0, maxWidth: '640px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {activeId === 'account' && (
+            <>
+              <TwoFactorSection />
+              <ChangePasswordSection />
+            </>
           )}
+
+          {activeId === 'sessions' && <SessionsSection />}
+
+          {activeId === 'users' && isAdmin && <UsersSection />}
+
+          {activeId === 'ai' && isAdmin && <AISettingsSection />}
+
+          {activeId === 'memory' && (
+            <>
+              <MemoryPanel scope="global" />
+              <RunbooksSection />
+            </>
+          )}
+
+          {activeId === 'features' && <FeaturesSection />}
+
+          {activeId === 'chat' && isAdmin && <ChatIntegrationSection />}
         </div>
-
-        <TwoFactorSection />
-
-        <ChangePasswordSection />
-
-        <SessionsSection />
-
-        {isAdmin && <UsersSection />}
-
-        {isAdmin && <AISettingsSection />}
-
-        <FeaturesSection />
-
-        {isAdmin && <ChatIntegrationSection />}
-
-        <MemoryPanel scope="global" />
-
-        <RunbooksSection />
       </div>
     </AppShell>
   )
