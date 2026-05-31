@@ -13,7 +13,7 @@ common_issues:
   - id: admin-secret-missing
     name: Admin web interface not accessible — ADMIN_SECRET not set
     symptoms:
-      - "401 Unauthorized" on admin panel
+      - '"401 Unauthorized" on admin panel'
       - "ADMIN_SECRET not found"
       - "Cannot log into web UI"
     trigger_conditions:
@@ -108,7 +108,7 @@ common_issues:
   - id: smtp-port-blocked
     name: Incoming mail rejected — port 25 unreachable
     symptoms:
-      - "Connection timed out" from external senders
+      - '"Connection timed out" from external senders'
       - "Inbound mail fails"
       - "MX record points here but no one can connect"
     trigger_conditions:

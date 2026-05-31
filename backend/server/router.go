@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
@@ -15,9 +17,13 @@ import (
 
 // Deps are everything the router needs to mount handlers and middleware.
 type Deps struct {
-	Handlers *api.Handlers
-	JWT      *auth.JWT
-	Store    db.Store
+	Handlers  *api.Handlers
+	JWT       *auth.JWT
+	Store     db.Store
+	// PromRegistry is the Prometheus registry for Stratum's own metrics.
+	// When non-nil, GET /metrics is registered as a public, unauthenticated
+	// Prometheus scrape endpoint.  When nil the route is omitted.
+	PromRegistry *prometheus.Registry
 }
 
 // NewRouter builds the chi router with the middleware order mandated by the
@@ -32,6 +38,15 @@ func NewRouter(d *Deps) http.Handler {
 
 	// Public, unauthenticated.
 	r.Get("/health", d.Handlers.Health)
+
+	// Prometheus scrape endpoint — top-level, outside /api, no auth required.
+	// Mount only when a registry is provided; omitting keeps the route absent in
+	// test setups that do not configure Prometheus.
+	if d.PromRegistry != nil {
+		r.Get("/metrics", promhttp.HandlerFor(d.PromRegistry, promhttp.HandlerOpts{
+			EnableOpenMetrics: true,
+		}).ServeHTTP)
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/setup/status", d.Handlers.SetupStatus)
@@ -339,6 +354,11 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Delete("/uptime/monitors/{id}", d.Handlers.DeleteUptimeMonitor)
 		})
 	})
+
+	// Embed fallback: serve the SPA for all non-API routes.
+	// In the default (no-tag) build, mountSPA is a no-op (embed_off.go).
+	// With -tags embed it serves frontend/dist (embed_on.go).
+	mountSPA(r)
 
 	return r
 }

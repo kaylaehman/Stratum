@@ -1,4 +1,4 @@
-id: jitsi-meet
+id: jitsi
 name: Jitsi Meet Video Conferencing
 version: "1.0"
 container_match:

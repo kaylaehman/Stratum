@@ -74,7 +74,7 @@ common_issues:
         type: inform
         command: ""
       - id: step-4
-        description: Generate a new random APP_KEY with base64: prefix
+        description: "Generate a new random APP_KEY with base64: prefix"
         type: fix
         command: "echo \"APP_KEY=base64:$(openssl rand -base64 32)\""
         requires_approval: true
@@ -224,7 +224,7 @@ default_config:
       description: Timezone
       default: "UTC"
     - name: APP_KEY
-      description: Laravel encryption key (must start with base64: followed by 32-byte base64 string)
+      description: "Laravel encryption key (must start with base64: followed by 32-byte base64 string)"
       default: "base64:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     - name: CONFIG_PATH
       description: Host path for /config (database and configuration)

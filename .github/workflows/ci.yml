@@ -92,9 +92,32 @@ jobs:
       - name: lint
         working-directory: frontend
         run: npm run lint
+      - name: test
+        working-directory: frontend
+        run: npm run test
       - name: build
         working-directory: frontend
         run: npm run build
+
+  # Playwright smoke (login -> resource tree). Non-blocking: it needs a running
+  # full stack, so it never gates the pipeline.
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: install
+        working-directory: frontend
+        run: npm ci
+      - name: install browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: smoke
+        working-directory: frontend
+        run: npm run test:e2e
 
   docker:
     runs-on: ubuntu-latest

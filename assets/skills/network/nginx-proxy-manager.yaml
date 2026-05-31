@@ -81,7 +81,7 @@ common_issues:
         type: inform
         command: ""
       - id: step-5
-        description: Alternative: reset admin user via Docker command
+        description: "Alternative: reset admin user via Docker command"
         type: fix
         command: "docker exec {container_name} npm run reset:admin"
         requires_approval: true

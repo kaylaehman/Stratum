@@ -163,7 +163,7 @@ default_config:
       description: NextAuth.js secret for session signing (generate with openssl rand -base64 32)
       default: ""
     - name: DATABASE_URL
-      description: PostgreSQL connection string (format: postgresql://user:password@host:port/dbname)
+      description: "PostgreSQL connection string (format: postgresql://user:password@host:port/dbname)"
       default: ""
     - name: NEXT_PUBLIC_WEBAPP_URL
       description: Public URL where Documenso is accessed (used in email links and OAuth callbacks)

@@ -90,10 +90,19 @@ func Load() (*Config, error) {
 	}
 	cfg.JWTSecret = []byte(secret)
 
-	// ENCRYPTION_KEY (required, exactly 32 bytes hex).
-	keyHex := strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
-	if keyHex == "" {
-		return nil, errors.New("config: ENCRYPTION_KEY is required (32 bytes hex)")
+	// ENCRYPTION_KEY / ENCRYPTION_KEY_FILE (required, exactly 32 bytes hex).
+	//
+	// Preference order (first non-empty wins):
+	//   1. ENCRYPTION_KEY_FILE — path to a file whose contents are the hex key.
+	//      Use this for Docker / Kubernetes secret mounts so the raw key never
+	//      appears in the process environment or `docker inspect` output.
+	//   2. ENCRYPTION_KEY — the hex key value directly in the environment
+	//      (legacy / dev-env back-compat).
+	//
+	// In both cases the value must be valid hex and decode to exactly 32 bytes.
+	keyHex, err := loadEncryptionKey()
+	if err != nil {
+		return nil, err
 	}
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
@@ -105,4 +114,27 @@ func Load() (*Config, error) {
 	cfg.EncryptionKey = key
 
 	return cfg, nil
+}
+
+// loadEncryptionKey resolves the hex-encoded AES-256 key from the environment.
+// It checks ENCRYPTION_KEY_FILE first (Docker/K8s secret mount path), then falls
+// back to the raw ENCRYPTION_KEY env var so existing deployments keep working.
+// Returns the trimmed hex string or an error if neither source provides a value.
+func loadEncryptionKey() (string, error) {
+	if filePath := strings.TrimSpace(os.Getenv("ENCRYPTION_KEY_FILE")); filePath != "" {
+		raw, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("config: ENCRYPTION_KEY_FILE %q: %w", filePath, err)
+		}
+		keyHex := strings.TrimSpace(string(raw))
+		if keyHex == "" {
+			return "", fmt.Errorf("config: ENCRYPTION_KEY_FILE %q is empty", filePath)
+		}
+		return keyHex, nil
+	}
+	keyHex := strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
+	if keyHex == "" {
+		return "", errors.New("config: ENCRYPTION_KEY is required (32 bytes hex); set ENCRYPTION_KEY or ENCRYPTION_KEY_FILE")
+	}
+	return keyHex, nil
 }

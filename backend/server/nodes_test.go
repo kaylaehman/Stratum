@@ -61,6 +61,23 @@ var errNoDockerInTest = errors.New("no docker in test")
 // it plus an admin access token (via the setup + login flow).
 func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
+	srv, token, _ := buildTestServer(t)
+	return srv, token
+}
+
+// newNodeTestServerWithStore is like newNodeTestServer but also returns the
+// underlying db.Store so tests can seed data (e.g. CVE results) before making
+// HTTP requests.
+func newNodeTestServerWithStore(t *testing.T) (*httptest.Server, string, appdb.Store) {
+	t.Helper()
+	return buildTestServer(t)
+}
+
+// buildTestServer is the shared server constructor that returns the store
+// alongside the httptest.Server and admin token. newNodeTestServer wraps this
+// and discards the store; newNodeTestServerWithStore exposes it.
+func buildTestServer(t *testing.T) (*httptest.Server, string, appdb.Store) {
+	t.Helper()
 	path := filepath.ToSlash(filepath.Join(t.TempDir(), "test.db"))
 	sqldb, err := appdb.Open("sqlite://" + path)
 	if err != nil {
@@ -133,7 +150,7 @@ func newNodeTestServer(t *testing.T) (*httptest.Server, string) {
 	if login.AccessToken == "" {
 		t.Fatal("no token")
 	}
-	return srv, login.AccessToken
+	return srv, login.AccessToken, store
 }
 
 // mustLoadSkills loads the real skill library from the repo's assets/skills so

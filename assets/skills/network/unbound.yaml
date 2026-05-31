@@ -195,6 +195,28 @@ notes: |
 
   DNSSEC validation: Unbound performs DNSSEC validation by default, improving security but requiring valid root hints and clock synchronization.
 
+  Quick start: Mount unbound.conf and run. The container initializes automatically with root hints.
+
+  Network setup: If Pi-hole or AdGuard is in a separate container, create a shared Docker network and use the container name (unbound) as the upstream address, not localhost.
+
+  Query logging: Enable query logging in unbound.conf with:
+  ```
+  log-queries: yes
+  log-replies: yes
+  ```
+
+  Then inspect logs with: docker logs unbound
+
+  Access control: Restrict which clients can query by adding to unbound.conf:
+  ```
+  access-control: 127.0.0.1/8 allow
+  access-control: 172.17.0.0/16 allow    # Docker bridge
+  access-control: 0.0.0.0/0 deny
+  ```
+
+  Common upstream configuration in Pi-hole:
+  Settings → DNS → Upstream DNS Servers → add 172.17.0.2:5335 (or <host-ip>:5335 if unbound is on a different Docker host)
+
 default_config:
   compose_template: |
     services:
@@ -234,28 +256,3 @@ default_config:
 
 linuxserver_conventions:
   enabled: false
-
-notes: |
-  Unbound is a simple, lightweight recursive DNS resolver. No special permissions or complex volume layouts required compared to Pi-hole.
-
-  Quick start: Mount unbound.conf and run. The container initializes automatically with root hints.
-
-  Network setup: If Pi-hole or AdGuard is in a separate container, create a shared Docker network and use the container name (unbound) as the upstream address, not localhost.
-
-  Query logging: Enable query logging in unbound.conf with:
-  ```
-  log-queries: yes
-  log-replies: yes
-  ```
-
-  Then inspect logs with: docker logs unbound
-
-  Access control: Restrict which clients can query by adding to unbound.conf:
-  ```
-  access-control: 127.0.0.1/8 allow
-  access-control: 172.17.0.0/16 allow    # Docker bridge
-  access-control: 0.0.0.0/0 deny
-  ```
-
-  Common upstream configuration in Pi-hole:
-  Settings → DNS → Upstream DNS Servers → add 172.17.0.2:5335 (or <host-ip>:5335 if unbound is on a different Docker host)

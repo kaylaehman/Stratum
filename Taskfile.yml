@@ -69,6 +69,18 @@ tasks:
       - npm run typecheck
       - npm run lint
 
+  frontend:test:
+    desc: Run the frontend unit tests (Vitest)
+    dir: frontend
+    cmds:
+      - npm run test
+
+  skills:validate:
+    desc: Validate the service-skill catalog (schema + risk gating)
+    dir: backend
+    cmds:
+      - go test ./skills/... -run TestValidateCatalog -count=1
+
   test:
     desc: Run all backend + agent tests
     cmds:

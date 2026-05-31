@@ -113,7 +113,7 @@ common_issues:
     name: Services fail to start — database not initialized
     symptoms:
       - "Cannot connect to database"
-      - "database error" in logs
+      - '"database error" in logs'
       - "admin container exits immediately"
     trigger_conditions:
       - log_pattern: "database"

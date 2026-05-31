@@ -81,7 +81,7 @@ common_issues:
         type: inform
         command: ""
       - id: step-4
-        description: Restrict to read-only operations: disable mutating endpoints
+        description: "Restrict to read-only operations: disable mutating endpoints"
         type: fix
         command: "docker exec {container_name} sed -i 's/^DELETE=.*/DELETE=0/' /etc/environment && docker exec {container_name} sed -i 's/^POST=.*/POST=0/' /etc/environment"
         requires_approval: true
