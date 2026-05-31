@@ -15,14 +15,23 @@ type updateView struct {
 	Status        string `json:"status"`
 	CurrentDigest string `json:"current_digest"`
 	LatestDigest  string `json:"latest_digest"`
+	// UnknownReason is non-empty only when status == "unknown"; it explains why
+	// the digest comparison could not be made (e.g. locally-built image,
+	// private registry auth failure, rate-limit). Suitable for a UI tooltip.
+	UnknownReason string `json:"unknown_reason,omitempty"`
 	CheckedAt     string `json:"checked_at"`
 }
 
 func toUpdateView(r db.ImageUpdateRow) updateView {
 	return updateView{
-		ContainerID: r.ContainerID, NodeID: r.NodeID, Image: r.Image, Status: r.Status,
-		CurrentDigest: r.CurrentDigest, LatestDigest: r.LatestDigest,
-		CheckedAt: r.CheckedAt.UTC().Format(time.RFC3339),
+		ContainerID:   r.ContainerID,
+		NodeID:        r.NodeID,
+		Image:         r.Image,
+		Status:        r.Status,
+		CurrentDigest: r.CurrentDigest,
+		LatestDigest:  r.LatestDigest,
+		UnknownReason: r.UnknownReason,
+		CheckedAt:     r.CheckedAt.UTC().Format(time.RFC3339),
 	}
 }
 

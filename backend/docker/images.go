@@ -6,6 +6,33 @@ import (
 	"strings"
 )
 
+// NormalizeImageRef ensures an image reference has a tag so the Docker daemon
+// can resolve it against the registry. Bare names like "nginx" or
+// "myregistry.example.com/myimage" have ":latest" appended. References that
+// already carry a tag ("nginx:1.25") or a digest pin ("nginx@sha256:...") are
+// returned unchanged.
+func NormalizeImageRef(ref string) string {
+	if ref == "" {
+		return ref
+	}
+	// Already digest-pinned — leave as-is.
+	if strings.Contains(ref, "@") {
+		return ref
+	}
+	// Find the image name portion (after the last "/") and check for a colon
+	// that signals a tag. We inspect only the last path segment so that a
+	// registry host with a port ("registry.local:5000/img") is not mistaken
+	// for a tagged reference.
+	last := ref
+	if i := strings.LastIndex(ref, "/"); i >= 0 {
+		last = ref[i+1:]
+	}
+	if strings.Contains(last, ":") {
+		return ref
+	}
+	return ref + ":latest"
+}
+
 // LocalRepoDigest returns the content-addressable repo digest of a locally
 // present image (e.g. "sha256:abc..."), via ImageInspect. Returns "" when the
 // image has no repo digest (e.g. built locally, never pushed/pulled).
@@ -60,9 +87,12 @@ func digestFromRepoDigests(repoDigests []string) string {
 // RemoteDigest queries the registry for an image reference's current manifest
 // digest WITHOUT pulling it (anonymous; private registries that require auth
 // return an error, surfaced by the caller as "unknown"). ref is the image
-// reference as configured (e.g. "jellyfin/jellyfin:latest").
+// reference as configured (e.g. "jellyfin/jellyfin:latest"). The reference is
+// normalised to include a tag before the daemon call so that bare names like
+// "nginx" resolve correctly.
 func (c *Client) RemoteDigest(ctx context.Context, ref string) (string, error) {
-	di, err := c.cli.DistributionInspect(ctx, ref, "")
+	normalized := NormalizeImageRef(ref)
+	di, err := c.cli.DistributionInspect(ctx, normalized, "")
 	if err != nil {
 		return "", err
 	}

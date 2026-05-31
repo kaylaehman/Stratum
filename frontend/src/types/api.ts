@@ -974,6 +974,10 @@ export interface ImageUpdate {
   status: UpdateStatus
   current_digest: string
   latest_digest: string
+  /** Non-empty only when status === 'unknown'. Human-readable reason why the
+   *  digest comparison could not be made (e.g. locally-built image, private
+   *  registry, rate-limit). Suitable for a tooltip. */
+  unknown_reason?: string
   checked_at: string
 }
 

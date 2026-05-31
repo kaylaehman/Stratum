@@ -10,6 +10,7 @@ package updates
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -110,16 +111,48 @@ func (s *Service) EnsureFresh(ctx context.Context, nodeID string) error {
 	return err
 }
 
+// checkOne fetches the local repo digest and the remote manifest digest for one
+// container and persists the result. Errors from either digest fetch are logged
+// and surfaced as UnknownReason so operators can see why a check failed.
 func (s *Service) checkOne(ctx context.Context, client *docker.Client, c db.Container) {
 	cctx, cancel := context.WithTimeout(ctx, perImageTimeout)
 	defer cancel()
-	local, _ := client.LocalRepoDigest(cctx, c.ImageID)
-	remote, rerr := client.RemoteDigest(cctx, c.Image)
-	newStatus := Classify(local, remote, rerr != nil)
-	_ = s.store.UpsertImageUpdate(ctx, db.ImageUpdateRow{
-		ContainerID: c.ID, NodeID: c.NodeID, Image: c.Image,
-		Status: newStatus, CurrentDigest: local, LatestDigest: remote, CheckedAt: time.Now(),
-	})
+
+	// ImageID may be empty for containers inventoried before the field existed;
+	// fall back to the image name/ref in that case.
+	lookupID := c.ImageID
+	if lookupID == "" {
+		lookupID = c.Image
+	}
+
+	local, localErr := client.LocalRepoDigest(cctx, lookupID)
+	if localErr != nil {
+		slog.Warn("updates: local digest lookup failed",
+			"container", c.Name, "image_id", lookupID, "err", localErr)
+	}
+
+	remote, remoteErr := client.RemoteDigest(cctx, c.Image)
+	if remoteErr != nil {
+		slog.Warn("updates: remote digest lookup failed",
+			"container", c.Name, "image", c.Image, "err", remoteErr)
+	}
+
+	newStatus, unknownReason := Classify(local, remote, localErr, remoteErr)
+
+	if err := s.store.UpsertImageUpdate(ctx, db.ImageUpdateRow{
+		ContainerID:   c.ID,
+		NodeID:        c.NodeID,
+		Image:         c.Image,
+		Status:        newStatus,
+		CurrentDigest: local,
+		LatestDigest:  remote,
+		UnknownReason: unknownReason,
+		CheckedAt:     time.Now(),
+	}); err != nil {
+		slog.Error("updates: failed to persist image update row",
+			"container", c.Name, "err", err)
+	}
+
 	// Fire a notification when an update is detected. The webhook dispatcher's
 	// 5-minute rate window prevents alert floods when EnsureFresh runs frequently.
 	if newStatus == StatusUpdateAvailable && s.notify != nil {
@@ -150,14 +183,30 @@ func (s *Service) EnsureAll(ctx context.Context) {
 }
 
 // Classify decides update status from the local repo digest, the remote
-// manifest digest, and whether the remote lookup failed. Unknown when either
-// digest is unavailable (locally-built image, private/rate-limited registry).
-func Classify(localDigest, remoteDigest string, remoteFailed bool) string {
-	if localDigest == "" || remoteFailed || remoteDigest == "" {
-		return StatusUnknown
+// manifest digest, and any errors from fetching them. It returns the status
+// string and, when the status is "unknown", a human-readable explanation of why
+// the comparison could not be made.
+//
+// Rules (evaluated in order):
+//   - localErr != nil  → unknown: daemon / image-inspect failure
+//   - localDigest == "" → unknown: locally-built image or no repo digest
+//   - remoteErr != nil → unknown: registry unreachable / auth / rate-limited
+//   - remoteDigest == "" → unknown: registry returned an empty digest
+//   - local == remote  → up_to_date
+//   - otherwise        → update_available
+func Classify(localDigest, remoteDigest string, localErr, remoteErr error) (status, unknownReason string) {
+	switch {
+	case localErr != nil:
+		return StatusUnknown, fmt.Sprintf("local digest unavailable: %v", localErr)
+	case localDigest == "":
+		return StatusUnknown, "no repo digest (locally-built or never pushed)"
+	case remoteErr != nil:
+		return StatusUnknown, fmt.Sprintf("registry lookup failed: %v", remoteErr)
+	case remoteDigest == "":
+		return StatusUnknown, "registry returned empty digest"
+	case localDigest == remoteDigest:
+		return StatusUpToDate, ""
+	default:
+		return StatusUpdateAvailable, ""
 	}
-	if localDigest == remoteDigest {
-		return StatusUpToDate
-	}
-	return StatusUpdateAvailable
 }
