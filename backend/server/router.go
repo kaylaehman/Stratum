@@ -184,6 +184,10 @@ func NewRouter(d *Deps) http.Handler {
 			// Image update detection (read-only; cross-node).
 			r.Get("/updates", d.Handlers.Updates)
 
+			// Live stack: compose read + env-var list (docker-gated; degrades on SSH-only).
+			r.Get("/nodes/{id}/stacks/{project}/compose", d.Handlers.GetStackCompose)
+			r.Get("/nodes/{id}/stacks/{project}/env", d.Handlers.ListStackEnvVars)
+
 			// Template library (read + render; CRUD/deploy are audited below).
 			r.Get("/templates", d.Handlers.ListTemplates)
 			r.Get("/templates/{id}", d.Handlers.GetTemplate)
@@ -253,6 +257,10 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/webhooks/{id}", d.Handlers.UpdateWebhook)
 			audited.Delete("/webhooks/{id}", d.Handlers.DeleteWebhook)
 			audited.Post("/updates/rescan", d.Handlers.RescanUpdates)
+			// Stack edit + redeploy (audited; admin-gated in handler).
+			audited.Post("/nodes/{id}/stacks/{project}/deploy", d.Handlers.RedeployStack)
+			audited.Put("/nodes/{id}/stacks/{project}/env/{key}", d.Handlers.SetStackEnvVar)
+			audited.Delete("/nodes/{id}/stacks/{project}/env/{key}", d.Handlers.DeleteStackEnvVar)
 			audited.Post("/templates", d.Handlers.CreateTemplate)
 			audited.Put("/templates/{id}", d.Handlers.UpdateTemplate)
 			audited.Delete("/templates/{id}", d.Handlers.DeleteTemplate)

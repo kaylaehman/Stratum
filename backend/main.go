@@ -54,6 +54,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
+	"github.com/kaylaehman/stratum/backend/stacks"
 	"github.com/kaylaehman/stratum/backend/skills"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
@@ -171,6 +172,7 @@ func run(logger *slog.Logger) error {
 	})
 	twoFASvc := twofa.New(store, cipher)
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
+	stacksSvc := stacks.New(store, filesSvc, cipher)
 	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL)
 	proxySvc := proxy.New(store, cipher)
 	proxySvc.WithFiles(filesSvc)
@@ -265,6 +267,7 @@ func run(logger *slog.Logger) error {
 		Backups:        backupSvc,
 		TwoFA:          twoFASvc,
 		Recreate:       recreateSvc,
+		Stacks:         stacksSvc,
 		AI:             aiSvc,
 		Remediation:    remediationSvc,
 		Certs:          certSvc,

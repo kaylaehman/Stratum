@@ -447,6 +447,17 @@ type Script struct {
 	UpdatedAt   time.Time
 }
 
+// StackEnvRow is one per-(node, project) environment variable for a live
+// Compose stack. Either Value (plaintext stored AES-sealed by the stacks
+// service) or SecretID (pointer into the secrets vault) is populated.
+type StackEnvRow struct {
+	NodeID      string
+	ProjectName string
+	Key         string
+	Value       string // plaintext stored AES-sealed; empty when SecretID is set
+	SecretID    string // non-empty when backed by secrets vault entry
+}
+
 // SecretGroup is a named group of secrets (Feature 12).
 type SecretGroup struct {
 	ID          string
@@ -766,6 +777,12 @@ type Store interface {
 	GetScript(ctx context.Context, id string) (Script, error)
 	UpdateScript(ctx context.Context, s Script) error
 	DeleteScript(ctx context.Context, id string) error
+
+	// Stack env vars (stacks-edit feature) — per (node, project) key-value store.
+	// Values are either plaintext (stored AES-sealed) or secret-vault references.
+	UpsertStackEnvVar(ctx context.Context, r StackEnvRow) error
+	ListStackEnvVars(ctx context.Context, nodeID, projectName string) ([]StackEnvRow, error)
+	DeleteStackEnvVar(ctx context.Context, nodeID, projectName, key string) error
 
 	// Secrets vault (Feature 12)
 	CreateSecretGroup(ctx context.Context, g SecretGroup) error

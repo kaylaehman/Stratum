@@ -1791,3 +1791,33 @@ export interface GenerateProposalRequest {
   commands: string[]
 }
 
+// ---- Stack edit + redeploy types (stacks-edit feature) ----
+
+export interface StackEnvVar {
+  key: string
+  secret_id?: string
+  masked: boolean
+}
+
+export interface StackComposeResponse {
+  compose_path: string
+  compose_yaml: string
+  env_vars: StackEnvVar[]
+  found: boolean
+}
+
+export interface StackEnvVarsResponse {
+  env_vars: StackEnvVar[]
+}
+
+export interface StackDeployRequest {
+  compose_path: string
+  compose_yaml: string
+  env_vars: Array<{ key: string; value?: string; secret_id?: string; masked?: boolean }>
+  secret_groups: string[]
+}
+
+export interface StackDeployResponse {
+  output: string
+}
+
