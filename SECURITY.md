@@ -105,7 +105,7 @@ GitHub will notify the maintainer privately. Expect an acknowledgment within
 ### Alternative contact
 
 If you are unable to use GitHub's advisory flow, email:
-**kaylaehman@pm.me** — include "STRATUM SECURITY" in the subject line.
+**security@kaylas.systems** — include "STRATUM SECURITY" in the subject line.
 PGP is not currently required; plain-text email is fine.
 
 ### Disclosure timeline
