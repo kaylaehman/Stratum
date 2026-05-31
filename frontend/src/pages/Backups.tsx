@@ -520,8 +520,12 @@ export default function Backups() {
 
   const { data: tree } = useTree()
   const nodes = tree?.nodes ?? []
-  const dockerNodes = nodes.filter((n) => n.capabilities.docker)
-  const proxmoxNodes = nodes.filter((n) => n.capabilities.proxmox && n.proxmox_auth_status === 'confirmed')
+  const dockerNodes = [...nodes.filter((n) => n.capabilities.docker)].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  )
+  const proxmoxNodes = [
+    ...nodes.filter((n) => n.capabilities.proxmox && n.proxmox_auth_status === 'confirmed'),
+  ].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 
   const { data: volumesData } = useVolumes()
   const allVolumes = volumesData?.volumes ?? []
