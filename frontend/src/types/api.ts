@@ -1458,6 +1458,16 @@ export interface ProxyCapabilities {
   delete: boolean
 }
 
+/** A reverse-proxy rule's TargetURL resolved to a known container/resource.
+ *  Present only when the backend could match the target; deep-link via
+ *  resourceLink(node_id, container_id). */
+export interface ResolvedTarget {
+  node_id: string
+  container_id: string
+  name: string
+  match_kind: 'container_name' | 'localhost_port' | 'host_ip_port'
+}
+
 export interface ProxyRule {
   id: string
   adapter_type: string
@@ -1467,6 +1477,8 @@ export interface ProxyRule {
   ssl_enabled: boolean
   cert_id?: string
   auth_enabled: boolean
+  /** Resolved container/resource this rule's target points at (nil when unresolved). */
+  resolved?: ResolvedTarget
 }
 
 export interface SupportedProxy {

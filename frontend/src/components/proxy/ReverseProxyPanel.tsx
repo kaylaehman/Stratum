@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Globe, Lock, Save, Loader, Network } from 'lucide-react'
 import { useNodeProxy, useSetProxyConfig } from '../../lib/api/proxy'
 import { useCan } from '../../lib/roles'
 import { ApiError } from '../../lib/api'
+import { resourceLink } from '../../lib/resourceLink'
 import type { ProxyRule, SupportedProxy } from '../../types/api'
 
 interface ReverseProxyPanelProps {
@@ -71,14 +73,48 @@ function RulesTable({ rules }: { rules: ProxyRule[] }) {
               key={r.id}
               style={{ borderBottom: '1px solid var(--border-subtle)' }}
             >
-              <td className="font-mono text-xs px-2 py-1.5" style={{ color: 'var(--text-primary)' }}>
-                {r.source_host}
+              {/* Source host — external link to the public hostname */}
+              <td className="font-mono text-xs px-2 py-1.5">
+                <a
+                  href={`https://${r.source_host}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: 'var(--text-primary)',
+                    textDecoration: 'underline',
+                    textDecorationColor: 'var(--border-subtle)',
+                  }}
+                >
+                  {r.source_host}
+                </a>
               </td>
               <td className="font-mono text-xs px-2 py-1.5" style={{ color: 'var(--text-muted)' }}>
                 {r.source_path ?? '/'}
               </td>
-              <td className="font-mono text-xs px-2 py-1.5 max-w-xs truncate" style={{ color: 'var(--text-secondary)' }}>
-                {r.target_url}
+              {/* Target — resolved container link, or plain url with not-found hint */}
+              <td className="font-mono text-xs px-2 py-1.5 max-w-xs">
+                {r.resolved ? (
+                  <Link
+                    to={resourceLink(r.resolved.node_id, r.resolved.container_id)}
+                    title={r.target_url}
+                    style={{
+                      color: 'var(--accent)',
+                      textDecoration: 'underline',
+                      textDecorationColor: 'var(--accent-dim)',
+                    }}
+                  >
+                    {r.resolved.name}
+                  </Link>
+                ) : (
+                  <span className="flex flex-col gap-0.5">
+                    <span className="truncate" style={{ color: 'var(--text-secondary)' }}>
+                      {r.target_url}
+                    </span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                      not found
+                    </span>
+                  </span>
+                )}
               </td>
               <td className="px-2 py-1.5">
                 {r.ssl_enabled && (
@@ -324,6 +360,33 @@ function ConfigForm({ nodeId, detected, currentEndpoint, hasToken }: ConfigFormP
   )
 }
 
+// ── Cloudflared SSH-required notice ─────────────────────────────────────────
+
+function CloudflaredSshNotice() {
+  return (
+    <p
+      className="font-mono text-xs mb-2"
+      style={{
+        color: 'var(--text-secondary)',
+        background: 'rgba(255,180,0,0.07)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: '3px',
+        padding: '4px 8px',
+      }}
+    >
+      cloudflared ingress rules are read from the on-disk config file, which requires SSH
+      access to this node.{' '}
+      <Link
+        to="/nodes"
+        style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+      >
+        Add SSH credentials for this node
+      </Link>{' '}
+      to enable rule listing.
+    </p>
+  )
+}
+
 // ── Main panel ───────────────────────────────────────────────────────────────
 
 export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
@@ -433,6 +496,14 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
     !isFileBased && (!data.configured || (data.rule_error !== undefined && data.rule_error !== ''))
   const showConfigForm = hasListCapability && needsConfig
 
+  // Detect the specific case: cloudflared + rule_error indicating SSH is missing.
+  // The backend surfaces this as a rule_error when SSH access is unavailable.
+  const cloudflaredNeedsSsh =
+    isFileBased &&
+    !data.dashboard_managed &&
+    data.rule_error !== undefined &&
+    data.rule_error !== ''
+
   return (
     <div style={sectionStyle}>
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
@@ -461,8 +532,11 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         </p>
       )}
 
-      {/* Rule-fetch error notice — for API-based adapters and SSH-not-configured */}
-      {data.rule_error && !data.dashboard_managed && (
+      {/* cloudflared: SSH not configured — actionable notice with link to add credentials */}
+      {cloudflaredNeedsSsh && <CloudflaredSshNotice />}
+
+      {/* Rule-fetch error notice — for API-based adapters only (not cloudflared) */}
+      {data.rule_error && !data.dashboard_managed && !isFileBased && (
         <p
           className="font-mono text-xs mb-2"
           style={{
@@ -475,9 +549,7 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         >
           {data.rule_error.toLowerCase().startsWith('admin endpoint not configured')
             ? 'Admin endpoint not configured — set one below to load rules.'
-            : isFileBased
-              ? data.rule_error
-              : `Couldn't reach the proxy admin API: ${data.rule_error}`}
+            : `Couldn't reach the proxy admin API: ${data.rule_error}`}
         </p>
       )}
 
