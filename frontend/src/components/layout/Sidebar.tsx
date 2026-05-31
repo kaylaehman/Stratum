@@ -54,47 +54,102 @@ interface NavGroup {
   children: NavLeaf[]
 }
 
-type NavEntry = NavLeaf | NavGroup
 
-function isGroup(entry: NavEntry): entry is NavGroup {
-  return 'children' in entry
-}
+// ---------------------------------------------------------------------------
+// Nav structure
+// ---------------------------------------------------------------------------
 
-const navItems: NavEntry[] = [
+/** Pinned items rendered above the groups (always visible). */
+const pinnedTop: NavLeaf[] = [
   { icon: <LayoutDashboard size={14} />, label: 'Dashboard', to: '/' },
   { icon: <GitBranch size={14} />, label: 'Resources', to: '/resources' },
-  { icon: <HardDrive size={14} />, label: 'Nodes', to: '/nodes' },
-  { icon: <Database size={14} />, label: 'Volumes', to: '/volumes' },
-  { icon: <TrendingUp size={14} />, label: 'Metrics', to: '/metrics' },
+]
+
+/** Pinned items rendered below the groups (always visible). */
+const pinnedBottom: NavLeaf[] = [
+  { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications', adminOnly: true },
+  { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },
+]
+
+/**
+ * Collapsible groups. Topology's four children are flattened directly under
+ * Infrastructure — nesting a NavGroup inside another NavGroup is not supported
+ * by the existing pattern and would add unnecessary complexity.
+ */
+const navGroups: NavGroup[] = [
   {
-    icon: <Share2 size={14} />,
-    label: 'Topology',
+    icon: <TrendingUp size={14} />,
+    label: 'Monitor',
     children: [
+      { icon: <TrendingUp size={14} />, label: 'Metrics', to: '/metrics' },
+      { icon: <ScrollText size={14} />, label: 'Logs', to: '/logs' },
+      { icon: <Radio size={14} />, label: 'Uptime', to: '/uptime' },
+      { icon: <AlertCircle size={14} />, label: 'Incidents', to: '/incidents' },
+      { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
+    ],
+  },
+  {
+    icon: <HardDrive size={14} />,
+    label: 'Infrastructure',
+    children: [
+      { icon: <HardDrive size={14} />, label: 'Nodes', to: '/nodes' },
+      { icon: <Database size={14} />, label: 'Volumes', to: '/volumes' },
+      // Topology children flattened here
       { icon: <NetworkIcon size={14} />, label: 'Infrastructure', to: '/infrastructure' },
       { icon: <Share2 size={14} />, label: 'Network', to: '/network' },
       { icon: <Workflow size={14} />, label: 'Dependencies', to: '/dependencies' },
       { icon: <Layers size={14} />, label: 'Stacks', to: '/stacks' },
     ],
   },
-  { icon: <ScrollText size={14} />, label: 'Logs', to: '/logs' },
-  { icon: <Bot size={14} />, label: 'Assistant', to: '/chat', operatorOnly: true },
-  { icon: <Shield size={14} />, label: 'Security', to: '/security' },
-  { icon: <ShieldAlert size={14} />, label: 'CVE Scan', to: '/cve' },
-  { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
-  { icon: <ArrowUpCircle size={14} />, label: 'Updates', to: '/updates' },
-  { icon: <LayoutTemplate size={14} />, label: 'Templates', to: '/templates' },
-  { icon: <Wrench size={14} />, label: 'Skills', to: '/skills' },
-  { icon: <ShieldCheck size={14} />, label: 'Certificates', to: '/certs', adminOnly: true },
-  { icon: <KeyRound size={14} />, label: 'Secrets', to: '/secrets', adminOnly: true },
-  { icon: <SquareTerminal size={14} />, label: 'Terminal', to: '/terminal', adminOnly: true },
-  { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
-  { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
-  { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
-  { icon: <AlertCircle size={14} />, label: 'Incidents', to: '/incidents' },
-  { icon: <Radio size={14} />, label: 'Uptime', to: '/uptime' },
-  { icon: <Bell size={14} />, label: 'Notifications', to: '/notifications', adminOnly: true },
-  { icon: <Settings size={14} />, label: 'Settings', to: '/settings' },
+  {
+    icon: <ArrowUpCircle size={14} />,
+    label: 'Operations',
+    children: [
+      { icon: <ArrowUpCircle size={14} />, label: 'Updates', to: '/updates' },
+      { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
+      { icon: <LayoutTemplate size={14} />, label: 'Templates', to: '/templates' },
+      { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
+      { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
+      { icon: <SquareTerminal size={14} />, label: 'Terminal', to: '/terminal', adminOnly: true },
+    ],
+  },
+  {
+    icon: <Shield size={14} />,
+    label: 'Security',
+    children: [
+      { icon: <Shield size={14} />, label: 'Security', to: '/security' },
+      { icon: <ShieldAlert size={14} />, label: 'CVE Scan', to: '/cve' },
+      { icon: <ShieldCheck size={14} />, label: 'Certificates', to: '/certs', adminOnly: true },
+      { icon: <KeyRound size={14} />, label: 'Secrets', to: '/secrets', adminOnly: true },
+    ],
+  },
+  {
+    icon: <Bot size={14} />,
+    label: 'Assist',
+    children: [
+      { icon: <Bot size={14} />, label: 'Assistant', to: '/chat', operatorOnly: true },
+      { icon: <Wrench size={14} />, label: 'Skills', to: '/skills' },
+    ],
+  },
 ]
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function sessionKey(groupLabel: string): string {
+  return `stratum.navGroup.${groupLabel}`
+}
+
+function readStoredOpen(groupLabel: string): boolean | null {
+  const raw = sessionStorage.getItem(sessionKey(groupLabel))
+  if (raw === null) return null
+  return raw === 'true'
+}
+
+function writeStoredOpen(groupLabel: string, open: boolean): void {
+  sessionStorage.setItem(sessionKey(groupLabel), String(open))
+}
 
 // Shared NavLink styling for leaf entries (top-level and nested).
 function navLinkStyle({ isActive }: { isActive: boolean }): React.CSSProperties {
@@ -106,25 +161,53 @@ function navLinkStyle({ isActive }: { isActive: boolean }): React.CSSProperties 
   }
 }
 
-/** A collapsible sidebar group (e.g. Topology → Network, Dependencies). Auto-
- *  expands when one of its child routes is active; otherwise starts collapsed. */
-function NavGroupItem({ group }: { group: NavGroup }) {
+// ---------------------------------------------------------------------------
+// NavGroupItem — now persists open/closed state in sessionStorage
+// ---------------------------------------------------------------------------
+
+interface NavGroupItemProps {
+  group: NavGroup
+  /** Leaves that have been filtered out for the current user's role. */
+  visibleChildren: NavLeaf[]
+}
+
+/**
+ * A collapsible sidebar group. Persists open/closed state in sessionStorage
+ * (key: `stratum.navGroup.<label>`). The active-route group is always expanded
+ * on load, overriding any previously stored closed state.
+ */
+function NavGroupItem({ group, visibleChildren }: NavGroupItemProps) {
   const location = useLocation()
-  const childActive = group.children.some(
+  const childActive = visibleChildren.some(
     (c) => location.pathname === c.to || location.pathname.startsWith(`${c.to}/`),
   )
-  const [open, setOpen] = useState(childActive)
 
-  // Expand automatically when navigating into one of the group's routes.
+  const [open, setOpen] = useState<boolean>(() => {
+    // Active group: always open, regardless of stored state.
+    if (childActive) return true
+    const stored = readStoredOpen(group.label)
+    // No stored state yet → default closed for non-active groups.
+    return stored ?? false
+  })
+
+  // When navigating into a child route, ensure the group expands.
   useEffect(() => {
     if (childActive) setOpen(true)
   }, [childActive])
+
+  const handleToggle = () => {
+    setOpen((prev) => {
+      const next = !prev
+      writeStoredOpen(group.label, next)
+      return next
+    })
+  }
 
   return (
     <li>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={handleToggle}
         className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-sm transition-colors w-full"
         style={{
           background: 'transparent',
@@ -148,7 +231,7 @@ function NavGroupItem({ group }: { group: NavGroup }) {
       </button>
       {open && (
         <ul className="flex flex-col gap-0.5 mt-0.5" style={{ marginLeft: '10px', paddingLeft: '8px', borderLeft: '1px solid var(--border-subtle)' }}>
-          {group.children.map((child) => (
+          {visibleChildren.map((child) => (
             <li key={child.to}>
               <NavLink
                 to={child.to}
@@ -285,7 +368,6 @@ export function Sidebar() {
     if (!el) return
     const saved = sessionStorage.getItem('stratum.sidebarScroll')
     if (saved) el.scrollTop = Number(saved)
-   
   }, [])
 
   // Persist scroll position whenever the user scrolls the sidebar.
@@ -298,6 +380,34 @@ export function Sidebar() {
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
+
+  /** Filter a leaf list by the current user's role. */
+  function visibleLeaves(leaves: NavLeaf[]): NavLeaf[] {
+    return leaves.filter((item) => {
+      if (item.adminOnly && !isAdmin) return false
+      if (item.operatorOnly && !isOperator) return false
+      return true
+    })
+  }
+
+  /** Render a single pinned leaf item. */
+  function renderPinnedLeaf(item: NavLeaf) {
+    if (item.adminOnly && !isAdmin) return null
+    if (item.operatorOnly && !isOperator) return null
+    return (
+      <li key={item.to}>
+        <NavLink
+          to={item.to}
+          end={item.to === '/'}
+          className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-sm transition-colors"
+          style={navLinkStyle}
+        >
+          {item.icon}
+          {item.label}
+        </NavLink>
+      </li>
+    )
+  }
 
   return (
     <nav
@@ -314,26 +424,18 @@ export function Sidebar() {
         </span>
       </div>
       <ul className="flex flex-col gap-0.5 px-2">
-        {navItems.map((item) => {
-          if (isGroup(item)) {
-            return <NavGroupItem key={item.label} group={item} />
-          }
-          if (item.adminOnly && !isAdmin) return null
-          if (item.operatorOnly && !isOperator) return null
-          return (
-            <li key={item.to}>
-              <NavLink
-                to={item.to}
-                end={item.to === '/'}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded text-sm transition-colors"
-                style={navLinkStyle}
-              >
-                {item.icon}
-                {item.label}
-              </NavLink>
-            </li>
-          )
+        {/* Pinned top items — always visible, ungrouped */}
+        {pinnedTop.map(renderPinnedLeaf)}
+
+        {/* Collapsible groups — hidden entirely if no visible children */}
+        {navGroups.map((group) => {
+          const visible = visibleLeaves(group.children)
+          if (visible.length === 0) return null
+          return <NavGroupItem key={group.label} group={group} visibleChildren={visible} />
         })}
+
+        {/* Pinned bottom items — always visible, ungrouped */}
+        {pinnedBottom.map(renderPinnedLeaf)}
       </ul>
       <BookmarksSection />
     </nav>
