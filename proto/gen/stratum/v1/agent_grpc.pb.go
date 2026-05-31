@@ -19,7 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_Ping_FullMethodName = "/stratum.v1.AgentService/Ping"
+	AgentService_Ping_FullMethodName       = "/stratum.v1.AgentService/Ping"
+	AgentService_WatchFiles_FullMethodName = "/stratum.v1.AgentService/WatchFiles"
+	AgentService_DetectInit_FullMethodName = "/stratum.v1.AgentService/DetectInit"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -27,13 +29,18 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // AgentService is the gRPC contract between the Stratum backend and the
-// per-host agent. SP0 ships only a Ping RPC to prove the contract compiles and
-// both modules can import the generated package. Real file-ops, permissions,
-// cron, and watch RPCs land with their feature sub-projects.
+// per-host agent.
 type AgentServiceClient interface {
 	// Ping is a liveness check. The agent echoes the nonce and reports its
 	// version so the backend can confirm connectivity and compatibility.
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
+	// WatchFiles opens a server-streaming RPC that delivers real-time file
+	// change events for the requested paths. The stream remains open until the
+	// client cancels or the connection is lost.
+	WatchFiles(ctx context.Context, in *WatchFilesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchFilesResponse], error)
+	// DetectInit reports which init system is active on the host. The backend
+	// persists the result into node capabilities_json.
+	DetectInit(ctx context.Context, in *DetectInitRequest, opts ...grpc.CallOption) (*DetectInitResponse, error)
 }
 
 type agentServiceClient struct {
@@ -54,18 +61,52 @@ func (c *agentServiceClient) Ping(ctx context.Context, in *PingRequest, opts ...
 	return out, nil
 }
 
+func (c *agentServiceClient) WatchFiles(ctx context.Context, in *WatchFilesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchFilesResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[0], AgentService_WatchFiles_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchFilesRequest, WatchFilesResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_WatchFilesClient = grpc.ServerStreamingClient[WatchFilesResponse]
+
+func (c *agentServiceClient) DetectInit(ctx context.Context, in *DetectInitRequest, opts ...grpc.CallOption) (*DetectInitResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DetectInitResponse)
+	err := c.cc.Invoke(ctx, AgentService_DetectInit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
 //
 // AgentService is the gRPC contract between the Stratum backend and the
-// per-host agent. SP0 ships only a Ping RPC to prove the contract compiles and
-// both modules can import the generated package. Real file-ops, permissions,
-// cron, and watch RPCs land with their feature sub-projects.
+// per-host agent.
 type AgentServiceServer interface {
 	// Ping is a liveness check. The agent echoes the nonce and reports its
 	// version so the backend can confirm connectivity and compatibility.
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
+	// WatchFiles opens a server-streaming RPC that delivers real-time file
+	// change events for the requested paths. The stream remains open until the
+	// client cancels or the connection is lost.
+	WatchFiles(*WatchFilesRequest, grpc.ServerStreamingServer[WatchFilesResponse]) error
+	// DetectInit reports which init system is active on the host. The backend
+	// persists the result into node capabilities_json.
+	DetectInit(context.Context, *DetectInitRequest) (*DetectInitResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -78,6 +119,12 @@ type UnimplementedAgentServiceServer struct{}
 
 func (UnimplementedAgentServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedAgentServiceServer) WatchFiles(*WatchFilesRequest, grpc.ServerStreamingServer[WatchFilesResponse]) error {
+	return status.Error(codes.Unimplemented, "method WatchFiles not implemented")
+}
+func (UnimplementedAgentServiceServer) DetectInit(context.Context, *DetectInitRequest) (*DetectInitResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DetectInit not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -118,6 +165,35 @@ func _AgentService_Ping_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_WatchFiles_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchFilesRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServiceServer).WatchFiles(m, &grpc.GenericServerStream[WatchFilesRequest, WatchFilesResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_WatchFilesServer = grpc.ServerStreamingServer[WatchFilesResponse]
+
+func _AgentService_DetectInit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DetectInitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).DetectInit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_DetectInit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).DetectInit(ctx, req.(*DetectInitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -129,7 +205,17 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Ping",
 			Handler:    _AgentService_Ping_Handler,
 		},
+		{
+			MethodName: "DetectInit",
+			Handler:    _AgentService_DetectInit_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchFiles",
+			Handler:       _AgentService_WatchFiles_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "stratum/v1/agent.proto",
 }

@@ -9,6 +9,7 @@ package stratumv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -20,6 +21,118 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+// FileEventType classifies the filesystem change.
+type FileEventType int32
+
+const (
+	FileEventType_FILE_EVENT_TYPE_UNSPECIFIED FileEventType = 0
+	FileEventType_FILE_EVENT_TYPE_CREATE      FileEventType = 1
+	FileEventType_FILE_EVENT_TYPE_MODIFY      FileEventType = 2
+	FileEventType_FILE_EVENT_TYPE_DELETE      FileEventType = 3
+	FileEventType_FILE_EVENT_TYPE_RENAME      FileEventType = 4
+	FileEventType_FILE_EVENT_TYPE_ATTRIB      FileEventType = 5
+)
+
+// Enum value maps for FileEventType.
+var (
+	FileEventType_name = map[int32]string{
+		0: "FILE_EVENT_TYPE_UNSPECIFIED",
+		1: "FILE_EVENT_TYPE_CREATE",
+		2: "FILE_EVENT_TYPE_MODIFY",
+		3: "FILE_EVENT_TYPE_DELETE",
+		4: "FILE_EVENT_TYPE_RENAME",
+		5: "FILE_EVENT_TYPE_ATTRIB",
+	}
+	FileEventType_value = map[string]int32{
+		"FILE_EVENT_TYPE_UNSPECIFIED": 0,
+		"FILE_EVENT_TYPE_CREATE":      1,
+		"FILE_EVENT_TYPE_MODIFY":      2,
+		"FILE_EVENT_TYPE_DELETE":      3,
+		"FILE_EVENT_TYPE_RENAME":      4,
+		"FILE_EVENT_TYPE_ATTRIB":      5,
+	}
+)
+
+func (x FileEventType) Enum() *FileEventType {
+	p := new(FileEventType)
+	*p = x
+	return p
+}
+
+func (x FileEventType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FileEventType) Descriptor() protoreflect.EnumDescriptor {
+	return file_stratum_v1_agent_proto_enumTypes[0].Descriptor()
+}
+
+func (FileEventType) Type() protoreflect.EnumType {
+	return &file_stratum_v1_agent_proto_enumTypes[0]
+}
+
+func (x FileEventType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FileEventType.Descriptor instead.
+func (FileEventType) EnumDescriptor() ([]byte, []int) {
+	return file_stratum_v1_agent_proto_rawDescGZIP(), []int{0}
+}
+
+// InitSystem identifies which init/service-manager is active on the host.
+type InitSystem int32
+
+const (
+	InitSystem_INIT_SYSTEM_UNSPECIFIED InitSystem = 0
+	InitSystem_INIT_SYSTEM_SYSTEMD     InitSystem = 1
+	InitSystem_INIT_SYSTEM_OPENRC      InitSystem = 2
+	InitSystem_INIT_SYSTEM_OTHER       InitSystem = 3
+)
+
+// Enum value maps for InitSystem.
+var (
+	InitSystem_name = map[int32]string{
+		0: "INIT_SYSTEM_UNSPECIFIED",
+		1: "INIT_SYSTEM_SYSTEMD",
+		2: "INIT_SYSTEM_OPENRC",
+		3: "INIT_SYSTEM_OTHER",
+	}
+	InitSystem_value = map[string]int32{
+		"INIT_SYSTEM_UNSPECIFIED": 0,
+		"INIT_SYSTEM_SYSTEMD":     1,
+		"INIT_SYSTEM_OPENRC":      2,
+		"INIT_SYSTEM_OTHER":       3,
+	}
+)
+
+func (x InitSystem) Enum() *InitSystem {
+	p := new(InitSystem)
+	*p = x
+	return p
+}
+
+func (x InitSystem) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (InitSystem) Descriptor() protoreflect.EnumDescriptor {
+	return file_stratum_v1_agent_proto_enumTypes[1].Descriptor()
+}
+
+func (InitSystem) Type() protoreflect.EnumType {
+	return &file_stratum_v1_agent_proto_enumTypes[1]
+}
+
+func (x InitSystem) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use InitSystem.Descriptor instead.
+func (InitSystem) EnumDescriptor() ([]byte, []int) {
+	return file_stratum_v1_agent_proto_rawDescGZIP(), []int{1}
+}
 
 type PingRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -120,19 +233,272 @@ func (x *PingResponse) GetAgentVersion() string {
 	return ""
 }
 
+// DetectInitRequest is the input for DetectInit (no fields needed).
+type DetectInitRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetectInitRequest) Reset() {
+	*x = DetectInitRequest{}
+	mi := &file_stratum_v1_agent_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetectInitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetectInitRequest) ProtoMessage() {}
+
+func (x *DetectInitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_stratum_v1_agent_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetectInitRequest.ProtoReflect.Descriptor instead.
+func (*DetectInitRequest) Descriptor() ([]byte, []int) {
+	return file_stratum_v1_agent_proto_rawDescGZIP(), []int{2}
+}
+
+// WatchFilesRequest specifies which paths to watch and whether to recurse into
+// subdirectories.
+type WatchFilesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Absolute paths on the agent host to monitor.
+	Paths []string `protobuf:"bytes,1,rep,name=paths,proto3" json:"paths,omitempty"`
+	// When true, subdirectories under each path are also watched.
+	Recursive     bool `protobuf:"varint,2,opt,name=recursive,proto3" json:"recursive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchFilesRequest) Reset() {
+	*x = WatchFilesRequest{}
+	mi := &file_stratum_v1_agent_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchFilesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchFilesRequest) ProtoMessage() {}
+
+func (x *WatchFilesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_stratum_v1_agent_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchFilesRequest.ProtoReflect.Descriptor instead.
+func (*WatchFilesRequest) Descriptor() ([]byte, []int) {
+	return file_stratum_v1_agent_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WatchFilesRequest) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+func (x *WatchFilesRequest) GetRecursive() bool {
+	if x != nil {
+		return x.Recursive
+	}
+	return false
+}
+
+// WatchFilesResponse is one filesystem notification streamed from agent to
+// backend.
+type WatchFilesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Absolute path of the changed file or directory.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// The kind of change observed.
+	EventType FileEventType `protobuf:"varint,2,opt,name=event_type,json=eventType,proto3,enum=stratum.v1.FileEventType" json:"event_type,omitempty"`
+	// Wallclock time on the agent host when the event was observed.
+	Timestamp *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// True when the path refers to a directory rather than a file.
+	IsDir         bool `protobuf:"varint,4,opt,name=is_dir,json=isDir,proto3" json:"is_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchFilesResponse) Reset() {
+	*x = WatchFilesResponse{}
+	mi := &file_stratum_v1_agent_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchFilesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchFilesResponse) ProtoMessage() {}
+
+func (x *WatchFilesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_stratum_v1_agent_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchFilesResponse.ProtoReflect.Descriptor instead.
+func (*WatchFilesResponse) Descriptor() ([]byte, []int) {
+	return file_stratum_v1_agent_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WatchFilesResponse) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *WatchFilesResponse) GetEventType() FileEventType {
+	if x != nil {
+		return x.EventType
+	}
+	return FileEventType_FILE_EVENT_TYPE_UNSPECIFIED
+}
+
+func (x *WatchFilesResponse) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+func (x *WatchFilesResponse) GetIsDir() bool {
+	if x != nil {
+		return x.IsDir
+	}
+	return false
+}
+
+// DetectInitResponse is the response from DetectInit.
+type DetectInitResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The detected init system.
+	InitSystem InitSystem `protobuf:"varint,1,opt,name=init_system,json=initSystem,proto3,enum=stratum.v1.InitSystem" json:"init_system,omitempty"`
+	// Human-readable description (e.g. "systemd 252", "openrc 0.44").
+	Description   string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetectInitResponse) Reset() {
+	*x = DetectInitResponse{}
+	mi := &file_stratum_v1_agent_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetectInitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetectInitResponse) ProtoMessage() {}
+
+func (x *DetectInitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_stratum_v1_agent_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetectInitResponse.ProtoReflect.Descriptor instead.
+func (*DetectInitResponse) Descriptor() ([]byte, []int) {
+	return file_stratum_v1_agent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DetectInitResponse) GetInitSystem() InitSystem {
+	if x != nil {
+		return x.InitSystem
+	}
+	return InitSystem_INIT_SYSTEM_UNSPECIFIED
+}
+
+func (x *DetectInitResponse) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
 var File_stratum_v1_agent_proto protoreflect.FileDescriptor
 
 const file_stratum_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x16stratum/v1/agent.proto\x12\n" +
-	"stratum.v1\"#\n" +
+	"stratum.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"#\n" +
 	"\vPingRequest\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\tR\x05nonce\"I\n" +
 	"\fPingResponse\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\tR\x05nonce\x12#\n" +
-	"\ragent_version\x18\x02 \x01(\tR\fagentVersion2I\n" +
+	"\ragent_version\x18\x02 \x01(\tR\fagentVersion\"\x13\n" +
+	"\x11DetectInitRequest\"G\n" +
+	"\x11WatchFilesRequest\x12\x14\n" +
+	"\x05paths\x18\x01 \x03(\tR\x05paths\x12\x1c\n" +
+	"\trecursive\x18\x02 \x01(\bR\trecursive\"\xb3\x01\n" +
+	"\x12WatchFilesResponse\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x128\n" +
+	"\n" +
+	"event_type\x18\x02 \x01(\x0e2\x19.stratum.v1.FileEventTypeR\teventType\x128\n" +
+	"\ttimestamp\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x15\n" +
+	"\x06is_dir\x18\x04 \x01(\bR\x05isDir\"o\n" +
+	"\x12DetectInitResponse\x127\n" +
+	"\vinit_system\x18\x01 \x01(\x0e2\x16.stratum.v1.InitSystemR\n" +
+	"initSystem\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription*\xbc\x01\n" +
+	"\rFileEventType\x12\x1f\n" +
+	"\x1bFILE_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16FILE_EVENT_TYPE_CREATE\x10\x01\x12\x1a\n" +
+	"\x16FILE_EVENT_TYPE_MODIFY\x10\x02\x12\x1a\n" +
+	"\x16FILE_EVENT_TYPE_DELETE\x10\x03\x12\x1a\n" +
+	"\x16FILE_EVENT_TYPE_RENAME\x10\x04\x12\x1a\n" +
+	"\x16FILE_EVENT_TYPE_ATTRIB\x10\x05*q\n" +
+	"\n" +
+	"InitSystem\x12\x1b\n" +
+	"\x17INIT_SYSTEM_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13INIT_SYSTEM_SYSTEMD\x10\x01\x12\x16\n" +
+	"\x12INIT_SYSTEM_OPENRC\x10\x02\x12\x15\n" +
+	"\x11INIT_SYSTEM_OTHER\x10\x032\xe5\x01\n" +
 	"\fAgentService\x129\n" +
-	"\x04Ping\x12\x17.stratum.v1.PingRequest\x1a\x18.stratum.v1.PingResponseB\xa3\x01\n" +
+	"\x04Ping\x12\x17.stratum.v1.PingRequest\x1a\x18.stratum.v1.PingResponse\x12M\n" +
+	"\n" +
+	"WatchFiles\x12\x1d.stratum.v1.WatchFilesRequest\x1a\x1e.stratum.v1.WatchFilesResponse0\x01\x12K\n" +
+	"\n" +
+	"DetectInit\x12\x1d.stratum.v1.DetectInitRequest\x1a\x1e.stratum.v1.DetectInitResponseB\xa3\x01\n" +
 	"\x0ecom.stratum.v1B\n" +
 	"AgentProtoP\x01Z<github.com/kaylaehman/stratum/proto/gen/stratum/v1;stratumv1\xa2\x02\x03SXX\xaa\x02\n" +
 	"Stratum.V1\xca\x02\n" +
@@ -150,19 +516,34 @@ func file_stratum_v1_agent_proto_rawDescGZIP() []byte {
 	return file_stratum_v1_agent_proto_rawDescData
 }
 
-var file_stratum_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_stratum_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_stratum_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_stratum_v1_agent_proto_goTypes = []any{
-	(*PingRequest)(nil),  // 0: stratum.v1.PingRequest
-	(*PingResponse)(nil), // 1: stratum.v1.PingResponse
+	(FileEventType)(0),            // 0: stratum.v1.FileEventType
+	(InitSystem)(0),               // 1: stratum.v1.InitSystem
+	(*PingRequest)(nil),           // 2: stratum.v1.PingRequest
+	(*PingResponse)(nil),          // 3: stratum.v1.PingResponse
+	(*DetectInitRequest)(nil),     // 4: stratum.v1.DetectInitRequest
+	(*WatchFilesRequest)(nil),     // 5: stratum.v1.WatchFilesRequest
+	(*WatchFilesResponse)(nil),    // 6: stratum.v1.WatchFilesResponse
+	(*DetectInitResponse)(nil),    // 7: stratum.v1.DetectInitResponse
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_stratum_v1_agent_proto_depIdxs = []int32{
-	0, // 0: stratum.v1.AgentService.Ping:input_type -> stratum.v1.PingRequest
-	1, // 1: stratum.v1.AgentService.Ping:output_type -> stratum.v1.PingResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0, // 0: stratum.v1.WatchFilesResponse.event_type:type_name -> stratum.v1.FileEventType
+	8, // 1: stratum.v1.WatchFilesResponse.timestamp:type_name -> google.protobuf.Timestamp
+	1, // 2: stratum.v1.DetectInitResponse.init_system:type_name -> stratum.v1.InitSystem
+	2, // 3: stratum.v1.AgentService.Ping:input_type -> stratum.v1.PingRequest
+	5, // 4: stratum.v1.AgentService.WatchFiles:input_type -> stratum.v1.WatchFilesRequest
+	4, // 5: stratum.v1.AgentService.DetectInit:input_type -> stratum.v1.DetectInitRequest
+	3, // 6: stratum.v1.AgentService.Ping:output_type -> stratum.v1.PingResponse
+	6, // 7: stratum.v1.AgentService.WatchFiles:output_type -> stratum.v1.WatchFilesResponse
+	7, // 8: stratum.v1.AgentService.DetectInit:output_type -> stratum.v1.DetectInitResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_stratum_v1_agent_proto_init() }
@@ -175,13 +556,14 @@ func file_stratum_v1_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_stratum_v1_agent_proto_rawDesc), len(file_stratum_v1_agent_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      2,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_stratum_v1_agent_proto_goTypes,
 		DependencyIndexes: file_stratum_v1_agent_proto_depIdxs,
+		EnumInfos:         file_stratum_v1_agent_proto_enumTypes,
 		MessageInfos:      file_stratum_v1_agent_proto_msgTypes,
 	}.Build()
 	File_stratum_v1_agent_proto = out.File
