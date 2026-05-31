@@ -23,6 +23,7 @@ type Flag struct {
 // catalog is the known flag set. Default reflects whether the feature is built
 // and on by default; the two not-yet-implemented features default off.
 var catalog = []Flag{
+	{Key: "feature.automations", Label: "Automations", Default: true, Description: "Autonomous automation engine (8 configurable automations)."},
 	{Key: "feature.reverse_proxy", Label: "Reverse Proxy", Default: true, Description: "Detect and view reverse-proxy rules per node."},
 	{Key: "feature.dns_management", Label: "DNS Management", Default: true, Description: "Detect and view DNS records per node."},
 	{Key: "feature.cert_management", Label: "Certificate Monitoring", Default: true, Description: "Scan and alert on TLS certificate expiry."},

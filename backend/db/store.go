@@ -836,5 +836,23 @@ type Store interface {
 	UpdateProposalStatus(ctx context.Context, id, status, approvedBy string) error
 	UpdateProposalExecution(ctx context.Context, id, status, stdout, stderr string, exitCode int) error
 
+	// Automations engine (Feature W6)
+	ListAutomations(ctx context.Context) ([]AutomationRow, error)
+	GetAutomation(ctx context.Context, key string) (AutomationRow, error)
+	UpsertAutomation(ctx context.Context, key string, enabled bool, intervalSeconds int, configJSON string) error
+	SetAutomationRun(ctx context.Context, key, status, detail string, ranAt time.Time) error
+
 	Close() error
+}
+
+// AutomationRow is a DB override row for one automation. Missing keys take
+// catalog defaults; only overrides are persisted.
+type AutomationRow struct {
+	Key             string
+	Enabled         bool
+	IntervalSeconds int
+	ConfigJSON      string
+	LastRun         *time.Time
+	LastStatus      string
+	LastDetail      string
 }

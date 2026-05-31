@@ -342,6 +342,18 @@ func (s *stubStore) LatestUptimeResult(_ context.Context, _ string) (db.UptimeRe
 func (s *stubStore) PruneUptimeResultsBefore(_ context.Context, _ time.Time) (int64, error) {
 	panic("not used")
 }
+func (s *stubStore) ListAutomations(_ context.Context) ([]db.AutomationRow, error) {
+	panic("not used")
+}
+func (s *stubStore) GetAutomation(_ context.Context, _ string) (db.AutomationRow, error) {
+	panic("not used")
+}
+func (s *stubStore) UpsertAutomation(_ context.Context, _ string, _ bool, _ int, _ string) error {
+	panic("not used")
+}
+func (s *stubStore) SetAutomationRun(_ context.Context, _, _, _ string, _ time.Time) error {
+	panic("not used")
+}
 
 // --- tests -------------------------------------------------------------------
 

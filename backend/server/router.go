@@ -196,6 +196,9 @@ func NewRouter(d *Deps) http.Handler {
 			r.Get("/uptime/monitors/{id}", d.Handlers.GetUptimeMonitor)
 			r.Get("/uptime/monitors/{id}/history", d.Handlers.UptimeMonitorHistory)
 
+			// Automations engine (read; mutations are audited below).
+			r.Get("/automations", d.Handlers.ListAutomations)
+
 			// Image update detection (read-only; cross-node).
 			r.Get("/updates", d.Handlers.Updates)
 
@@ -352,6 +355,10 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/uptime/monitors", d.Handlers.CreateUptimeMonitor)
 			audited.Put("/uptime/monitors/{id}", d.Handlers.UpdateUptimeMonitor)
 			audited.Delete("/uptime/monitors/{id}", d.Handlers.DeleteUptimeMonitor)
+
+			// Automation mutations (audited).
+			audited.Put("/automations/{key}", d.Handlers.UpdateAutomation)
+			audited.Post("/automations/{key}/run", d.Handlers.RunAutomation)
 		})
 	})
 

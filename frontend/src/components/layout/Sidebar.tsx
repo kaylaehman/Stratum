@@ -32,6 +32,7 @@ import {
   Layers,
   AlertCircle,
   Radio,
+  Zap,
 } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
@@ -111,6 +112,7 @@ const navGroups: NavGroup[] = [
       { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
       { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
       { icon: <SquareTerminal size={14} />, label: 'Terminal', to: '/terminal', adminOnly: true },
+      { icon: <Zap size={14} />, label: 'Automations', to: '/automations', operatorOnly: true },
     ],
   },
   {
