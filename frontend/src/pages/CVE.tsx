@@ -82,8 +82,16 @@ function formatDate(iso: string): string {
   }
 }
 
-function isCveId(id: string): boolean {
-  return /^CVE-\d{4}-\d+$/i.test(id)
+// advisoryUrl picks a source that actually resolves for the id. NVD 404s for
+// recently-RESERVED CVEs that scanners know from other feeds, so CVE ids go to
+// MITRE's cve.org record (always resolves for an assigned id, shows status),
+// GHSA ids to GitHub's advisory DB, and anything else to OSV (which aggregates
+// the feeds Trivy/Grype draw from).
+function advisoryUrl(id: string): string {
+  const u = id.toUpperCase()
+  if (u.startsWith('CVE-')) return `https://www.cve.org/CVERecord?id=${encodeURIComponent(id)}`
+  if (u.startsWith('GHSA-')) return `https://github.com/advisories/${encodeURIComponent(id)}`
+  return `https://osv.dev/vulnerability/${encodeURIComponent(id)}`
 }
 
 function sortScans(scans: ImageScan[]): ImageScan[] {
@@ -261,20 +269,16 @@ function CVEDetailPanel({ digest }: CVEDetailPanelProps) {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {isCveId(vuln.cve_id) ? (
-                          <a
-                            href={`https://nvd.nist.gov/vuln/detail/${vuln.cve_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1"
-                            style={{ color: 'var(--accent)', textDecoration: 'none' }}
-                          >
-                            {vuln.cve_id}
-                            <ExternalLink size={10} />
-                          </a>
-                        ) : (
-                          <span>{vuln.cve_id}</span>
-                        )}
+                        <a
+                          href={advisoryUrl(vuln.cve_id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1"
+                          style={{ color: 'var(--accent)', textDecoration: 'none' }}
+                        >
+                          {vuln.cve_id}
+                          <ExternalLink size={10} />
+                        </a>
                       </td>
                       <td
                         className="px-3 py-1.5"
@@ -298,7 +302,11 @@ function CVEDetailPanel({ digest }: CVEDetailPanelProps) {
                         style={{
                           color: 'var(--text-primary)',
                           borderBottom: '1px solid var(--border-subtle)',
-                          whiteSpace: 'nowrap',
+                          // Wrap long package names (e.g. golang.org/x/...) so the
+                          // table fits the panel width instead of forcing a
+                          // horizontal scroll.
+                          wordBreak: 'break-word',
+                          maxWidth: '180px',
                         }}
                       >
                         {vuln.package}
