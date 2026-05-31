@@ -78,7 +78,7 @@ export function useAcknowledgeFlag() {
         queryClient.setQueryData(privilegedKey(), context.previous)
       }
     },
-    onSuccess: () => {
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: privilegedKey() })
       void queryClient.invalidateQueries({ queryKey: securityBadgesKey() })
     },

@@ -61,16 +61,35 @@ func New(store db.Store, files *fs.Service, cipher *crypto.Cipher) *Service {
 	return &Service{store: store, files: files, cipher: cipher}
 }
 
-// FindCompose discovers the compose file path for a project on a node. It
-// searches composeDirs under /opt, /srv, /home, /var, /mnt for a directory
-// whose last path segment matches the project name, then probes the standard
-// filenames. Returns "" when nothing is found (degraded gracefully).
+// FindCompose discovers the compose file path for a project on a node.
+//
+// It first asks Docker where the project's compose file actually is — every
+// Compose v2 container is stamped with a `com.docker.compose.project.config_files`
+// label holding the absolute path Compose was invoked with. This is the only
+// reliable source for stacks deployed to non-standard locations (Portainer, git
+// stacks, custom data dirs), which the old directory-guessing missed. When the
+// stack was deployed from INSIDE a container (Portainer runs compose from its own
+// container, so the label reads e.g. `/data/compose/<id>/docker-compose.yml`),
+// the label path won't exist on the host — we then translate it through the
+// deploying container's bind/volume mounts back to a host path.
+//
+// If the label lookup yields nothing reachable, it falls back to probing the
+// standard directories (/opt, /srv, /home, /var/lib, /mnt, /opt/stratum-stacks)
+// for a dir matching the project name. Returns "" when nothing is found
+// (degraded gracefully).
 func (s *Service) FindCompose(ctx context.Context, nodeID, projectName string) (string, error) {
 	// SECURITY: the project name comes from a URL param. Sanitize before it is
 	// ever joined into a filesystem path so a value like "../../etc" cannot
 	// escape the search roots (path.Join would otherwise resolve the traversal).
 	// Legitimate compose project names are already restricted to [a-z0-9_-].
 	projectName = sanitizeProject(projectName)
+
+	// 1. Ask Docker for the project's real compose path via the compose label.
+	if p, err := s.findComposeByLabel(ctx, nodeID, projectName); err == nil && p != "" {
+		return p, nil
+	}
+
+	// 2. Fall back to guessing standard directories.
 	searchRoots := []string{"/opt", "/srv", "/home", "/var/lib", "/mnt"}
 	for _, root := range searchRoots {
 		dir := path.Join(root, projectName)
@@ -89,6 +108,83 @@ func (s *Service) FindCompose(ctx context.Context, nodeID, projectName string) (
 		}
 	}
 	return "", nil
+}
+
+// findComposeByLabel resolves the compose file from the project's running (or
+// stopped) containers via the `com.docker.compose.project.config_files` label.
+// It returns a host-reachable path or "" if it cannot determine/translate one.
+func (s *Service) findComposeByLabel(ctx context.Context, nodeID, projectName string) (string, error) {
+	// One line per container carrying the project label: the config_files label
+	// value (comma-separated when compose was invoked with multiple -f files).
+	out, err := s.files.Exec(ctx, nodeID, "docker", "ps", "-a",
+		"--filter", "label=com.docker.compose.project="+projectName,
+		"--format", `{{.Label "com.docker.compose.project.config_files"}}`)
+	if err != nil {
+		return "", err
+	}
+	labelPath := firstConfigFile(out)
+	if labelPath == "" {
+		return "", nil
+	}
+
+	// The label path is correct as-is when the stack was deployed from the host.
+	if _, err := s.files.StatEntry(ctx, nodeID, labelPath); err == nil {
+		return labelPath, nil
+	}
+
+	// Otherwise the stack was likely deployed from inside a container (Portainer
+	// et al.): translate the in-container path back to a host path through the
+	// deploying container's mounts.
+	if hostPath, ok := s.translateContainerComposePath(ctx, nodeID, projectName, labelPath); ok {
+		return hostPath, nil
+	}
+	return "", nil
+}
+
+// translateContainerComposePath maps an in-container compose path (e.g.
+// /data/compose/42/docker-compose.yml reported by a Portainer-deployed stack)
+// to a host path by inspecting the bind/volume mounts of the containers in the
+// project and of any Portainer container, then verifying the candidate exists.
+func (s *Service) translateContainerComposePath(ctx context.Context, nodeID, projectName, containerPath string) (string, bool) {
+	// Gather mount (destination -> host source) pairs from candidate containers:
+	// the project's own containers plus any container named/imaged "portainer".
+	// `docker ps -a --format` with .Mounts only gives sources, so use inspect.
+	names := s.composeRelatedContainerNames(ctx, nodeID, projectName)
+	for _, name := range names {
+		// Format: one "<destination>\t<source>" line per mount.
+		out, err := s.files.Exec(ctx, nodeID, "docker", "inspect",
+			"--format", `{{range .Mounts}}{{.Destination}}{{"\t"}}{{.Source}}{{"\n"}}{{end}}`,
+			name)
+		if err != nil {
+			continue
+		}
+		for dest, src := range parseMountLines(out) {
+			if hostPath, ok := remapUnderMount(containerPath, dest, src); ok {
+				if _, err := s.files.StatEntry(ctx, nodeID, hostPath); err == nil {
+					return hostPath, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// composeRelatedContainerNames returns container names worth inspecting for a
+// mount that exposes the compose file: the project's containers first, then any
+// container that looks like Portainer (which is what deployed it).
+func (s *Service) composeRelatedContainerNames(ctx context.Context, nodeID, projectName string) []string {
+	var names []string
+	if out, err := s.files.Exec(ctx, nodeID, "docker", "ps", "-a",
+		"--filter", "label=com.docker.compose.project="+projectName,
+		"--format", "{{.Names}}"); err == nil {
+		names = append(names, nonEmptyLines(out)...)
+	}
+	if out, err := s.files.Exec(ctx, nodeID, "docker", "ps", "-a",
+		"--filter", "name=portainer",
+		"--format", "{{.Names}}"); err == nil {
+		names = append(names, nonEmptyLines(out)...)
+	}
+	return names
 }
 
 // ReadCompose returns the raw YAML of the compose file at composePath.
@@ -143,6 +239,77 @@ func (s *Service) Deploy(
 
 // ErrInvalidAction is returned by Lifecycle for an action outside the allowed set.
 var ErrInvalidAction = fmt.Errorf("stacks: invalid lifecycle action")
+
+// firstConfigFile picks the first usable compose path from `docker ps` output
+// of the config_files label (one line per container; compose joins multiple
+// -f files with commas — we take the first).
+func firstConfigFile(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "<no value>" {
+			continue
+		}
+		if i := strings.IndexByte(line, ','); i >= 0 {
+			line = strings.TrimSpace(line[:i])
+		}
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+// nonEmptyLines splits command output into trimmed, non-empty lines.
+func nonEmptyLines(out string) []string {
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+// parseMountLines parses "<destination>\t<source>" lines (from docker inspect)
+// into a destination→hostSource map.
+func parseMountLines(out string) map[string]string {
+	m := make(map[string]string)
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l == "" {
+			continue
+		}
+		parts := strings.SplitN(l, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		dest := strings.TrimSpace(parts[0])
+		src := strings.TrimSpace(parts[1])
+		if dest != "" && src != "" {
+			m[dest] = src
+		}
+	}
+	return m
+}
+
+// remapUnderMount translates an in-container path to a host path when it falls
+// under a mount whose container destination is `dest` and host source is `src`.
+// Returns ("", false) when containerPath is not under dest.
+func remapUnderMount(containerPath, dest, src string) (string, bool) {
+	containerPath = path.Clean(containerPath)
+	dest = path.Clean(dest)
+	src = path.Clean(src)
+	if dest == "/" || dest == "." || src == "" || src == "." {
+		return "", false
+	}
+	if containerPath == dest {
+		return src, true
+	}
+	prefix := dest + "/"
+	if strings.HasPrefix(containerPath, prefix) {
+		return path.Join(src, containerPath[len(prefix):]), true
+	}
+	return "", false
+}
 
 // lifecycleActions is the allowed set for Lifecycle; anything else is rejected.
 var lifecycleActions = map[string]bool{"stop": true, "start": true, "restart": true}

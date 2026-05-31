@@ -37,7 +37,8 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useBookmarks, useRemoveBookmark } from '../../lib/api/bookmarks'
 import { useCan } from '../../lib/roles'
-import type { BookmarkResourceType } from '../../types/api'
+import { resourceLink } from '../../lib/resourceLink'
+import type { BookmarkResourceType, Bookmark } from '../../types/api'
 
 interface NavLeaf {
   icon: React.ReactNode
@@ -181,6 +182,25 @@ function bookmarkIcon(type: BookmarkResourceType) {
   }
 }
 
+/**
+ * Builds the navigation destination for a bookmark.
+ *
+ * - container bookmark: deep-links via resourceLink(undefined, resource_ref)
+ *   so that useResourceDeepLink in Resources.tsx can find the owning node.
+ * - node bookmark: deep-links via resourceLink(resource_ref).
+ * - vm / path / file: fall back to /resources (tree will be visible).
+ */
+function bookmarkNavTarget(bm: Bookmark): string {
+  if (bm.resource_type === 'container') {
+    return resourceLink(undefined, bm.resource_ref)
+  }
+  if (bm.resource_type === 'node') {
+    return resourceLink(bm.resource_ref)
+  }
+  // vm, path, file — land on Resources; user can navigate further from there.
+  return '/resources'
+}
+
 function BookmarksSection() {
   const { data } = useBookmarks()
   const { mutate: remove } = useRemoveBookmark()
@@ -211,7 +231,7 @@ function BookmarksSection() {
           >
             <button
               type="button"
-              onClick={() => navigate('/resources')}
+              onClick={() => navigate(bookmarkNavTarget(bm))}
               className="flex items-center gap-2 px-2.5 py-1.5 flex-1 text-sm truncate text-left"
               style={{
                 background: 'transparent',
@@ -265,7 +285,7 @@ export function Sidebar() {
     if (!el) return
     const saved = sessionStorage.getItem('stratum.sidebarScroll')
     if (saved) el.scrollTop = Number(saved)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [])
 
   // Persist scroll position whenever the user scrolls the sidebar.

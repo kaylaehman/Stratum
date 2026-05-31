@@ -8,6 +8,41 @@ import type {
   StackDeployResponse,
 } from '../../types/api'
 
+// ── Stack lifecycle ────────────────────────────────────────────────────────────
+
+export type StackLifecycleAction = 'stop' | 'start' | 'restart'
+
+export interface StackLifecycleRequest {
+  action: StackLifecycleAction
+}
+
+export interface StackLifecycleResponse {
+  action: StackLifecycleAction
+  project: string
+  output: string
+}
+
+interface StackLifecycleVars {
+  nodeId: string
+  project: string
+  action: StackLifecycleAction
+}
+
+/** Start / stop / restart an entire compose stack (operator-gated on backend). */
+export function useStackLifecycle() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ nodeId, project, action }: StackLifecycleVars) =>
+      apiPost<StackLifecycleResponse>(
+        `/api/nodes/${encodeURIComponent(nodeId)}/stacks/${encodeURIComponent(project)}/lifecycle`,
+        { action } satisfies StackLifecycleRequest,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: TREE_KEY })
+    },
+  })
+}
+
 export function stackComposeKey(nodeId: string, project: string) {
   return ['stack-compose', nodeId, project] as const
 }

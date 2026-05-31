@@ -12,6 +12,9 @@ import {
   KeyRound,
   Plus,
   Trash2,
+  Play,
+  Square,
+  RotateCw,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import CodeMirror from '@uiw/react-codemirror'
@@ -20,8 +23,10 @@ import { AppShell } from '../components/layout/AppShell'
 import { useTree } from '../lib/api/tree'
 import { useMe } from '../hooks/useMe'
 import { useSecrets } from '../lib/api/secrets'
-import { useStackCompose, useRedeployStack } from '../lib/api/stacks'
+import { useStackCompose, useRedeployStack, useStackLifecycle } from '../lib/api/stacks'
+import type { StackLifecycleAction } from '../lib/api/stacks'
 import { resolveLanguage } from '../lib/codemirror'
+import { useCan } from '../lib/roles'
 import type { Container, TreeNode, SecretGroup, StackEnvVar } from '../types/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -507,7 +512,7 @@ function StackEditModal({ stack, isAdmin, secretGroups, onClose }: StackEditModa
               }}
             >
               <AlertTriangle size={11} style={{ color: 'var(--status-warn)' }} />
-              No compose file found at standard paths for this project.
+              No compose file could be located for this project on this host.
             </div>
           )}
 
@@ -778,12 +783,60 @@ function StackCard({ stack, isAdmin, secretGroups, defaultOpen = false }: StackC
   const [open, setOpen] = useState(defaultOpen)
   const [editOpen, setEditOpen] = useState(false)
   const navigate = useNavigate()
+  const { isOperator } = useCan()
+  const { mutate: lifecycle, isPending: lifecyclePending, variables: lifecycleVars } = useStackLifecycle()
+  const [pendingConfirm, setPendingConfirm] = useState<StackLifecycleAction | null>(null)
 
   const running = stack.containers.filter((c) => c.status === 'running').length
   const total = stack.containers.length
   const isUngrouped = stack.projectName === UNGROUPED
   const displayName = isUngrouped ? 'Ungrouped / standalone' : stack.projectName
   const canEdit = !isUngrouped && stack.node.type !== 'ssh'
+  const canLifecycle = isOperator && !isUngrouped && stack.node.type !== 'ssh'
+
+  const nodeId = stack.node.id
+  const project = stack.projectName
+
+  function triggerLifecycle(action: StackLifecycleAction) {
+    if ((action === 'stop' || action === 'restart') && pendingConfirm !== action) {
+      setPendingConfirm(action)
+      return
+    }
+    setPendingConfirm(null)
+    lifecycle({ nodeId, project, action })
+  }
+
+  function lifecycleBtn(action: StackLifecycleAction, icon: React.ReactNode, label: string) {
+    const loading =
+      lifecyclePending &&
+      lifecycleVars?.nodeId === nodeId &&
+      lifecycleVars?.project === project &&
+      lifecycleVars?.action === action
+    const confirming = pendingConfirm === action
+    return (
+      <button
+        key={action}
+        type="button"
+        disabled={lifecyclePending}
+        onClick={(e) => { e.stopPropagation(); triggerLifecycle(action) }}
+        title={confirming ? `Click again to confirm ${label}` : label}
+        className="flex items-center justify-center shrink-0"
+        style={{
+          background: confirming ? 'rgba(232,64,64,0.10)' : 'transparent',
+          border: `1px solid ${confirming ? 'var(--status-error)' : 'var(--border-subtle)'}`,
+          color: confirming ? 'var(--status-error)' : 'var(--text-muted)',
+          borderRadius: '3px',
+          padding: '2px 5px',
+          cursor: lifecyclePending ? 'not-allowed' : 'pointer',
+          opacity: lifecyclePending && !loading ? 0.4 : 1,
+          gap: '3px',
+          fontSize: '10px',
+        }}
+      >
+        {loading ? <Loader size={10} className="animate-spin" /> : icon}
+      </button>
+    )
+  }
 
   return (
     <>
@@ -836,6 +889,14 @@ function StackCard({ stack, isAdmin, secretGroups, defaultOpen = false }: StackC
           >
             {running}/{total}
           </span>
+
+          {canLifecycle && (
+            <div className="flex items-center gap-1 shrink-0">
+              {lifecycleBtn('start', <Play size={10} />, 'Start')}
+              {lifecycleBtn('stop', <Square size={10} />, 'Stop')}
+              {lifecycleBtn('restart', <RotateCw size={10} />, 'Restart')}
+            </div>
+          )}
 
           <span
             className="text-xs truncate shrink-0"

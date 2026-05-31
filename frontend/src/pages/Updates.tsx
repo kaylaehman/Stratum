@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { ArrowUpCircle, CheckCircle, HelpCircle, RefreshCw, Loader, RotateCcw } from 'lucide-react'
+import { ArrowUpCircle, CheckCircle, HelpCircle, RefreshCw, Loader, RotateCcw, AlertTriangle, Info } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
 import { useUpdates, useRescanUpdates } from '../lib/api/updates'
+import type { UpdatesSummary, UnknownBreakdownItem } from '../lib/api/updates'
 import { useUpdateContainer } from '../lib/api/recreate'
 import { ApiError } from '../lib/api'
 import type { ImageUpdate, UpdateStatus, TreeNode } from '../types/api'
@@ -309,6 +310,126 @@ function SummaryBar({ updates }: { updates: ImageUpdate[] }) {
   )
 }
 
+// ---- Unknown reason banner ----
+
+type BannerVariant = 'benign' | 'actionable'
+
+function categoryCopy(category: string, count: number): { message: string; variant: BannerVariant } {
+  switch (category) {
+    case 'locally_built':
+      return {
+        message: `${count} image${count !== 1 ? 's are' : ' is'} built locally — there's nothing to check against a registry.`,
+        variant: 'benign',
+      }
+    case 'rate_limited':
+      return {
+        message: `Docker Hub anonymous rate limit hit — add registry auth to resume checks (${count} image${count !== 1 ? 's' : ''} affected).`,
+        variant: 'actionable',
+      }
+    case 'registry_unreachable':
+      return {
+        message: `The backend can't reach the registry — check its network egress (${count} image${count !== 1 ? 's' : ''} affected).`,
+        variant: 'actionable',
+      }
+    case 'auth':
+      return {
+        message: `Registry authentication required for ${count} image${count !== 1 ? 's' : ''}.`,
+        variant: 'actionable',
+      }
+    case 'daemon_error':
+      return {
+        message: `Docker daemon reported errors while checking ${count} image${count !== 1 ? 's' : ''} — check agent/daemon health.`,
+        variant: 'actionable',
+      }
+    case 'empty_digest':
+      return {
+        message: `${count} image${count !== 1 ? 's have' : ' has'} no digest — the image may not have been pushed to a registry.`,
+        variant: 'actionable',
+      }
+    default:
+      return {
+        message: `${count} image${count !== 1 ? 's' : ''} could not be checked — unknown reason.`,
+        variant: 'actionable',
+      }
+  }
+}
+
+interface UnknownReasonBannerProps {
+  summary: UpdatesSummary
+}
+
+function UnknownReasonBanner({ summary }: UnknownReasonBannerProps) {
+  const shouldShow =
+    summary.unknown > 0 &&
+    (summary.unknown >= summary.total / 2 || summary.dominant_unknown_count > 0)
+
+  if (!shouldShow) return null
+
+  const dominant = summary.dominant_unknown_category || 'other'
+  const { message, variant } = categoryCopy(dominant, summary.dominant_unknown_count || summary.unknown)
+
+  const isBenign = variant === 'benign'
+
+  const bannerStyle: React.CSSProperties = isBenign
+    ? {
+        borderColor: 'var(--border-subtle)',
+        color: 'var(--text-muted)',
+        backgroundColor: 'rgba(74,82,104,0.08)',
+      }
+    : {
+        borderColor: 'rgba(240,160,32,0.5)',
+        color: 'var(--status-warn)',
+        backgroundColor: 'rgba(240,160,32,0.07)',
+      }
+
+  const secondaryRows = summary.unknown_breakdown.filter(
+    (b) => b.category !== dominant && b.count > 0,
+  )
+
+  return (
+    <div
+      className="flex flex-col gap-2 px-3 py-2.5 mb-4 text-xs"
+      style={{
+        border: '1px solid',
+        borderRadius: '3px',
+        ...bannerStyle,
+      }}
+    >
+      <div className="flex items-start gap-2">
+        {isBenign ? (
+          <Info size={13} style={{ flexShrink: 0, marginTop: '1px', color: 'var(--text-muted)' }} />
+        ) : (
+          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: '1px' }} />
+        )}
+        <span>{message}</span>
+      </div>
+
+      {secondaryRows.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pl-5">
+          {secondaryRows.map((b: UnknownBreakdownItem) => (
+            <span
+              key={b.category}
+              title={b.example_reason || undefined}
+              className="font-mono"
+              style={{
+                fontSize: '11px',
+                padding: '1px 6px',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '3px',
+                color: 'var(--text-muted)',
+                cursor: b.example_reason ? 'help' : undefined,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {b.category} · {b.count}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- Main page ----
 
 const TABLE_COLS = ['Container', 'Node', 'Image', 'Status', 'Last Checked', '']
@@ -324,6 +445,7 @@ export default function Updates() {
   const { mutate: rescan, isPending: isRescanning } = useRescanUpdates()
 
   const updates = sortUpdates(data?.updates ?? [])
+  const summary = data?.summary
 
   return (
     <AppShell>
@@ -401,6 +523,8 @@ export default function Updates() {
             ) : (
               <>
                 <SummaryBar updates={updates} />
+
+                {summary && <UnknownReasonBanner summary={summary} />}
 
                 <div
                   style={{

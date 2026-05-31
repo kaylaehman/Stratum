@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { HardDrive, Trash2, Loader, AlertTriangle, Database } from 'lucide-react'
+import { HardDrive, Trash2, Loader, AlertTriangle, Database, Filter } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
-import { useVolumes, useRemoveVolume } from '../lib/api/volumes'
+import { useVolumes, useRemoveVolume, usePruneUnusedVolumes } from '../lib/api/volumes'
 import { ApiError } from '../lib/api'
 import type { VolumeView, VolumeSamplePoint } from '../types/api'
+import type { PruneUnusedResult } from '../lib/api/volumes'
 
 // ---- Helpers ----
 
@@ -198,6 +199,166 @@ function ConfirmDialog({ volumeName, nodeName, onConfirm, onCancel, isPending, i
   )
 }
 
+// ---- Prune confirm dialog ----
+
+interface PruneConfirmDialogProps {
+  unusedVolumes: VolumeView[]
+  nodeNameFn: (id: string) => string
+  onConfirm: () => void
+  onCancel: () => void
+  isPending: boolean
+  inlineError: string | null
+  results: PruneUnusedResult[] | null
+}
+
+function PruneConfirmDialog({
+  unusedVolumes,
+  nodeNameFn,
+  onConfirm,
+  onCancel,
+  isPending,
+  inlineError,
+  results,
+}: PruneConfirmDialogProps) {
+  const settled = results !== null
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+      }}
+    >
+      <div
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '3px',
+          padding: '20px 24px',
+          maxWidth: '520px',
+          width: '100%',
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <Trash2 size={14} style={{ color: 'var(--status-error)', flexShrink: 0 }} />
+          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>
+            {settled ? 'Prune Results' : `Remove All Unused Volumes (${unusedVolumes.length})`}
+          </span>
+        </div>
+
+        {!settled && (
+          <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+            The following unused volumes will be permanently removed. This cannot be undone.
+          </p>
+        )}
+
+        {/* Volume list / results */}
+        <div
+          style={{
+            overflowY: 'auto',
+            flex: '1 1 auto',
+            marginBottom: '12px',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '3px',
+          }}
+        >
+          {!settled &&
+            unusedVolumes.map((vol) => (
+              <div
+                key={`${vol.node_id}:${vol.name}`}
+                className="flex items-center justify-between px-3 py-1.5 text-xs"
+                style={{
+                  borderBottom: '1px solid var(--border-subtle)',
+                  gap: '8px',
+                }}
+              >
+                <span className="font-mono truncate" style={{ color: 'var(--text-primary)' }}>
+                  {vol.name}
+                </span>
+                <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{nodeNameFn(vol.node_id)}</span>
+              </div>
+            ))}
+
+          {settled &&
+            results!.map((r) => (
+              <div
+                key={`${r.node_id}:${r.name}`}
+                className="flex items-center justify-between px-3 py-1.5 text-xs"
+                style={{ borderBottom: '1px solid var(--border-subtle)', gap: '8px' }}
+              >
+                <span className="font-mono truncate" style={{ color: 'var(--text-primary)' }}>
+                  {r.name}
+                </span>
+                <span style={{ flexShrink: 0, color: r.ok ? 'var(--status-ok)' : 'var(--status-error)' }}>
+                  {r.ok ? 'removed' : (r.error ?? 'failed')}
+                </span>
+              </div>
+            ))}
+        </div>
+
+        {inlineError && (
+          <div
+            className="flex items-center gap-2 mb-3 px-2 py-1.5 text-xs"
+            style={{
+              backgroundColor: 'rgba(232,64,64,0.1)',
+              border: '1px solid rgba(232,64,64,0.3)',
+              borderRadius: '3px',
+              color: 'var(--status-error)',
+            }}
+          >
+            <AlertTriangle size={11} style={{ flexShrink: 0 }} />
+            {inlineError}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            className="text-xs px-3 py-1.5"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            {settled ? 'Close' : 'Cancel'}
+          </button>
+          {!settled && (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={isPending || unusedVolumes.length === 0}
+              className="text-xs px-3 py-1.5"
+              style={{
+                backgroundColor: 'rgba(232,64,64,0.15)',
+                border: '1px solid rgba(232,64,64,0.4)',
+                color: 'var(--status-error)',
+                borderRadius: '3px',
+                cursor: isPending || unusedVolumes.length === 0 ? 'default' : 'pointer',
+                opacity: isPending || unusedVolumes.length === 0 ? 0.6 : 1,
+              }}
+            >
+              {isPending ? 'Removing...' : `Remove ${unusedVolumes.length}`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---- Volume row ----
 
 interface VolumeRowProps {
@@ -363,8 +524,54 @@ export default function Volumes() {
   const { data, isLoading } = useVolumes()
   const volumes = data?.volumes ?? []
 
+  // ---- Filter state ----
+  const [unusedOnly, setUnusedOnly] = useState(false)
+
+  // ---- Prune dialog state ----
+  const [pruneOpen, setPruneOpen] = useState(false)
+  const [pruneError, setPruneError] = useState<string | null>(null)
+  const [pruneResults, setPruneResults] = useState<PruneUnusedResult[] | null>(null)
+
+  const { mutate: pruneUnused, isPending: pruneIsPending } = usePruneUnusedVolumes()
+
   function nodeName(nodeId: string): string {
     return nodes.find((n) => n.id === nodeId)?.name ?? nodeId
+  }
+
+  const unusedVolumes = volumes.filter((v) => v.status === 'unused')
+  const displayedVolumes = unusedOnly ? unusedVolumes : volumes
+
+  function handlePruneOpen() {
+    setPruneError(null)
+    setPruneResults(null)
+    setPruneOpen(true)
+  }
+
+  function handlePruneConfirm() {
+    setPruneError(null)
+    pruneUnused(
+      {},
+      {
+        onSuccess: (resp) => {
+          setPruneResults(resp.results)
+        },
+        onError: (err) => {
+          if (err instanceof ApiError && err.status === 428) {
+            // apiFetch already handled the step-up modal and retry;
+            // if we still get here it means the user cancelled the 2FA prompt.
+            setPruneError('Step-up authentication was cancelled.')
+          } else {
+            setPruneError('Bulk removal failed. Please try again.')
+          }
+        },
+      },
+    )
+  }
+
+  function handlePruneClose() {
+    setPruneOpen(false)
+    setPruneResults(null)
+    setPruneError(null)
   }
 
   const TABLE_COLS = ['Name', 'Node', 'Driver', 'Size', 'Status', 'Attached Containers', 'Trend', '']
@@ -376,14 +583,70 @@ export default function Volumes() {
         style={{ maxWidth: '1100px', margin: '0 auto' }}
       >
         {/* Page header */}
-        <div className="flex items-center gap-2 mb-6">
-          <Database size={16} style={{ color: 'var(--text-secondary)' }} />
-          <h1
-            className="text-sm font-medium uppercase tracking-wider"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            Volume Health
-          </h1>
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-2">
+            <Database size={16} style={{ color: 'var(--text-secondary)' }} />
+            <h1
+              className="text-sm font-medium uppercase tracking-wider"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              Volume Health
+            </h1>
+          </div>
+
+          {/* Toolbar — filter + bulk prune */}
+          <div className="flex items-center gap-2">
+            {/* Unused-only toggle */}
+            <button
+              type="button"
+              onClick={() => setUnusedOnly((v) => !v)}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5"
+              style={{
+                backgroundColor: unusedOnly ? 'rgba(240,160,32,0.15)' : 'var(--bg-surface)',
+                border: `1px solid ${unusedOnly ? 'rgba(240,160,32,0.45)' : 'var(--border-default)'}`,
+                color: unusedOnly ? 'var(--status-warn)' : 'var(--text-secondary)',
+                borderRadius: '3px',
+                cursor: 'pointer',
+                transition: 'background 0.1s, border-color 0.1s, color 0.1s',
+              }}
+              aria-pressed={unusedOnly}
+            >
+              <Filter size={10} />
+              Unused only
+              {unusedVolumes.length > 0 && (
+                <span
+                  className="font-mono ml-0.5"
+                  style={{
+                    backgroundColor: unusedOnly ? 'rgba(240,160,32,0.25)' : 'rgba(74,82,104,0.2)',
+                    borderRadius: '3px',
+                    padding: '0 4px',
+                    fontSize: '11px',
+                  }}
+                >
+                  {unusedVolumes.length}
+                </span>
+              )}
+            </button>
+
+            {/* Remove all unused — admin only */}
+            {isAdmin && unusedVolumes.length > 0 && (
+              <button
+                type="button"
+                onClick={handlePruneOpen}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5"
+                style={{
+                  backgroundColor: 'rgba(232,64,64,0.1)',
+                  border: '1px solid rgba(232,64,64,0.35)',
+                  color: 'var(--status-error)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                }}
+              >
+                <Trash2 size={10} />
+                Remove all unused ({unusedVolumes.length})
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Loading */}
@@ -399,8 +662,11 @@ export default function Volumes() {
         {/* Content */}
         {!isLoading && (
           <>
-            <SectionHeader label="All Volumes" count={volumes.length} />
-            {volumes.length === 0 ? (
+            <SectionHeader
+              label={unusedOnly ? 'Unused Volumes' : 'All Volumes'}
+              count={displayedVolumes.length}
+            />
+            {displayedVolumes.length === 0 ? (
               <div
                 className="px-3 py-4 text-xs"
                 style={{
@@ -410,7 +676,7 @@ export default function Volumes() {
                   borderRadius: '3px',
                 }}
               >
-                No volumes found.
+                {unusedOnly ? 'No unused volumes found.' : 'No volumes found.'}
               </div>
             ) : (
               <div
@@ -440,7 +706,7 @@ export default function Volumes() {
                     </tr>
                   </thead>
                   <tbody>
-                    {volumes.map((vol) => (
+                    {displayedVolumes.map((vol) => (
                       <VolumeRow
                         key={`${vol.node_id}:${vol.name}`}
                         volume={vol}
@@ -472,6 +738,19 @@ export default function Volumes() {
               </span>
             </div>
           </>
+        )}
+
+        {/* Prune confirm / results dialog */}
+        {pruneOpen && (
+          <PruneConfirmDialog
+            unusedVolumes={unusedVolumes}
+            nodeNameFn={nodeName}
+            onConfirm={handlePruneConfirm}
+            onCancel={handlePruneClose}
+            isPending={pruneIsPending}
+            inlineError={pruneError}
+            results={pruneResults}
+          />
         )}
       </div>
     </AppShell>
