@@ -88,6 +88,10 @@ function isCveId(id: string): boolean {
 
 function sortScans(scans: ImageScan[]): ImageScan[] {
   return [...scans].sort((a, b) => {
+    // Newest scans first; fall back to severity for same-timestamp ties.
+    const at = Date.parse(a.scanned_at) || 0
+    const bt = Date.parse(b.scanned_at) || 0
+    if (bt !== at) return bt - at
     if (b.critical !== a.critical) return b.critical - a.critical
     return b.high - a.high
   })
@@ -100,6 +104,23 @@ function passesTableFilter(scan: ImageScan, filter: SeverityFilter): boolean {
   if (filter === 'medium') return scan.medium > 0
   if (filter === 'low') return scan.low > 0
   return true
+}
+
+type TimeWindow = 'day' | 'week' | 'month' | 'all'
+
+const TIME_WINDOWS: { value: TimeWindow; label: string; ms: number }[] = [
+  { value: 'day', label: 'Last 24h', ms: 24 * 60 * 60 * 1000 },
+  { value: 'week', label: 'Last 7d', ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: 'month', label: 'Last 30d', ms: 30 * 24 * 60 * 60 * 1000 },
+  { value: 'all', label: 'All time', ms: 0 },
+]
+
+function passesTimeFilter(scan: ImageScan, window: TimeWindow, now: number): boolean {
+  const w = TIME_WINDOWS.find((t) => t.value === window)
+  if (!w || w.ms === 0) return true // 'all'
+  const t = Date.parse(scan.scanned_at)
+  if (Number.isNaN(t)) return true // undated scans never hidden
+  return now - t <= w.ms
 }
 
 // ---- Sub-components ----
@@ -891,12 +912,16 @@ export default function CVE() {
   const { data: status } = useCVEStatus(isAdmin)
   const [expandedDigest, setExpandedDigest] = useState<string | null>(null)
   const [tableFilter, setTableFilter] = useState<SeverityFilter>('all')
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>('all')
 
   // Prefer the status endpoint's resolved trivy presence; fall back to the
   // scans payload's `available` until status loads.
   const scannerAvailable = status?.available ?? data?.available ?? true
   const rawScans = data?.scans ?? []
-  const sorted = sortScans(rawScans).filter((s) => passesTableFilter(s, tableFilter))
+  const now = Date.now()
+  const sorted = sortScans(rawScans).filter(
+    (s) => passesTableFilter(s, tableFilter) && passesTimeFilter(s, timeWindow, now),
+  )
 
   function toggleExpand(digest: string) {
     setExpandedDigest((prev) => (prev === digest ? null : digest))
@@ -1049,6 +1074,29 @@ export default function CVE() {
                   ({rawScans.length})
                 </span>
               </div>
+              {/* Time-window filter — newest scans always sort first. */}
+              <div className="flex items-center gap-1 mb-1">
+                {TIME_WINDOWS.map((tw) => {
+                  const active = timeWindow === tw.value
+                  return (
+                    <button
+                      key={tw.value}
+                      type="button"
+                      onClick={() => setTimeWindow(tw.value)}
+                      className="font-mono text-xs px-2 py-0.5"
+                      style={{
+                        background: active ? 'var(--accent-glow)' : 'var(--bg-elevated)',
+                        border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
+                        color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                        borderRadius: '3px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {tw.label}
+                    </button>
+                  )
+                })}
+              </div>
               <select
                 value={tableFilter}
                 onChange={(e) => setTableFilter(e.target.value as SeverityFilter)}
@@ -1091,7 +1139,7 @@ export default function CVE() {
                   borderRadius: '3px',
                 }}
               >
-                No images match the current severity filter.
+                No images match the current filter.
               </div>
             ) : (
               <div
