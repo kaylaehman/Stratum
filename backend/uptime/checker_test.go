@@ -9,17 +9,6 @@ import (
 	"testing"
 )
 
-// mockChecker lets tests inject a fixed result without network calls.
-type mockChecker struct {
-	result Result
-}
-
-func (m *mockChecker) Check(_ context.Context, mon Monitor) Result {
-	r := m.result
-	r.MonitorID = mon.ID
-	return r
-}
-
 // --- looksLikeStatusCode ---
 
 func TestLooksLikeStatusCode(t *testing.T) {

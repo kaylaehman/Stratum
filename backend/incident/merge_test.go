@@ -60,8 +60,6 @@ func ts(offset time.Duration) time.Time {
 	return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC).Add(offset)
 }
 
-func ptr(s string) *string { return &s }
-
 // TestBuildTimeline_Sort ensures entries are returned newest-first.
 func TestBuildTimeline_Sort(t *testing.T) {
 	base := ts(0)

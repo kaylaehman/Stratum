@@ -152,11 +152,15 @@ func (s *Service) Execute(ctx context.Context, id string) (db.RemediationProposa
 		return db.RemediationProposal{}, ErrNotApproved
 	}
 
+	// Bound execution so a hung remediation command cannot run unbounded.
+	execCtx, cancel := context.WithTimeout(ctx, execTimeout)
+	defer cancel()
+
 	combined := buildScript(p.Commands)
 	b64 := base64.StdEncoding.EncodeToString([]byte(combined))
 	cmd := "printf '%s' '" + b64 + "' | base64 -d | sh 2>&1"
 
-	stdout, execErr := s.exec(ctx, p.NodeID, "sh", "-c", cmd)
+	stdout, execErr := s.exec(execCtx, p.NodeID, "sh", "-c", cmd)
 
 	exitCode := 0
 	status := StatusExecuted
