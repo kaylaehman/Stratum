@@ -185,11 +185,11 @@ async function main() {
   // we collect viewport screenshots (fixed size) and encode with gifenc.
   await tryShot('tour', async () => {
     const TW = 1000, TH = 640
-    const tourCtx = await browser.newContext({
-      viewport: { width: TW, height: TH },
-      storageState: path.join(AUTH, 'state.json'),
-    })
+    // The access token is in-memory (not persisted), so storageState does NOT
+    // re-authenticate a fresh context — log in for the tour too.
+    const tourCtx = await browser.newContext({ viewport: { width: TW, height: TH } })
     const p = await tourCtx.newPage()
+    await login(p)
     const frames = []
     const grab = async () => { await light(p); frames.push(await p.screenshot({ type: 'png' })) }
     const dwell = async (n, ms = 320) => { for (let i = 0; i < n; i++) { await grab(); await sleep(ms) } }
