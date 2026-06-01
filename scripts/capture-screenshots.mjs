@@ -202,8 +202,8 @@ async function main() {
       if (await el.count().catch(() => 0)) { await el.click().catch(() => {}); await grab(); await sleep(350) }
     }
     await dwell(3)
-    await visit('/cve'); await dwell(5)
-    await visit('/security'); await dwell(5)
+    await visit('/cve'); await dwell(7)
+    // /security omitted: its posture card computes live and shows a spinner.
     await p.close(); await tourCtx.close()
 
     if (!frames.length) throw new Error('no frames captured')
