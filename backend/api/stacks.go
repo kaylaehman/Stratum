@@ -26,6 +26,115 @@ type stackEnvVarView struct {
 	Masked   bool   `json:"masked"`
 }
 
+// createStackBody is the request body for POST /api/nodes/:id/stacks.
+type createStackBody struct {
+	Project      string          `json:"project"`
+	Directory    string          `json:"directory"`    // absolute path on node; defaults to /opt/<project>
+	ComposeYAML  string          `json:"compose_yaml"` // required; the full docker-compose.yml content
+	EnvVars      []stacks.EnvVar `json:"env_vars"`     // runtime env; secrets referenced by id
+	SecretGroups []string        `json:"secret_groups"` // group IDs injected wholesale
+}
+
+// CreateStack creates a new compose stack on a node by writing docker-compose.yml
+// to the specified directory and running docker compose up -d. Admin-gated and
+// audited. The directory must not already contain a compose file.
+func (h *Handlers) CreateStack(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
+	nodeID := chi.URLParam(r, "id")
+
+	node, err := h.Store.GetNode(r.Context(), nodeID)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
+	if !caps.Docker {
+		writeError(w, http.StatusConflict, "docker_not_available")
+		return
+	}
+
+	var body createStackBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	if body.ComposeYAML == "" {
+		writeError(w, http.StatusBadRequest, "compose_yaml_required")
+		return
+	}
+
+	// Merge secret groups into the env var list (same pattern as RedeployStack).
+	mergedEnv, err := h.mergeSecretGroups(r.Context(), body.EnvVars, body.SecretGroups)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "secret_resolution_failed")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stackDeployTimeout)
+	defer cancel()
+
+	composePath, out, createErr := h.Stacks.CreateStack(
+		ctx, nodeID, body.Project, body.Directory,
+		[]byte(body.ComposeYAML), mergedEnv,
+	)
+
+	auditCreateStack(r, nodeID, body.Project, composePath, createErr)
+
+	if errors.Is(createErr, stacks.ErrProjectExists) {
+		writeError(w, http.StatusConflict, "project_already_exists")
+		return
+	}
+	if errors.Is(createErr, stacks.ErrInvalidDirectory) {
+		writeError(w, http.StatusBadRequest, "invalid_directory")
+		return
+	}
+	if createErr != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":  "create_failed",
+			"output": out,
+		})
+		return
+	}
+
+	// Persist the env-var configuration for this (node, project).
+	for _, ev := range body.EnvVars {
+		if err := h.Stacks.SetEnvVar(r.Context(), nodeID, body.Project, ev.Key, ev.Value, ev.SecretID); err != nil {
+			h.Logger.Warn("stack: persist env var failed", "node", nodeID, "project", body.Project, "key", ev.Key, "error", err)
+		}
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"project":      body.Project,
+		"compose_path": composePath,
+		"output":       out,
+	})
+}
+
+func auditCreateStack(r *http.Request, nodeID, project, composePath string, createErr error) {
+	e := activity.FromContext(r.Context())
+	if e == nil {
+		return
+	}
+	e.Action = activity.ActionStackCreate
+	e.TargetType = ptr(activity.TargetStack)
+	detail := map[string]string{
+		"node_id":      nodeID,
+		"project":      project,
+		"compose_path": composePath,
+	}
+	if createErr != nil {
+		detail["error"] = createErr.Error()
+	}
+	e.Detail = detail
+}
+
 // GetStackCompose returns the current compose YAML for a named stack on a node.
 // Requires docker capability; degrades to 409 Conflict if not available.
 func (h *Handlers) GetStackCompose(w http.ResponseWriter, r *http.Request) {

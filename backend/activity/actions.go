@@ -120,6 +120,9 @@ const (
 	// Stack edit + redeploy (stacks-edit feature)
 	ActionStackDeploy = "stack.deploy"
 
+	// Stack create (A9 — new stack from compose YAML)
+	ActionStackCreate = "stack.create"
+
 	// Stack lifecycle (whole-project stop/start/restart)
 	ActionStackStop    = "stack.stop"
 	ActionStackStart   = "stack.start"
@@ -156,6 +159,10 @@ const (
 
 	// DR export (C7)
 	ActionDRExport = "dr.export"
+
+	// Web Push notifications (C9)
+	ActionPushSubscribe = "push.subscribe"
+	ActionPushTest      = "push.test"
 )
 
 // Target type constants for ActivityEntry.TargetType.
@@ -302,6 +309,7 @@ var actionCatalog = []ActionInfo{
 	{ActionUptimeDelete, "Uptime monitor deleted", "uptime", TargetUptime},
 
 	{ActionStackDeploy, "Compose stack redeployed", "stack", TargetStack},
+	{ActionStackCreate, "Compose stack created", "stack", TargetStack},
 	{ActionStackStop, "Compose stack stopped", "stack", TargetStack},
 	{ActionStackStart, "Compose stack started", "stack", TargetStack},
 	{ActionStackRestart, "Compose stack restarted", "stack", TargetStack},
@@ -329,6 +337,9 @@ var actionCatalog = []ActionInfo{
 	{ActionAlertPolicyConfig, "Alert policy configured", "alertpolicy", TargetAlertPolicy},
 
 	{ActionDRExport, "DR manifest exported", "dr", TargetDR},
+
+	{ActionPushSubscribe, "Push notification subscription registered", "push", TargetUser},
+	{ActionPushTest, "Test push notification sent", "push", TargetUser},
 }
 
 var actionByName = func() map[string]ActionInfo {

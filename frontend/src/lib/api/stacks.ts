@@ -8,6 +8,29 @@ import type {
   StackDeployResponse,
 } from '../../types/api'
 
+// ── Local types for Create Stack (A9) ────────────────────────────────────────
+// Do NOT add these to types/api.ts — swarm isolation.
+
+export interface CreateStackEnvVar {
+  key: string
+  value?: string
+  secret_id?: string
+}
+
+export interface CreateStackRequest {
+  project: string
+  directory: string
+  compose_yaml: string
+  env_vars: CreateStackEnvVar[]
+  secret_groups: string[]
+}
+
+export interface CreateStackResponse {
+  project: string
+  compose_path: string
+  output: string
+}
+
 // ── Stack lifecycle ────────────────────────────────────────────────────────────
 
 export type StackLifecycleAction = 'stop' | 'start' | 'restart'
@@ -111,6 +134,21 @@ interface SetEnvVarVars {
   key: string
   value?: string
   secretId?: string
+}
+
+/** Create a brand-new stack on a node. Admin-only. */
+export function useCreateStack() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ nodeId, req }: { nodeId: string; req: CreateStackRequest }) =>
+      apiPost<CreateStackResponse>(
+        `/api/nodes/${encodeURIComponent(nodeId)}/stacks`,
+        req,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: TREE_KEY })
+    },
+  })
 }
 
 /** Upsert one env var for a (node, project). */

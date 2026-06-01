@@ -12,6 +12,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
@@ -49,17 +50,29 @@ type StackEnvRow struct {
 	SecretID       string // non-empty when backed by secrets vault
 }
 
+// fileIO is the narrow interface over fs.Service that Service requires.
+// *fs.Service satisfies this interface. The interface is unexported so it
+// stays an implementation detail; callers use New (production) or
+// newTestService (tests, via the test helper in service_test.go).
+type fileIO interface {
+	Exec(ctx context.Context, nodeID, cmd string, args ...string) (string, error)
+	Write(ctx context.Context, nodeID, p string, content []byte, ifUnmodifiedSince *time.Time) error
+	StatEntry(ctx context.Context, nodeID, p string) (fs.Entry, error)
+	Preview(ctx context.Context, nodeID, p string) (content []byte, tooLarge bool, modTime time.Time, err error)
+}
+
 // Service reads and redeploys live Compose stacks.
 type Service struct {
 	store  db.Store
-	files  *fs.Service
+	files  fileIO
 	cipher *crypto.Cipher
 }
 
-// New wires the service dependencies.
+// New wires the service dependencies with the production fs.Service.
 func New(store db.Store, files *fs.Service, cipher *crypto.Cipher) *Service {
 	return &Service{store: store, files: files, cipher: cipher}
 }
+
 
 // FindCompose discovers the compose file path for a project on a node.
 //
@@ -546,3 +559,90 @@ func sanitizeProject(name string) string {
 
 // SanitizeProject exposes the sanitizer for use in the API layer.
 func SanitizeProject(name string) string { return sanitizeProject(name) }
+
+// ErrProjectExists is returned when a compose file already exists at the target
+// directory. CreateStack never silently overwrites an existing stack.
+var ErrProjectExists = fmt.Errorf("stacks: a compose file already exists in that directory")
+
+// ErrInvalidDirectory is returned when the supplied directory path fails
+// validation (not absolute, contains "..", or is empty).
+var ErrInvalidDirectory = fmt.Errorf("stacks: directory must be an absolute path with no '..' segments")
+
+// CreateStack provisions a brand-new compose stack on a node. It:
+//  1. Validates project (non-empty, stable under sanitization) and directory
+//     (absolute, no "..", defaults to /opt/<project>).
+//  2. Creates the directory via `mkdir -p` on the node.
+//  3. Rejects the operation if a compose file already exists there.
+//  4. Writes docker-compose.yml to the directory.
+//  5. Calls Deploy to inject secrets at runtime and bring the stack up.
+//
+// Returns the full compose file path and the docker-compose output.
+// Secrets are never written to disk: they are forwarded to Deploy as envVars.
+func (s *Service) CreateStack(
+	ctx context.Context,
+	nodeID, project, directory string,
+	composeYAML []byte,
+	envVars []EnvVar,
+) (composePath string, output string, err error) {
+	// --- validation ---
+
+	if project == "" {
+		return "", "", fmt.Errorf("stacks: project name is required")
+	}
+	if sanitizeProject(project) != project {
+		return "", "", fmt.Errorf("stacks: project name %q contains characters not allowed in a stack name (a-z A-Z 0-9 - _)", project)
+	}
+
+	directory, err = validateDirectory(project, directory)
+	if err != nil {
+		return "", "", err
+	}
+
+	// --- ensure directory exists ---
+
+	if _, execErr := s.files.Exec(ctx, nodeID, "mkdir", "-p", "--", directory); execErr != nil {
+		return "", "", fmt.Errorf("stacks: create directory %q: %w", directory, execErr)
+	}
+
+	// --- reject if compose file already exists ---
+
+	composePath = path.Join(directory, "docker-compose.yml")
+	if _, statErr := s.files.StatEntry(ctx, nodeID, composePath); statErr == nil {
+		return "", "", ErrProjectExists
+	}
+
+	// --- write compose YAML ---
+
+	if writeErr := s.files.Write(ctx, nodeID, composePath, composeYAML, nil); writeErr != nil {
+		return "", "", fmt.Errorf("stacks: write compose file: %w", writeErr)
+	}
+
+	// --- deploy ---
+
+	out, deployErr := s.Deploy(ctx, nodeID, composePath, composeYAML, envVars)
+	if deployErr != nil {
+		return composePath, out, deployErr
+	}
+	return composePath, out, nil
+}
+
+// validateDirectory checks that dir is an absolute path with no ".." segments.
+// If dir is empty it returns the default path /opt/<project>.
+// The ".." check is performed on the RAW path before cleaning, because
+// path.Clean resolves ".." segments and would silently absorb traversal
+// attempts like "/opt/../etc" → "/etc".
+func validateDirectory(project, dir string) (string, error) {
+	if dir == "" {
+		return "/opt/" + project, nil
+	}
+	// Check raw segments for ".." BEFORE cleaning.
+	for _, seg := range strings.Split(dir, "/") {
+		if seg == ".." {
+			return "", ErrInvalidDirectory
+		}
+	}
+	if !path.IsAbs(dir) {
+		return "", ErrInvalidDirectory
+	}
+	return path.Clean(dir), nil
+}

@@ -6,6 +6,12 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      // injectManifest: use our custom src/sw.ts so we can add push + notificationclick
+      // handlers on top of the existing Workbox precaching strategy.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+
       registerType: 'prompt',
       // Manual SW registration in main.tsx gives us control over the
       // update-available prompt (skipWaiting only fires after user confirms).
@@ -40,47 +46,10 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      // injectManifest options: passed to workbox-build's injectManifest().
+      injectManifest: {
         // Precache the compiled app shell and static assets only.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-
-        runtimeCaching: [
-          {
-            // Google Fonts stylesheets — stale-while-revalidate is safe.
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'google-fonts-stylesheets',
-              expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-          {
-            // Google Fonts files — cache-first (versioned/immutable URLs).
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-webfonts',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-          {
-            // /api/* and /health — NEVER cache.
-            // This rule also covers /api/ws so the SW never intercepts
-            // WebSocket upgrades or SSE log/metric streams.
-            urlPattern: /^\/(api|health)(\/|$)/,
-            handler: 'NetworkOnly',
-          },
-        ],
-
-        // Offline navigation fallback: the app shell for any non-API path.
-        navigateFallback: '/index.html',
-        // Exclude API routes and health endpoint from fallback entirely.
-        navigateFallbackDenylist: [/^\/(api|health)(\/|$)/],
-
-        // Activate the new SW immediately but don't skipWaiting automatically;
-        // we call it explicitly from the update prompt in main.tsx.
-        clientsClaim: true,
-        skipWaiting: false,
       },
     }),
   ],
