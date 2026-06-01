@@ -16,6 +16,10 @@ Self-hosted, unified infrastructure management for the messy middle — bridging
 
 Navigate host → VM → container → filesystem → file permissions in a single UI, with deep diagnostic tooling for the permission conflicts, bind-mount weirdness, and silent access failures that eat hours of debugging time.
 
+<p align="center">
+  <img src="assets/tour.gif" alt="Stratum tour — dashboard, resource tree, CVE scan" width="820">
+</p>
+
 ## What makes it different
 
 - **No Proxmox required.** Proxmox is one supported node type — not a prerequisite. Stratum runs fully against any Linux host reachable via SSH or agent: Ubuntu, Debian, RHEL/Rocky/Alma, Arch, Alpine.
@@ -52,6 +56,25 @@ Pin a release in production (recommended): `STRATUM_TAG=v0.1.0 docker compose up
 Then register a Linux host from the UI — Stratum probes Proxmox API → Docker daemon → SSH-only and surfaces the detected capabilities to confirm or override. For richer features (real-time file watch), drop the agent on the host with the one-liner the UI generates per node.
 
 > **Build from source instead?** `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshots/dashboard.png" alt="Dashboard"><br><sub><b>Dashboard</b> — nodes, running containers, critical CVEs, and what needs attention at a glance.</sub></td>
+<td width="50%"><img src="assets/screenshots/resource-tree.png" alt="Resource tree"><br><sub><b>Resource tree</b> — host → compose stack → container → filesystem, with live status and per-host detail.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/screenshots/diagnostic.png" alt="Why is this broken? diagnostic"><br><sub><b>"Why is this broken?"</b> — plain-English access verdict (here: <code>other</code> category, access denied) with ranked, copy-paste fixes.</sub></td>
+<td width="50%"><img src="assets/screenshots/uid-gid-visualizer.png" alt="UID/GID conflict visualizer"><br><sub><b>UID/GID visualizer</b> — host vs container user tables side by side, flagging the same-UID/different-identity mismatch.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/screenshots/cve.png" alt="CVE scan"><br><sub><b>CVE scan</b> — per-image Trivy results by severity, on-demand and scheduled.</sub></td>
+<td width="50%"><img src="assets/screenshots/security-audit.png" alt="Security audit"><br><sub><b>Security audit</b> — A–F posture score per node from CVE, privileged, exposed-port, and key signals.</sub></td>
+</tr>
+</table>
+
+> Screenshots and the tour above are generated from a throwaway demo environment (`task seed:demo` + `scripts/capture-screenshots.mjs`) using documentation-only data — no real infrastructure.
 
 ## Status
 
