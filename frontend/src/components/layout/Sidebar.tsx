@@ -131,6 +131,7 @@ const navGroups: NavGroup[] = [
       { icon: <Bot size={14} />, label: 'Assistant', to: '/chat', operatorOnly: true },
       { icon: <Zap size={14} />, label: 'Automations', to: '/automations', operatorOnly: true },
       { icon: <Wrench size={14} />, label: 'Skills', to: '/skills' },
+      { icon: <ListChecks size={14} />, label: 'Runbooks', to: '/runbooks', operatorOnly: true },
     ],
   },
 ]

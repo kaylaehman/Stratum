@@ -157,6 +157,8 @@ func NewRouter(d *Deps) http.Handler {
 
 			// AI runbooks (read; create/update/delete audited below).
 			r.Get("/runbooks", d.Handlers.ListRunbooks)
+			r.Get("/runbooks/{id}", d.Handlers.GetRunbook)
+			r.Post("/runbooks/{id}/validate", d.Handlers.ValidateRunbook)
 
 			// Agentic remediation (read; mutations audited below).
 			r.Get("/remediation", d.Handlers.ListProposals)

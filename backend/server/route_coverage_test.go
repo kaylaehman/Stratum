@@ -46,6 +46,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/logs/unsubscribe":           true,
 		"POST /api/webhooks/{id}/test":         true, // sends a test message; no Stratum state change
 		"POST /api/templates/{id}/render":      true, // pure string substitution; no state change
+		"POST /api/runbooks/{id}/validate":     true, // lints a runbook; no state change
 	}
 
 	// Per-user preference mutations (bookmarks): user-owned state, not

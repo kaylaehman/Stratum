@@ -10,9 +10,17 @@ import {
   Loader,
   ShieldAlert,
   AlertTriangle,
+  Clock,
+  ScanSearch,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  CalendarClock,
+  X,
 } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
+import { useNodes } from '../lib/api/nodes'
 import {
   useSecrets,
   useCreateGroup,
@@ -21,12 +29,201 @@ import {
   useImportSecrets,
   useDeleteSecret,
   useRevealSecret,
+  useSetExpiry,
+  useExpiringSecrets,
+  useScanNode,
+} from '../lib/api/secrets'
+import type {
+  ExpiryStatus,
+  SecretExpiryMeta,
+  PlaintextFinding,
 } from '../lib/api/secrets'
 import type { SecretGroup, SecretKey } from '../types/api'
 
 // ---- Helpers ----
 
 const REVEAL_TIMEOUT_MS = 30_000
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function daysUntil(iso: string): number {
+  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000)
+}
+
+// ---- Expiry badge ----
+
+const EXPIRY_BADGE: Record<
+  ExpiryStatus,
+  { label: string; bg: string; border: string; color: string }
+> = {
+  none: {
+    label: 'No expiry',
+    bg: 'rgba(74,82,104,0.15)',
+    border: 'var(--border-default)',
+    color: 'var(--text-muted)',
+  },
+  ok: {
+    label: 'Valid',
+    bg: 'rgba(74,200,80,0.10)',
+    border: 'rgba(74,200,80,0.3)',
+    color: 'var(--accent)',
+  },
+  warning: {
+    label: 'Expiring soon',
+    bg: 'rgba(240,160,32,0.12)',
+    border: 'rgba(240,160,32,0.35)',
+    color: 'var(--status-warn)',
+  },
+  expired: {
+    label: 'Expired',
+    bg: 'rgba(232,64,64,0.12)',
+    border: 'rgba(232,64,64,0.35)',
+    color: 'var(--status-error)',
+  },
+}
+
+interface ExpiryBadgeProps {
+  status: ExpiryStatus
+  expiresAt?: string | null
+}
+
+function ExpiryBadge({ status, expiresAt }: ExpiryBadgeProps) {
+  if (status === 'none') return null
+  const cfg = EXPIRY_BADGE[status]
+  const days = expiresAt ? daysUntil(expiresAt) : null
+  const label =
+    status === 'expired'
+      ? `Expired ${expiresAt ? formatDate(expiresAt) : ''}`
+      : status === 'warning' && days !== null
+        ? `Expires in ${days}d`
+        : status === 'ok' && expiresAt
+          ? `Expires ${formatDate(expiresAt)}`
+          : cfg.label
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 font-mono text-xs px-1.5 py-0.5"
+      style={{
+        backgroundColor: cfg.bg,
+        border: `1px solid ${cfg.border}`,
+        color: cfg.color,
+        borderRadius: '3px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <Clock size={9} />
+      {label}
+    </span>
+  )
+}
+
+// ---- Set expiry form (inline) ----
+
+interface SetExpiryFormProps {
+  secretId: string
+  currentExpiry: string | null
+  onDone: () => void
+}
+
+function SetExpiryForm({ secretId, currentExpiry, onDone }: SetExpiryFormProps) {
+  const [expiresAt, setExpiresAt] = useState<string>(
+    currentExpiry ? currentExpiry.slice(0, 10) : '',
+  )
+  const { mutate: setExpiry, isPending, error } = useSetExpiry()
+
+  function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    setExpiry(
+      {
+        secretId,
+        body: { expires_at: expiresAt ? new Date(expiresAt).toISOString() : null },
+      },
+      { onSuccess: onDone },
+    )
+  }
+
+  function handleClear() {
+    setExpiry({ secretId, body: { expires_at: null } }, { onSuccess: onDone })
+  }
+
+  return (
+    <form
+      onSubmit={handleSave}
+      className="flex items-center gap-1.5"
+      style={{ display: 'inline-flex' }}
+    >
+      <input
+        type="date"
+        value={expiresAt}
+        onChange={(e) => setExpiresAt(e.target.value)}
+        className="font-mono text-xs px-1.5 py-0.5"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)',
+          color: 'var(--text-primary)',
+          borderRadius: '3px',
+          outline: 'none',
+        }}
+      />
+      <button
+        type="submit"
+        disabled={isPending}
+        className="text-xs px-2 py-0.5"
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          color: 'var(--text-secondary)',
+          borderRadius: '3px',
+          cursor: isPending ? 'default' : 'pointer',
+          opacity: isPending ? 0.6 : 1,
+        }}
+      >
+        {isPending ? <Loader size={9} className="animate-spin" /> : 'Set'}
+      </button>
+      {currentExpiry && (
+        <button
+          type="button"
+          onClick={handleClear}
+          disabled={isPending}
+          className="text-xs px-2 py-0.5"
+          style={{
+            backgroundColor: 'var(--bg-elevated)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--status-error)',
+            borderRadius: '3px',
+            cursor: isPending ? 'default' : 'pointer',
+          }}
+        >
+          Clear
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onDone}
+        className="text-xs px-1.5 py-0.5"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--text-muted)',
+          cursor: 'pointer',
+        }}
+      >
+        <X size={10} />
+      </button>
+      {error && (
+        <span className="text-xs" style={{ color: 'var(--status-error)' }}>
+          Failed
+        </span>
+      )}
+    </form>
+  )
+}
 
 // ---- Admin gate ----
 
@@ -140,17 +337,19 @@ function ConfirmDialog({
 
 interface SecretRowProps {
   secret: SecretKey
+  isAdmin: boolean
+  expiryMeta?: SecretExpiryMeta
 }
 
-function SecretRow({ secret }: SecretRowProps) {
+function SecretRow({ secret, isAdmin, expiryMeta }: SecretRowProps) {
   const [revealedValue, setRevealedValue] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [editingExpiry, setEditingExpiry] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { mutate: reveal, isPending: revealing } = useRevealSecret()
   const { mutate: deleteSecret, isPending: deleting } = useDeleteSecret()
 
-  // Auto-hide revealed value after timeout
   useEffect(() => {
     if (revealedValue !== null) {
       timeoutRef.current = setTimeout(() => setRevealedValue(null), REVEAL_TIMEOUT_MS)
@@ -184,60 +383,108 @@ function SecretRow({ secret }: SecretRowProps) {
     deleteSecret(secret.id, { onSuccess: () => setConfirmingDelete(false) })
   }
 
+  const expiryStatus = expiryMeta?.status ?? 'none'
+
   return (
     <>
       <div
-        className="flex items-center gap-3 px-3 py-2"
+        className="flex flex-col gap-1 px-3 py-2"
         style={{ borderBottom: '1px solid var(--border-subtle)' }}
       >
-        {/* Key name */}
-        <span
-          className="font-mono text-xs flex-1 min-w-0 truncate"
-          style={{ color: 'var(--text-primary)' }}
-        >
-          {secret.key}
-        </span>
+        <div className="flex items-center gap-3">
+          {/* Key name */}
+          <span
+            className="font-mono text-xs flex-1 min-w-0 truncate"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {secret.key}
+          </span>
 
-        {/* Value display */}
-        <span
-          className="font-mono text-xs"
-          style={{
-            color: revealedValue ? 'var(--accent)' : 'var(--text-muted)',
-            letterSpacing: revealedValue ? undefined : '0.15em',
-            userSelect: revealedValue ? 'text' : 'none',
-            maxWidth: '220px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {revealedValue ?? '••••••••'}
-        </span>
+          {/* Expiry badge */}
+          {expiryMeta && (
+            <ExpiryBadge status={expiryStatus} expiresAt={expiryMeta.expires_at} />
+          )}
 
-        {/* Actions */}
-        <div className="flex items-center gap-1 shrink-0">
-          {revealedValue ? (
-            <>
+          {/* Value display */}
+          <span
+            className="font-mono text-xs"
+            style={{
+              color: revealedValue ? 'var(--accent)' : 'var(--text-muted)',
+              letterSpacing: revealedValue ? undefined : '0.15em',
+              userSelect: revealedValue ? 'text' : 'none',
+              maxWidth: '220px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {revealedValue ?? '••••••••'}
+          </span>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1 shrink-0">
+            {revealedValue ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handleCopy()}
+                  title="Copy value"
+                  className="flex items-center gap-1 text-xs px-1.5 py-1"
+                  style={{
+                    backgroundColor: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-default)',
+                    color: copied ? 'var(--accent)' : 'var(--text-muted)',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Copy size={10} />
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleHide}
+                  title="Hide value"
+                  className="flex items-center gap-1 text-xs px-1.5 py-1"
+                  style={{
+                    backgroundColor: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-default)',
+                    color: 'var(--text-muted)',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <EyeOff size={10} />
+                  Hide
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
-                onClick={() => void handleCopy()}
-                title="Copy value"
+                onClick={handleReveal}
+                disabled={revealing}
+                title="Reveal value"
                 className="flex items-center gap-1 text-xs px-1.5 py-1"
                 style={{
                   backgroundColor: 'var(--bg-elevated)',
                   border: '1px solid var(--border-default)',
-                  color: copied ? 'var(--accent)' : 'var(--text-muted)',
+                  color: 'var(--text-secondary)',
                   borderRadius: '3px',
-                  cursor: 'pointer',
+                  cursor: revealing ? 'default' : 'pointer',
+                  opacity: revealing ? 0.6 : 1,
                 }}
               >
-                <Copy size={10} />
-                {copied ? 'Copied' : 'Copy'}
+                {revealing ? <Loader size={10} className="animate-spin" /> : <Eye size={10} />}
+                Reveal
               </button>
+            )}
+
+            {/* Admin: set expiry */}
+            {isAdmin && !editingExpiry && (
               <button
                 type="button"
-                onClick={handleHide}
-                title="Hide value"
+                onClick={() => setEditingExpiry(true)}
+                title="Set expiry"
                 className="flex items-center gap-1 text-xs px-1.5 py-1"
                 style={{
                   backgroundColor: 'var(--bg-elevated)',
@@ -247,46 +494,38 @@ function SecretRow({ secret }: SecretRowProps) {
                   cursor: 'pointer',
                 }}
               >
-                <EyeOff size={10} />
-                Hide
+                <CalendarClock size={10} />
               </button>
-            </>
-          ) : (
+            )}
+
             <button
               type="button"
-              onClick={handleReveal}
-              disabled={revealing}
-              title="Reveal value"
+              onClick={() => setConfirmingDelete(true)}
+              title={`Delete ${secret.key}`}
               className="flex items-center gap-1 text-xs px-1.5 py-1"
               style={{
                 backgroundColor: 'var(--bg-elevated)',
                 border: '1px solid var(--border-default)',
-                color: 'var(--text-secondary)',
+                color: 'var(--status-error)',
                 borderRadius: '3px',
-                cursor: revealing ? 'default' : 'pointer',
-                opacity: revealing ? 0.6 : 1,
+                cursor: 'pointer',
               }}
             >
-              {revealing ? <Loader size={10} className="animate-spin" /> : <Eye size={10} />}
-              Reveal
+              <Trash2 size={10} />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setConfirmingDelete(true)}
-            title={`Delete ${secret.key}`}
-            className="flex items-center gap-1 text-xs px-1.5 py-1"
-            style={{
-              backgroundColor: 'var(--bg-elevated)',
-              border: '1px solid var(--border-default)',
-              color: 'var(--status-error)',
-              borderRadius: '3px',
-              cursor: 'pointer',
-            }}
-          >
-            <Trash2 size={10} />
-          </button>
+          </div>
         </div>
+
+        {/* Inline expiry editor */}
+        {editingExpiry && (
+          <div className="pl-0 pt-1">
+            <SetExpiryForm
+              secretId={secret.id}
+              currentExpiry={expiryMeta?.expires_at ?? null}
+              onDone={() => setEditingExpiry(false)}
+            />
+          </div>
+        )}
       </div>
 
       {confirmingDelete && (
@@ -524,11 +763,13 @@ function ImportForm({ groupId, onDone, onCancel }: ImportFormProps) {
 
 interface GroupCardProps {
   group: SecretGroup
+  isAdmin: boolean
+  expiryMap: Map<string, SecretExpiryMeta>
 }
 
 type PanelMode = 'none' | 'add' | 'import'
 
-function GroupCard({ group }: GroupCardProps) {
+function GroupCard({ group, isAdmin, expiryMap }: GroupCardProps) {
   const [panel, setPanel] = useState<PanelMode>('none')
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -662,7 +903,12 @@ function GroupCard({ group }: GroupCardProps) {
           </div>
         ) : (
           group.secrets.map((secret) => (
-            <SecretRow key={secret.id} secret={secret} />
+            <SecretRow
+              key={secret.id}
+              secret={secret}
+              isAdmin={isAdmin}
+              expiryMeta={expiryMap.get(secret.id)}
+            />
           ))
         )}
 
@@ -835,7 +1081,313 @@ function SectionHeader({ label, count }: { label: string; count?: number }) {
   )
 }
 
+// ---- Expiring summary banner ----
+
+interface ExpiringSummaryProps {
+  secrets: SecretExpiryMeta[]
+}
+
+function ExpiringSummary({ secrets }: ExpiringSummaryProps) {
+  const [expanded, setExpanded] = useState(false)
+  const expired = secrets.filter((s) => s.status === 'expired')
+  const warning = secrets.filter((s) => s.status === 'warning')
+
+  if (expired.length === 0 && warning.length === 0) return null
+
+  const totalUrgent = expired.length + warning.length
+
+  return (
+    <div
+      className="mb-4"
+      style={{
+        backgroundColor: expired.length > 0 ? 'rgba(232,64,64,0.07)' : 'rgba(240,160,32,0.07)',
+        border: `1px solid ${expired.length > 0 ? 'rgba(232,64,64,0.25)' : 'rgba(240,160,32,0.25)'}`,
+        borderRadius: '3px',
+      }}
+    >
+      <button
+        type="button"
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
+        onClick={() => setExpanded((v) => !v)}
+        style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+      >
+        <Clock
+          size={12}
+          style={{
+            color: expired.length > 0 ? 'var(--status-error)' : 'var(--status-warn)',
+            flexShrink: 0,
+          }}
+        />
+        <span
+          className="text-xs font-medium flex-1"
+          style={{
+            color: expired.length > 0 ? 'var(--status-error)' : 'var(--status-warn)',
+          }}
+        >
+          {expired.length > 0
+            ? `${expired.length} expired secret${expired.length !== 1 ? 's' : ''}`
+            : ''}
+          {expired.length > 0 && warning.length > 0 ? ', ' : ''}
+          {warning.length > 0
+            ? `${warning.length} expiring soon`
+            : ''}
+          {' '}— action required
+        </span>
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {totalUrgent} total
+        </span>
+        {expanded
+          ? <ChevronDown size={11} style={{ color: 'var(--text-muted)' }} />
+          : <ChevronRight size={11} style={{ color: 'var(--text-muted)' }} />
+        }
+      </button>
+
+      {expanded && (
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          {[...expired, ...warning].map((s) => (
+            <div
+              key={s.id}
+              className="flex items-center gap-2 px-3 py-1.5"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+            >
+              <ExpiryBadge status={s.status} expiresAt={s.expires_at} />
+              <span
+                className="font-mono text-xs flex-1 truncate"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {s.key}
+              </span>
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {s.group_name}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- Plaintext scanner panel ----
+
+interface ScannerPanelProps {
+  nodeId: string
+  nodeName: string
+  findings: PlaintextFinding[]
+  onClose: () => void
+}
+
+function FindingRow({ finding }: { finding: PlaintextFinding }) {
+  return (
+    <div
+      className="flex flex-col gap-0.5 px-3 py-2"
+      style={{ borderBottom: '1px solid var(--border-subtle)' }}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="font-mono text-xs"
+          style={{ color: 'var(--status-warn)', fontWeight: 500 }}
+        >
+          {finding.key_name}
+        </span>
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          line {finding.line}
+        </span>
+        <span
+          className="text-xs px-1.5 py-0.5"
+          style={{
+            backgroundColor: 'rgba(240,160,32,0.10)',
+            border: '1px solid rgba(240,160,32,0.25)',
+            color: 'var(--status-warn)',
+            borderRadius: '3px',
+          }}
+        >
+          {finding.reason}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span
+          className="font-mono text-xs truncate flex-1"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {finding.path}
+        </span>
+        <span
+          className="text-xs flex items-center gap-1 shrink-0"
+          style={{ color: 'var(--accent)', cursor: 'pointer' }}
+          title="Move this secret to the vault"
+        >
+          <ExternalLink size={9} />
+          Move to vault
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function ScannerPanel({ nodeName, findings, onClose }: ScannerPanelProps) {
+  return (
+    <div
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: '3px',
+        marginBottom: '16px',
+      }}
+    >
+      <div
+        className="flex items-center gap-2 px-3 py-2.5"
+        style={{ borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        <ScanSearch size={13} style={{ color: 'var(--status-warn)', flexShrink: 0 }} />
+        <span
+          className="text-xs font-medium flex-1"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          Plaintext secrets found on{' '}
+          <span className="font-mono">{nodeName}</span>
+        </span>
+        <span
+          className="font-mono text-xs px-1.5 py-0.5"
+          style={{
+            backgroundColor: 'rgba(240,160,32,0.12)',
+            border: '1px solid rgba(240,160,32,0.3)',
+            color: 'var(--status-warn)',
+            borderRadius: '3px',
+          }}
+        >
+          {findings.length} {findings.length === 1 ? 'finding' : 'findings'}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs px-1.5 py-0.5"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+          }}
+        >
+          <X size={11} />
+        </button>
+      </div>
+
+      {findings.length === 0 ? (
+        <div
+          className="px-3 py-3 text-xs"
+          style={{
+            color: 'var(--accent)',
+            backgroundColor: 'rgba(74,200,80,0.06)',
+          }}
+        >
+          No plaintext secrets detected. All clear.
+        </div>
+      ) : (
+        <>
+          <div
+            className="px-3 py-2 text-xs"
+            style={{
+              color: 'var(--text-secondary)',
+              backgroundColor: 'rgba(240,160,32,0.05)',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}
+          >
+            These keys appear to be stored in plaintext on disk. No values are shown.
+            Consider moving them to the vault.
+          </div>
+          {findings.map((f, i) => (
+            <FindingRow key={`${f.path}:${f.line}:${i}`} finding={f} />
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---- Scanner trigger control ----
+
+interface ScanTriggerProps {
+  onResult: (nodeId: string, nodeName: string, findings: PlaintextFinding[]) => void
+}
+
+function ScanTrigger({ onResult }: ScanTriggerProps) {
+  const { data: nodes } = useNodes()
+  const [selectedNodeId, setSelectedNodeId] = useState<string>('')
+  const { mutate: scan, isPending } = useScanNode()
+
+  const nodeList = nodes ?? []
+
+  function handleScan() {
+    if (!selectedNodeId) return
+    const node = nodeList.find((n) => n.id === selectedNodeId)
+    scan(selectedNodeId, {
+      onSuccess: (data) => {
+        onResult(selectedNodeId, node?.name ?? selectedNodeId, data.findings)
+      },
+    })
+  }
+
+  return (
+    <div
+      className="flex items-center gap-2 p-3 mb-4"
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: '3px',
+      }}
+    >
+      <ScanSearch size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+        Scan node for plaintext secrets:
+      </span>
+      <select
+        value={selectedNodeId}
+        onChange={(e) => setSelectedNodeId(e.target.value)}
+        className="text-xs px-2 py-1.5 flex-1"
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          color: selectedNodeId ? 'var(--text-primary)' : 'var(--text-muted)',
+          borderRadius: '3px',
+          outline: 'none',
+        }}
+      >
+        <option value="">Select a node...</option>
+        {nodeList.map((n) => (
+          <option key={n.id} value={n.id}>
+            {n.name} ({n.host})
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={handleScan}
+        disabled={!selectedNodeId || isPending}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 shrink-0"
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          color: !selectedNodeId || isPending ? 'var(--text-muted)' : 'var(--text-secondary)',
+          borderRadius: '3px',
+          cursor: !selectedNodeId || isPending ? 'default' : 'pointer',
+          opacity: !selectedNodeId || isPending ? 0.6 : 1,
+        }}
+      >
+        {isPending ? <Loader size={10} className="animate-spin" /> : <ScanSearch size={10} />}
+        {isPending ? 'Scanning...' : 'Scan'}
+      </button>
+    </div>
+  )
+}
+
 // ---- Main Secrets page ----
+
+interface ScanResult {
+  nodeId: string
+  nodeName: string
+  findings: PlaintextFinding[]
+}
 
 export default function Secrets() {
   const { data: me, isLoading: meLoading } = useMe()
@@ -844,9 +1396,22 @@ export default function Secrets() {
   const { data, isLoading: secretsLoading } = useSecrets()
   const groups: SecretGroup[] = data?.groups ?? []
 
+  const { data: expiringData } = useExpiringSecrets()
+  const expiringSecrets = expiringData?.secrets ?? []
+
+  // Build a lookup map: secretId → expiry meta
+  const expiryMap = new Map<string, SecretExpiryMeta>(
+    expiringSecrets.map((s) => [s.id, s]),
+  )
+
   const [showNewGroup, setShowNewGroup] = useState(false)
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null)
 
   const isLoading = meLoading || secretsLoading
+
+  function handleScanResult(nodeId: string, nodeName: string, findings: PlaintextFinding[]) {
+    setScanResult({ nodeId, nodeName, findings })
+  }
 
   return (
     <AppShell>
@@ -904,6 +1469,22 @@ export default function Secrets() {
               <NewGroupForm onDone={() => setShowNewGroup(false)} />
             )}
 
+            {/* Expiring secrets summary */}
+            <ExpiringSummary secrets={expiringSecrets} />
+
+            {/* Scanner trigger */}
+            <ScanTrigger onResult={handleScanResult} />
+
+            {/* Scanner results */}
+            {scanResult && (
+              <ScannerPanel
+                nodeId={scanResult.nodeId}
+                nodeName={scanResult.nodeName}
+                findings={scanResult.findings}
+                onClose={() => setScanResult(null)}
+              />
+            )}
+
             <SectionHeader label="Secret Groups" count={groups.length} />
 
             {groups.length === 0 ? (
@@ -919,7 +1500,14 @@ export default function Secrets() {
                 No secret groups yet. Create one above.
               </div>
             ) : (
-              groups.map((group) => <GroupCard key={group.id} group={group} />)
+              groups.map((group) => (
+                <GroupCard
+                  key={group.id}
+                  group={group}
+                  isAdmin={isAdmin}
+                  expiryMap={expiryMap}
+                />
+              ))
             )}
 
             {/* Security notice */}

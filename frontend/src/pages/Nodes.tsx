@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Server, Box, Terminal, Plus, RefreshCw, Pencil, Trash2, Check, X, Loader } from 'lucide-react'
+import { Server, Box, Terminal, Plus, RefreshCw, Pencil, Trash2, Check, X, Loader, Layers } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { AddNodeWizard } from '../components/nodes/AddNodeWizard'
 import { EditDockerModal } from '../components/nodes/EditDockerModal'
 import { useNodes, useDeleteNode, useRenameNode, useReprobeNode } from '../lib/api/nodes'
 import { ApiError } from '../lib/api'
+import { useDrainPlan, useDrainExecute } from '../lib/api/orchestration'
+import { useCan } from '../lib/roles'
 import type { NodeView, NodeType, NodeStatus, Capabilities } from '../types/api'
+import type { OrchPlan, OrchStepResult } from '../lib/api/orchestration'
 
 // ---- type icons ----
 
@@ -190,11 +193,195 @@ function DeleteConfirm({ nodeId, onDone }: { nodeId: string; onDone: () => void 
   )
 }
 
+// ---- drain modal ----
+
+type DrainPhase = 'plan' | 'confirm' | 'execute' | 'results'
+
+interface DrainModalProps {
+  nodeId: string
+  nodeName: string
+  onClose: () => void
+}
+
+function DrainModal({ nodeId, nodeName, onClose }: DrainModalProps) {
+  const [phase, setPhase] = useState<DrainPhase>('plan')
+  const [plan, setPlan] = useState<OrchPlan | null>(null)
+  const [results, setResults] = useState<OrchStepResult[] | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const drainPlan = useDrainPlan()
+  const drainExecute = useDrainExecute()
+
+  async function fetchPlan() {
+    setErr(null)
+    try {
+      const p = await drainPlan.mutateAsync(nodeId)
+      setPlan(p)
+      setPhase('confirm')
+    } catch (e) {
+      setErr(e instanceof ApiError ? ((e.body as { error?: string }).error ?? 'Plan failed.') : 'Plan failed.')
+    }
+  }
+
+  async function executeDrain() {
+    setErr(null)
+    setPhase('execute')
+    try {
+      const res = await drainExecute.mutateAsync(nodeId)
+      setResults(res.results)
+      setPhase('results')
+    } catch (e) {
+      if (e instanceof Error && e.message === 'step_up_cancelled') {
+        setPhase('confirm')
+        return
+      }
+      setErr(e instanceof ApiError ? ((e.body as { error?: string }).error ?? 'Drain failed.') : 'Drain failed.')
+      setPhase('confirm')
+    }
+  }
+
+  // Auto-fetch plan on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void fetchPlan() }, [])
+
+  const overlay: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 50,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  }
+  const modal: React.CSSProperties = {
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-default)',
+    borderRadius: '4px',
+    width: '440px',
+    maxWidth: '95vw',
+    maxHeight: '80vh',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  }
+
+  return (
+    <div style={overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div style={modal}>
+        {/* Header */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Drain node — {nodeName}
+          </span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px' }} aria-label="Close">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+          {(phase === 'plan' || drainPlan.isPending) && (
+            <div className="flex items-center gap-2 py-4 justify-center">
+              <Loader size={14} className="animate-spin" style={{ color: 'var(--accent)' }} />
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Building drain plan…</span>
+            </div>
+          )}
+
+          {(phase === 'confirm' || phase === 'execute' || phase === 'results') && plan && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                The following guests and containers will be stopped in dependency order:
+              </p>
+              {plan.cycles.length > 0 && (
+                <div style={{ backgroundColor: 'rgba(246,173,85,0.1)', border: '1px solid rgba(246,173,85,0.35)', borderRadius: '3px', padding: '8px 10px' }}>
+                  <span className="text-xs" style={{ color: 'var(--status-warn)' }}>
+                    Dependency cycles detected — order may be approximate.
+                  </span>
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                {plan.steps.map((step, i) => {
+                  const res = results?.find((r) => r.step.id === step.id)
+                  return (
+                    <div key={step.id} style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '5px 8px',
+                      backgroundColor: 'var(--bg-elevated)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '3px',
+                    }}>
+                      <span className="text-xs font-mono" style={{ color: 'var(--text-muted)', minWidth: '20px', textAlign: 'right' }}>
+                        {i + 1}.
+                      </span>
+                      <span className="text-xs font-mono" style={{ color: 'var(--text-primary)', flex: 1 }}>
+                        {step.name}
+                      </span>
+                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{step.kind}</span>
+                      {phase === 'execute' && !res && (
+                        <Loader size={10} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                      )}
+                      {res && (
+                        <span style={{ color: res.ok ? 'var(--status-ok)' : 'var(--status-error)', fontSize: '11px', fontFamily: 'monospace' }}>
+                          {res.ok ? 'ok' : 'err'}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              {phase === 'results' && results && (
+                <div style={{
+                  padding: '8px 10px',
+                  backgroundColor: results.every((r) => r.ok) ? 'rgba(74,222,128,0.08)' : 'rgba(232,64,64,0.08)',
+                  border: `1px solid ${results.every((r) => r.ok) ? 'rgba(74,222,128,0.3)' : 'rgba(232,64,64,0.3)'}`,
+                  borderRadius: '3px',
+                }}>
+                  <span className="text-xs" style={{ color: results.every((r) => r.ok) ? 'var(--status-ok)' : 'var(--status-error)' }}>
+                    {results.every((r) => r.ok)
+                      ? `Drain complete — ${results.length} step(s) stopped.`
+                      : `${results.filter((r) => !r.ok).length} step(s) failed.`}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {err && (
+            <p className="text-xs mt-2" style={{ color: 'var(--status-error)' }}>{err}</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          {phase === 'results' ? (
+            <button onClick={onClose} className="text-xs px-3 py-1.5" style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)', borderRadius: '3px', cursor: 'pointer' }}>
+              Close
+            </button>
+          ) : (
+            <>
+              <button onClick={onClose} disabled={phase === 'execute'} className="text-xs px-3 py-1.5" style={{ backgroundColor: 'transparent', border: '1px solid var(--border-default)', color: 'var(--text-secondary)', borderRadius: '3px', cursor: 'pointer' }}>
+                Cancel
+              </button>
+              {phase === 'confirm' && (
+                <button
+                  onClick={() => void executeDrain()}
+                  disabled={drainExecute.isPending}
+                  className="text-xs px-3 py-1.5"
+                  style={{ backgroundColor: 'rgba(232,64,64,0.15)', border: '1px solid rgba(232,64,64,0.4)', color: 'var(--status-error)', borderRadius: '3px', cursor: 'pointer' }}
+                >
+                  Drain node
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---- row actions ----
 
-function RowActions({ node, onEditDocker }: { node: NodeView; onEditDocker: () => void }) {
+function RowActions({ node, onEditDocker, onDrain }: { node: NodeView; onEditDocker: () => void; onDrain: () => void }) {
   const [mode, setMode] = useState<'idle' | 'rename' | 'delete'>('idle')
   const reprobe = useReprobeNode()
+  const { isAdmin } = useCan()
 
   if (mode === 'rename') {
     return <RenameInline node={node} onDone={() => setMode('idle')} />
@@ -215,6 +402,11 @@ function RowActions({ node, onEditDocker }: { node: NodeView; onEditDocker: () =
       <ActionButton label="Docker config" onClick={onEditDocker}>
         <Box size={12} />
       </ActionButton>
+      {isAdmin && (
+        <ActionButton label="Drain node (ordered stop)" danger onClick={onDrain}>
+          <Layers size={12} />
+        </ActionButton>
+      )}
       <ActionButton label="Rename" onClick={() => setMode('rename')}>
         <Pencil size={12} />
       </ActionButton>
@@ -274,7 +466,7 @@ function formatLastSeen(ts?: string): string {
 
 // ---- node row ----
 
-function NodeRow({ node, onEditDocker }: { node: NodeView; onEditDocker: (node: NodeView) => void }) {
+function NodeRow({ node, onEditDocker, onDrain }: { node: NodeView; onEditDocker: (node: NodeView) => void; onDrain: (node: NodeView) => void }) {
   return (
     <tr
       style={{
@@ -340,7 +532,7 @@ function NodeRow({ node, onEditDocker }: { node: NodeView; onEditDocker: (node: 
 
       {/* Actions */}
       <td className="px-3 py-2 align-middle">
-        <RowActions node={node} onEditDocker={() => onEditDocker(node)} />
+        <RowActions node={node} onEditDocker={() => onEditDocker(node)} onDrain={() => onDrain(node)} />
       </td>
     </tr>
   )
@@ -352,6 +544,7 @@ export default function Nodes() {
   const { data: nodes, isLoading, isError, error } = useNodes()
   const [showWizard, setShowWizard] = useState(false)
   const [editDockerNode, setEditDockerNode] = useState<NodeView | null>(null)
+  const [drainNode, setDrainNode] = useState<NodeView | null>(null)
 
   return (
     <AppShell>
@@ -480,7 +673,7 @@ export default function Nodes() {
               </thead>
               <tbody>
                 {nodes.map((node) => (
-                  <NodeRow key={node.id} node={node} onEditDocker={setEditDockerNode} />
+                  <NodeRow key={node.id} node={node} onEditDocker={setEditDockerNode} onDrain={setDrainNode} />
                 ))}
               </tbody>
             </table>
@@ -491,6 +684,9 @@ export default function Nodes() {
       {showWizard && <AddNodeWizard onClose={() => setShowWizard(false)} />}
       {editDockerNode && (
         <EditDockerModal node={editDockerNode} onClose={() => setEditDockerNode(null)} />
+      )}
+      {drainNode && (
+        <DrainModal nodeId={drainNode.id} nodeName={drainNode.name} onClose={() => setDrainNode(null)} />
       )}
     </AppShell>
   )

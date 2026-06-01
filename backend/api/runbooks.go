@@ -10,6 +10,7 @@ import (
 
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/remediation"
 )
 
 // ListRunbooks returns all saved runbooks (read-only).
@@ -109,6 +110,36 @@ func auditRunbook(r *http.Request, action, id string) {
 		e.TargetType = ptr(activity.TargetAI)
 		e.TargetID = &id
 	}
+}
+
+// GetRunbook returns a single runbook by ID (read-only).
+func (h *Handlers) GetRunbook(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rb, err := h.Store.GetRunbook(r.Context(), id)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, rb)
+}
+
+// ValidateRunbook lints a runbook's steps via the remediation risk classifier.
+// Destructive steps without requires_approval are errors; high-risk steps are
+// warnings. Returns 200 with the lint result (never 4xx for lint failures).
+func (h *Handlers) ValidateRunbook(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rb, err := h.Store.GetRunbook(r.Context(), id)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, remediation.ValidateRunbook(rb))
 }
 
 // norm drops empty/blank entries from a string list.

@@ -1,12 +1,74 @@
-import { Loader, AlertTriangle, ShieldCheck, ShieldX } from 'lucide-react'
+import { useState } from 'react'
+import { Loader, AlertTriangle, ShieldCheck, ShieldX, BookText, Check } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useDiagnostic } from '../../lib/api/diagnostic'
 import { DiagnosticStep } from './DiagnosticStep'
 import { SuggestedFixList } from './SuggestedFixList'
+import { useCreateRunbook } from '../../lib/api/runbooks'
 import { useEffect } from 'react'
+import type { DiagnosticResult } from '../../types/api'
 
 interface Props {
   containerId: string
   hostPath: string
+}
+
+function SaveAsRunbookButton({ data }: { data: DiagnosticResult }) {
+  const create = useCreateRunbook()
+  const navigate = useNavigate()
+  const [saved, setSaved] = useState(false)
+
+  function handleSave() {
+    const steps = data.fixes.map((f) => f.command).filter(Boolean)
+    const triggers = data.verdict.access_granted ? [] : [data.verdict.summary]
+    create.mutate(
+      {
+        name: `Fix: ${data.host_path}`,
+        description: data.verdict.summary,
+        trigger_conditions: triggers,
+        steps,
+        requires_approval: true,
+      },
+      {
+        onSuccess: () => {
+          setSaved(true)
+          setTimeout(() => navigate('/runbooks'), 1200)
+        },
+      },
+    )
+  }
+
+  if (data.fixes.length === 0) return null
+
+  return (
+    <button
+      type="button"
+      onClick={handleSave}
+      disabled={create.isPending || saved}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '5px',
+        background: saved ? 'rgba(34,201,122,0.10)' : 'var(--bg-overlay)',
+        border: `1px solid ${saved ? 'var(--status-ok)' : 'var(--border-strong)'}`,
+        color: saved ? 'var(--status-ok)' : 'var(--text-secondary)',
+        borderRadius: '3px',
+        padding: '4px 10px',
+        fontSize: '0.7rem',
+        fontFamily: 'monospace',
+        cursor: create.isPending || saved ? 'default' : 'pointer',
+        transition: 'color 0.15s, border-color 0.15s',
+      }}
+    >
+      {create.isPending
+        ? <Loader size={11} className="animate-spin" />
+        : saved
+          ? <Check size={11} />
+          : <BookText size={11} />
+      }
+      {saved ? 'Saved — opening runbooks…' : 'Save as runbook'}
+    </button>
+  )
 }
 
 function VerdictBanner({ granted, summary }: { granted: boolean; summary: string }) {
@@ -142,6 +204,13 @@ export function DiagnosticCard({ containerId, hostPath }: Props) {
         fixes={data.fixes}
         accessGranted={data.verdict.access_granted}
       />
+
+      {/* Save as runbook */}
+      {!data.verdict.access_granted && data.fixes.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <SaveAsRunbookButton data={data} />
+        </div>
+      )}
     </div>
   )
 }
