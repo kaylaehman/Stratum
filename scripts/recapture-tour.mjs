@@ -49,8 +49,10 @@ for (const txt of ['demo-prox', 'demo-docker', 'media', 'monitoring']) {
   if (await el.count().catch(() => 0)) { await el.click().catch(() => {}); await grab(); await sleep(350) }
 }
 await dwell(3)
-await visit('/cve'); await dwell(5)
-await visit('/security'); await dwell(4)
+await visit('/cve'); await dwell(7)
+// NOTE: /security is intentionally NOT toured — its posture card computes live
+// (SSH-key audit) and shows a "Computing posture score…" spinner for ~30s, which
+// looks broken in a short walkthrough.
 await ctx.close(); await browser.close()
 
 const gif = path.join(ROOT, 'assets', 'tour.gif')
