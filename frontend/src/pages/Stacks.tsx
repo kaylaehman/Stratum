@@ -15,6 +15,9 @@ import {
   Play,
   Square,
   RotateCw,
+  Cpu,
+  MemoryStick,
+  Star,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import CodeMirror from '@uiw/react-codemirror'
@@ -23,11 +26,14 @@ import { AppShell } from '../components/layout/AppShell'
 import { useTree } from '../lib/api/tree'
 import { useMe } from '../hooks/useMe'
 import { useSecrets } from '../lib/api/secrets'
-import { useStackCompose, useRedeployStack, useStackLifecycle } from '../lib/api/stacks'
-import type { StackLifecycleAction } from '../lib/api/stacks'
+import { useStackCompose, useRedeployStack, useStackLifecycle, useCreateStack } from '../lib/api/stacks'
+import type { StackLifecycleAction, CreateStackEnvVar } from '../lib/api/stacks'
+import { usePlacementRecommend } from '../lib/api/placement'
+import type { PlacementRecommendation } from '../lib/api/placement'
+import { useTemplates, useRenderTemplate } from '../lib/api/templates'
 import { resolveLanguage } from '../lib/codemirror'
 import { useCan } from '../lib/roles'
-import type { Container, TreeNode, SecretGroup, StackEnvVar } from '../types/api'
+import type { Container, TreeNode, SecretGroup, StackEnvVar, Template } from '../types/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -770,6 +776,838 @@ function StackEditModal({ stack, isAdmin, secretGroups, onClose }: StackEditModa
   )
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const PROJECT_RE = /^[a-z0-9_-]+$/
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`
+  return `${(bytes / 1_024).toFixed(0)} KB`
+}
+
+// ── Placement node picker ─────────────────────────────────────────────────────
+
+interface NodePickerProps {
+  selected: PlacementRecommendation | null
+  onSelect: (rec: PlacementRecommendation) => void
+}
+
+function NodePicker({ selected, onSelect }: NodePickerProps) {
+  const { data, isLoading, error } = usePlacementRecommend()
+  const recs = data?.recommendations ?? []
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-3">
+        <Loader size={12} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          Ranking nodes...
+        </span>
+      </div>
+    )
+  }
+
+  if (error || recs.length === 0) {
+    return (
+      <div
+        className="flex items-center gap-2 text-xs px-3 py-2"
+        style={{
+          backgroundColor: 'rgba(240,160,32,0.07)',
+          border: '1px solid rgba(240,160,32,0.2)',
+          borderRadius: '3px',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        <AlertTriangle size={11} style={{ color: 'var(--status-warn)' }} />
+        No Docker-capable nodes available for placement.
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {recs.map((rec, idx) => {
+        const isSelected = selected?.node_id === rec.node_id
+        const isTop = idx === 0
+        return (
+          <button
+            key={rec.node_id}
+            type="button"
+            onClick={() => onSelect(rec)}
+            className="flex items-start gap-3 px-3 py-2.5 w-full text-left"
+            style={{
+              backgroundColor: isSelected ? 'rgba(74,200,80,0.08)' : 'var(--bg-surface)',
+              border: `1px solid ${isSelected ? 'rgba(74,200,80,0.4)' : 'var(--border-subtle)'}`,
+              borderRadius: '3px',
+              cursor: 'pointer',
+              outline: 'none',
+            }}
+          >
+            {/* Score badge */}
+            <span
+              className="font-mono text-xs shrink-0 mt-0.5 px-1.5 py-0.5"
+              style={{
+                backgroundColor: isTop ? 'rgba(74,200,80,0.12)' : 'var(--bg-elevated)',
+                border: `1px solid ${isTop ? 'rgba(74,200,80,0.3)' : 'var(--border-subtle)'}`,
+                color: isTop ? 'var(--status-ok)' : 'var(--text-muted)',
+                borderRadius: '3px',
+                minWidth: '34px',
+                textAlign: 'center',
+              }}
+            >
+              {rec.score}
+            </span>
+
+            <div className="flex flex-col gap-1 flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {rec.node_name}
+                </span>
+                {isTop && (
+                  <span
+                    className="flex items-center gap-1 text-xs px-1.5 py-0.5 shrink-0"
+                    style={{
+                      backgroundColor: 'rgba(74,200,80,0.1)',
+                      border: '1px solid rgba(74,200,80,0.3)',
+                      color: 'var(--status-ok)',
+                      borderRadius: '3px',
+                    }}
+                  >
+                    <Star size={9} />
+                    Recommended
+                  </span>
+                )}
+                {isSelected && !isTop && (
+                  <Check size={10} style={{ color: 'var(--status-ok)' }} />
+                )}
+              </div>
+
+              {/* Headroom */}
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  <Cpu size={10} />
+                  {rec.headroom.cpu_free_pct.toFixed(0)}% CPU free
+                </span>
+                <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  <MemoryStick size={10} />
+                  {formatBytes(rec.headroom.mem_free_bytes)} RAM free
+                </span>
+              </div>
+
+              {/* Reasons */}
+              {rec.reasons.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {rec.reasons.map((r) => (
+                    <span
+                      key={r}
+                      className="text-xs px-1.5 py-0.5"
+                      style={{
+                        backgroundColor: 'var(--bg-elevated)',
+                        border: '1px solid var(--border-subtle)',
+                        color: 'var(--text-muted)',
+                        borderRadius: '3px',
+                      }}
+                    >
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Create Stack Modal ────────────────────────────────────────────────────────
+
+type CreateStep = 'node' | 'compose' | 'env'
+
+interface CreateStackModalProps {
+  secretGroups: SecretGroup[]
+  templates: Template[]
+  onClose: () => void
+  onCreated: (project: string) => void
+}
+
+function CreateStackModal({ secretGroups, templates, onClose, onCreated }: CreateStackModalProps) {
+  const [step, setStep] = useState<CreateStep>('node')
+  const [selectedNode, setSelectedNode] = useState<PlacementRecommendation | null>(null)
+  const [project, setProject] = useState('')
+  const [directory, setDirectory] = useState('')
+  const [yaml, setYaml] = useState('')
+  const [templateId, setTemplateId] = useState('')
+  const [templateVars, setTemplateVars] = useState<Record<string, string>>({})
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([])
+  const [envVars, setEnvVars] = useState<CreateStackEnvVar[]>([])
+  const [showAddEnv, setShowAddEnv] = useState(false)
+  const [projectError, setProjectError] = useState<string | null>(null)
+  const [langExt, setLangExt] = useState<LanguageSupport | null>(null)
+  const [deployOutput, setDeployOutput] = useState<string | null>(null)
+  const [deploySuccess, setDeploySuccess] = useState(false)
+
+  const { mutate: createStack, isPending: creating, error: createError } = useCreateStack()
+  const { mutate: renderTemplate, isPending: rendering } = useRenderTemplate()
+
+  useEffect(() => {
+    void resolveLanguage('compose.yml').then((l) => setLangExt(l))
+  }, [])
+
+  // Auto-set directory when project name changes
+  useEffect(() => {
+    if (project && !directory) {
+      setDirectory(`/opt/${project}`)
+    }
+  }, [project, directory])
+
+  const selectedTemplate = templates.find((t) => t.id === templateId)
+
+  function handleProjectChange(val: string) {
+    setProject(val)
+    if (val && !PROJECT_RE.test(val)) {
+      setProjectError('Only lowercase letters, digits, hyphens, and underscores.')
+    } else {
+      setProjectError(null)
+    }
+    // Reset directory if it was the auto-generated one
+    setDirectory(`/opt/${val}`)
+  }
+
+  function handleSelectTemplate(id: string) {
+    setTemplateId(id)
+    const tmpl = templates.find((t) => t.id === id)
+    if (!tmpl) return
+    // Pre-fill vars with defaults
+    const defaults: Record<string, string> = {}
+    for (const v of tmpl.variables) {
+      defaults[v.name] = v.default
+    }
+    setTemplateVars(defaults)
+  }
+
+  function handleRenderTemplate() {
+    if (!templateId) return
+    renderTemplate(
+      { id: templateId, req: { variables: templateVars } },
+      { onSuccess: (data) => setYaml(data.rendered) },
+    )
+  }
+
+  function toggleGroup(groupId: string) {
+    setSelectedGroups((prev) =>
+      prev.includes(groupId) ? prev.filter((g) => g !== groupId) : [...prev, groupId],
+    )
+  }
+
+  function handleAddEnvVar(key: string, value: string, secretId: string) {
+    setEnvVars((prev) => {
+      const filtered = prev.filter((v) => v.key !== key)
+      return [...filtered, { key, value: secretId ? undefined : value, secret_id: secretId || undefined }]
+    })
+    setShowAddEnv(false)
+  }
+
+  function handleDeleteEnvVar(key: string) {
+    setEnvVars((prev) => prev.filter((v) => v.key !== key))
+  }
+
+  function canAdvanceStep1() {
+    return selectedNode !== null
+  }
+
+  function canAdvanceStep2() {
+    return project.trim() !== '' && !projectError && yaml.trim() !== ''
+  }
+
+  function handleSubmit() {
+    if (!selectedNode || !canAdvanceStep2()) return
+    setDeployOutput(null)
+    setDeploySuccess(false)
+
+    createStack(
+      {
+        nodeId: selectedNode.node_id,
+        req: {
+          project: project.trim(),
+          directory: directory.trim() || `/opt/${project.trim()}`,
+          compose_yaml: yaml,
+          env_vars: envVars,
+          secret_groups: selectedGroups,
+        },
+      },
+      {
+        onSuccess: (data) => {
+          setDeployOutput(data.output)
+          setDeploySuccess(true)
+        },
+        onError: () => {
+          setDeploySuccess(false)
+        },
+      },
+    )
+  }
+
+  function handleDoneAfterSuccess() {
+    onCreated(project.trim())
+    onClose()
+  }
+
+  const stepLabels: Record<CreateStep, string> = {
+    node: '1. Pick Node',
+    compose: '2. Configure',
+    env: '3. Env & Deploy',
+  }
+
+  const steps: CreateStep[] = ['node', 'compose', 'env']
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+      }}
+    >
+      <div
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '4px',
+          width: 'min(860px, 96vw)',
+          maxHeight: '92vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-4 py-3 shrink-0"
+          style={{ borderBottom: '1px solid var(--border-subtle)' }}
+        >
+          <div className="flex items-center gap-3">
+            <Plus size={13} style={{ color: 'var(--text-secondary)' }} />
+            <span className="font-mono text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+              New Stack
+            </span>
+            {/* Step breadcrumb */}
+            <div className="flex items-center gap-1">
+              {steps.map((s, i) => (
+                <span key={s} className="flex items-center gap-1">
+                  {i > 0 && (
+                    <ChevronRight size={10} style={{ color: 'var(--border-default)' }} />
+                  )}
+                  <span
+                    className="text-xs"
+                    style={{
+                      color: step === s ? 'var(--accent)' : 'var(--text-muted)',
+                      fontWeight: step === s ? 600 : 400,
+                    }}
+                  >
+                    {stepLabels[s]}
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px' }}
+          >
+            <X size={14} style={{ color: 'var(--text-muted)' }} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-auto p-4 gap-4">
+
+          {/* ── Step 1: Node picker ── */}
+          {step === 'node' && (
+            <>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Select the Docker-capable node to deploy to. Nodes are ranked by available CPU
+                and RAM headroom.
+              </p>
+              <NodePicker selected={selectedNode} onSelect={setSelectedNode} />
+            </>
+          )}
+
+          {/* ── Step 2: Compose config ── */}
+          {step === 'compose' && (
+            <>
+              {/* Project name + directory */}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-start gap-3 flex-wrap">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                      Project name
+                    </label>
+                    <input
+                      type="text"
+                      value={project}
+                      onChange={(e) => handleProjectChange(e.target.value)}
+                      placeholder="my-stack"
+                      className="font-mono text-xs px-2 py-1.5"
+                      style={{
+                        width: '180px',
+                        backgroundColor: 'var(--bg-surface)',
+                        border: `1px solid ${projectError ? 'var(--status-error)' : 'var(--border-default)'}`,
+                        color: 'var(--text-primary)',
+                        borderRadius: '3px',
+                        outline: 'none',
+                      }}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    {projectError && (
+                      <span className="text-xs" style={{ color: 'var(--status-error)' }}>
+                        {projectError}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-1 flex-1">
+                    <label className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                      Target directory
+                    </label>
+                    <input
+                      type="text"
+                      value={directory}
+                      onChange={(e) => setDirectory(e.target.value)}
+                      placeholder="/opt/my-stack"
+                      className="font-mono text-xs px-2 py-1.5 w-full"
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-default)',
+                        color: 'var(--text-primary)',
+                        borderRadius: '3px',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Optional: seed from template */}
+              {templates.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                    Seed from template (optional)
+                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                      value={templateId}
+                      onChange={(e) => handleSelectTemplate(e.target.value)}
+                      className="text-xs px-2 py-1.5"
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-default)',
+                        color: 'var(--text-primary)',
+                        borderRadius: '3px',
+                        outline: 'none',
+                        maxWidth: '240px',
+                      }}
+                    >
+                      <option value="">— none —</option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    {selectedTemplate && selectedTemplate.variables.length > 0 && (
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {selectedTemplate.variables.map((v) => (
+                          <input
+                            key={v.name}
+                            type="text"
+                            placeholder={v.name}
+                            value={templateVars[v.name] ?? v.default}
+                            onChange={(e) =>
+                              setTemplateVars((prev) => ({ ...prev, [v.name]: e.target.value }))
+                            }
+                            title={v.description}
+                            className="font-mono text-xs px-2 py-1.5"
+                            style={{
+                              width: '140px',
+                              backgroundColor: 'var(--bg-surface)',
+                              border: '1px solid var(--border-default)',
+                              color: 'var(--text-primary)',
+                              borderRadius: '3px',
+                              outline: 'none',
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {templateId && (
+                      <button
+                        type="button"
+                        onClick={handleRenderTemplate}
+                        disabled={rendering}
+                        className="flex items-center gap-1 text-xs px-2 py-1.5 shrink-0"
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-default)',
+                          color: rendering ? 'var(--text-muted)' : 'var(--text-secondary)',
+                          borderRadius: '3px',
+                          cursor: rendering ? 'default' : 'pointer',
+                        }}
+                      >
+                        {rendering ? <Loader size={10} className="animate-spin" /> : <Check size={10} />}
+                        {rendering ? 'Rendering...' : 'Prefill YAML'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* YAML editor */}
+              <div className="flex flex-col gap-1 flex-1 min-h-0">
+                <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  Compose YAML
+                </span>
+                <div
+                  style={{
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '3px',
+                    overflow: 'hidden',
+                    minHeight: '200px',
+                    maxHeight: '340px',
+                    overflowY: 'auto',
+                  }}
+                >
+                  <CodeMirror
+                    value={yaml}
+                    onChange={(v) => setYaml(v)}
+                    extensions={langExt ? [langExt] : []}
+                    basicSetup={{ lineNumbers: true }}
+                    theme="dark"
+                    style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+                    placeholder={'services:\n  app:\n    image: nginx:latest\n    ports:\n      - "80:80"'}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Step 3: Env vars, secret groups, deploy ── */}
+          {step === 'env' && (
+            <>
+              {/* Secret groups */}
+              {secretGroups.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                    Inject secret groups
+                  </span>
+                  <div className="flex flex-col gap-1">
+                    {secretGroups.map((g) => (
+                      <label
+                        key={g.id}
+                        className="flex items-center gap-2 px-2 py-1.5 cursor-pointer"
+                        style={{
+                          backgroundColor: selectedGroups.includes(g.id)
+                            ? 'rgba(74,200,80,0.06)'
+                            : 'var(--bg-surface)',
+                          border: `1px solid ${selectedGroups.includes(g.id) ? 'rgba(74,200,80,0.3)' : 'var(--border-subtle)'}`,
+                          borderRadius: '3px',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedGroups.includes(g.id)}
+                          onChange={() => toggleGroup(g.id)}
+                          style={{ accentColor: 'var(--accent)' }}
+                        />
+                        <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+                          {g.name}
+                        </span>
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          ({g.secrets.length} keys)
+                        </span>
+                        {g.description && (
+                          <span className="text-xs flex-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                            — {g.description}
+                          </span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Secret values are injected at deploy time and never written to disk.
+                  </span>
+                </div>
+              )}
+
+              {/* Additional env vars */}
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                    Additional environment variables
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddEnv((v) => !v)}
+                    className="flex items-center gap-1 text-xs px-2 py-1"
+                    style={{
+                      backgroundColor: 'var(--bg-surface)',
+                      border: '1px solid var(--border-default)',
+                      color: showAddEnv ? 'var(--accent)' : 'var(--text-secondary)',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Plus size={10} />
+                    Add
+                  </button>
+                </div>
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '3px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {envVars.length === 0 && !showAddEnv && (
+                    <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                      No additional env vars.
+                    </div>
+                  )}
+                  {envVars.map((v) => (
+                    <EnvVarRow
+                      key={v.key}
+                      envVar={{ key: v.key, masked: true, secret_id: v.secret_id }}
+                      secretGroups={secretGroups}
+                      onDelete={handleDeleteEnvVar}
+                    />
+                  ))}
+                  {showAddEnv && (
+                    <AddEnvForm
+                      secretGroups={secretGroups}
+                      onAdd={handleAddEnvVar}
+                      onCancel={() => setShowAddEnv(false)}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div
+                className="flex flex-col gap-1 px-3 py-2"
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '3px',
+                }}
+              >
+                <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  Deployment summary
+                </span>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    Node: <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{selectedNode?.node_name}</span>
+                  </span>
+                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    Project: <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{project}</span>
+                  </span>
+                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    Directory: <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{directory}</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Deploy output */}
+              {deployOutput !== null && (
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    border: `1px solid ${deploySuccess ? 'rgba(74,200,80,0.3)' : 'rgba(232,64,64,0.3)'}`,
+                    borderRadius: '3px',
+                    padding: '8px',
+                  }}
+                >
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    {deploySuccess ? (
+                      <Check size={11} style={{ color: 'var(--status-ok)' }} />
+                    ) : (
+                      <AlertTriangle size={11} style={{ color: 'var(--status-error)' }} />
+                    )}
+                    <span
+                      className="text-xs font-medium uppercase tracking-wider"
+                      style={{ color: deploySuccess ? 'var(--status-ok)' : 'var(--status-error)' }}
+                    >
+                      {deploySuccess ? 'Stack deployed' : 'Deploy failed'}
+                    </span>
+                  </div>
+                  <pre
+                    className="text-xs"
+                    style={{
+                      color: 'var(--text-secondary)',
+                      whiteSpace: 'pre-wrap',
+                      maxHeight: '120px',
+                      overflowY: 'auto',
+                      fontFamily: "'Space Mono', monospace",
+                    }}
+                  >
+                    {deployOutput}
+                  </pre>
+                </div>
+              )}
+
+              {createError && deployOutput === null && (
+                <div
+                  className="flex items-center gap-2 text-xs px-3 py-2"
+                  style={{
+                    backgroundColor: 'rgba(232,64,64,0.08)',
+                    border: '1px solid rgba(232,64,64,0.25)',
+                    borderRadius: '3px',
+                    color: 'var(--status-error)',
+                  }}
+                >
+                  <AlertTriangle size={11} />
+                  Deploy failed. Check server logs.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="flex items-center justify-between gap-2 px-4 py-3 shrink-0"
+          style={{ borderTop: '1px solid var(--border-subtle)' }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs px-3 py-1.5"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+
+          <div className="flex items-center gap-2">
+            {step !== 'node' && (
+              <button
+                type="button"
+                onClick={() => setStep(step === 'env' ? 'compose' : 'node')}
+                className="text-xs px-3 py-1.5"
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-secondary)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                }}
+              >
+                Back
+              </button>
+            )}
+
+            {step === 'node' && (
+              <button
+                type="button"
+                onClick={() => setStep('compose')}
+                disabled={!canAdvanceStep1()}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+                style={{
+                  backgroundColor: canAdvanceStep1() ? 'rgba(74,200,80,0.1)' : 'var(--bg-surface)',
+                  border: `1px solid ${canAdvanceStep1() ? 'rgba(74,200,80,0.35)' : 'var(--border-default)'}`,
+                  color: canAdvanceStep1() ? 'var(--status-ok)' : 'var(--text-muted)',
+                  borderRadius: '3px',
+                  cursor: canAdvanceStep1() ? 'pointer' : 'default',
+                }}
+              >
+                Next
+                <ChevronRight size={10} />
+              </button>
+            )}
+
+            {step === 'compose' && (
+              <button
+                type="button"
+                onClick={() => setStep('env')}
+                disabled={!canAdvanceStep2()}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+                style={{
+                  backgroundColor: canAdvanceStep2() ? 'rgba(74,200,80,0.1)' : 'var(--bg-surface)',
+                  border: `1px solid ${canAdvanceStep2() ? 'rgba(74,200,80,0.35)' : 'var(--border-default)'}`,
+                  color: canAdvanceStep2() ? 'var(--status-ok)' : 'var(--text-muted)',
+                  borderRadius: '3px',
+                  cursor: canAdvanceStep2() ? 'pointer' : 'default',
+                }}
+              >
+                Next
+                <ChevronRight size={10} />
+              </button>
+            )}
+
+            {step === 'env' && !deploySuccess && (
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={creating}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+                style={{
+                  backgroundColor: creating ? 'var(--bg-surface)' : 'rgba(74,200,80,0.1)',
+                  border: `1px solid ${creating ? 'var(--border-default)' : 'rgba(74,200,80,0.35)'}`,
+                  color: creating ? 'var(--text-muted)' : 'var(--status-ok)',
+                  borderRadius: '3px',
+                  cursor: creating ? 'default' : 'pointer',
+                  opacity: creating ? 0.7 : 1,
+                }}
+              >
+                {creating ? (
+                  <Loader size={10} className="animate-spin" />
+                ) : (
+                  <Check size={10} />
+                )}
+                {creating ? 'Deploying...' : 'Deploy stack'}
+              </button>
+            )}
+
+            {step === 'env' && deploySuccess && (
+              <button
+                type="button"
+                onClick={handleDoneAfterSuccess}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+                style={{
+                  backgroundColor: 'rgba(74,200,80,0.1)',
+                  border: '1px solid rgba(74,200,80,0.35)',
+                  color: 'var(--status-ok)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                }}
+              >
+                <Check size={10} />
+                Done
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── StackCard ─────────────────────────────────────────────────────────────────
 
 interface StackCardProps {
@@ -987,8 +1825,12 @@ export default function Stacks() {
   const { data: tree, isLoading } = useTree()
   const { data: me } = useMe()
   const { data: secretsData } = useSecrets()
+  const { data: templatesData } = useTemplates()
   const isAdmin = me?.role === 'admin'
   const secretGroups = secretsData?.groups ?? []
+  const templates = templatesData?.templates ?? []
+
+  const [showCreate, setShowCreate] = useState(false)
 
   const nodes = useMemo(() => tree?.nodes ?? [], [tree])
   const stacks = useMemo(() => buildStacks(nodes), [nodes])
@@ -1021,12 +1863,31 @@ export default function Stacks() {
             </h1>
           </div>
 
-          {tree && (
-            <div className="flex items-center gap-4 flex-wrap">
-              <Stat label="stacks" value={namedStacks.length} />
-              <Stat label="containers" value={totalContainers} />
-            </div>
-          )}
+          <div className="flex items-center gap-4 flex-wrap">
+            {tree && (
+              <>
+                <Stat label="stacks" value={namedStacks.length} />
+                <Stat label="containers" value={totalContainers} />
+              </>
+            )}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 shrink-0"
+                style={{
+                  backgroundColor: 'rgba(74,200,80,0.08)',
+                  border: '1px solid rgba(74,200,80,0.3)',
+                  color: 'var(--status-ok)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                }}
+              >
+                <Plus size={11} />
+                New stack
+              </button>
+            )}
+          </div>
         </div>
 
         {isLoading && (
@@ -1057,6 +1918,15 @@ export default function Stacks() {
           </div>
         )}
       </div>
+
+      {showCreate && (
+        <CreateStackModal
+          secretGroups={secretGroups}
+          templates={templates}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => setShowCreate(false)}
+        />
+      )}
     </AppShell>
   )
 }

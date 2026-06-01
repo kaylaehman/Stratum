@@ -247,6 +247,12 @@ func NewRouter(d *Deps) http.Handler {
 			// DR export (admin-gated; format via ?format=json|yaml|md).
 			r.Get("/dr-export", d.Handlers.DRExport)
 
+			// Placement recommender (admin-gated; read-only; no audit).
+			r.Get("/placement/recommend", d.Handlers.RecommendPlacement)
+
+			// Web Push: VAPID key read (no auth role requirement; no audit).
+			r.Get("/push/vapid-key", d.Handlers.VAPIDKey)
+
 			// Bookmarks (per-user prefs; not infra mutations, so not audited).
 			r.Get("/bookmarks", d.Handlers.ListBookmarks)
 			r.Post("/bookmarks", d.Handlers.CreateBookmark)
@@ -402,6 +408,14 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Post("/alert-policies", d.Handlers.CreateAlertPolicy)
 			audited.Put("/alert-policies/{id}", d.Handlers.UpdateAlertPolicy)
 			audited.Delete("/alert-policies/{id}", d.Handlers.DeleteAlertPolicy)
+
+			// New compose stack (A9, audited).
+			audited.Post("/nodes/{id}/stacks", d.Handlers.CreateStack)
+
+			// Web Push mutations (C9, audited).
+			audited.Post("/push/subscribe", d.Handlers.PushSubscribe)
+			audited.Post("/push/unsubscribe", d.Handlers.PushUnsubscribe)
+			audited.Post("/push/test", d.Handlers.PushTest)
 		})
 	})
 

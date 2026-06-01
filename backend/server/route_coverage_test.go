@@ -200,6 +200,14 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/alert-policies":        true,
 		"PUT /api/alert-policies/{id}":    true,
 		"DELETE /api/alert-policies/{id}": true,
+
+		// New compose stack (A9)
+		"POST /api/nodes/{id}/stacks": true,
+
+		// Web Push mutations (C9)
+		"POST /api/push/subscribe":   true,
+		"POST /api/push/unsubscribe": true,
+		"POST /api/push/test":        true,
 	}
 
 	walkErr := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

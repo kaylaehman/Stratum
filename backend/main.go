@@ -56,6 +56,8 @@ import (
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/features"
 	"github.com/kaylaehman/stratum/backend/filewatch"
+	"github.com/kaylaehman/stratum/backend/placement"
+	"github.com/kaylaehman/stratum/backend/push"
 	"github.com/kaylaehman/stratum/backend/sso"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
@@ -141,9 +143,23 @@ func run(logger *slog.Logger) error {
 	logsMgr := logtail.NewManager(dockerForNode, h, func(context.Context, string, string) (bool, error) { return true, nil })
 	mountIdx := mountindex.New(store, dockerForNode, 30*time.Second)
 	securityScanner := security.NewScanner(store, security.ClientProvider(dockerForNode), containerUsers, 30*time.Second)
+	// pushSvc is declared here so the securityScanner.SetNotify closure below can
+	// capture it by reference; it is assigned after VAPID init completes.
+	var pushSvc *push.Service
 	webhookDispatcher := webhooks.New(store)
 	securityScanner.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
+		if pushSvc != nil && isCriticalTrigger(trigger) {
+			_ = pushSvc.SendToAll(ctx, push.Payload{
+				Title: title,
+				Body:  text,
+				Tag:   trigger,
+				URL:   "/security",
+				Actions: []push.Action{
+					{Action: "ack", Title: "Acknowledge"},
+				},
+			})
+		}
 	})
 	poller.SetNotify(func(ctx context.Context, trigger, title, text string) {
 		webhookDispatcher.Notify(ctx, trigger, webhooks.Message{Title: title, Text: text})
@@ -258,6 +274,19 @@ func run(logger *slog.Logger) error {
 	// DR export service.
 	drExportSvc := drexport.New(store, dnsSvc, proxySvc, volumeSvc)
 
+	// Placement service (C8): ranks docker-capable nodes by available headroom.
+	// No disk prober yet (nil = disk scores omitted); wire a DiskProber later.
+	placementSvc := placement.New(store, store, nil)
+
+	// Web Push service (C9): VAPID keypair managed in DB; non-fatal on failure.
+	// The VAPID subject is a mailto: derived from BASE_URL or a stable constant.
+	pushSubject := "mailto:stratum@" + sanitisePushHost(cfg.BaseURL)
+	if svc, pushErr := push.New(context.Background(), store, pushSubject, logger); pushErr != nil {
+		logger.Warn("push: service init failed; push notifications disabled", "err", pushErr)
+	} else {
+		pushSvc = svc
+	}
+
 	// Container-troubleshooting skill library (reference data). Graceful: a
 	// missing/empty SKILLS_DIR yields an empty library, not a startup failure.
 	skillLib, err := skills.Load(cfg.SkillsDir)
@@ -350,6 +379,8 @@ func run(logger *slog.Logger) error {
 		Forecast:       forecastSvc,
 		AlertPolicy:    alertPolicySvc,
 		DRExportSvc:    drExportSvc,
+		Placement:      placementSvc,
+		Push:           pushSvc,
 		Logger:         logger,
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
@@ -484,4 +515,37 @@ func maybeSeedAdmin(ctx context.Context, store db.Store, cfg *config.Config, log
 		return
 	}
 	logger.Info("seeded admin user from environment", "username", cfg.AdminUser)
+}
+
+// sanitisePushHost extracts a hostname from BASE_URL for the VAPID mailto
+// subject. Falls back to "stratum.local" when BASE_URL is unset or malformed.
+func sanitisePushHost(baseURL string) string {
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(baseURL, prefix) {
+			host := strings.TrimPrefix(baseURL, prefix)
+			if i := strings.IndexByte(host, '/'); i >= 0 {
+				host = host[:i]
+			}
+			if host != "" {
+				return host
+			}
+		}
+	}
+	return "stratum.local"
+}
+
+// criticalTriggers is the set of webhook trigger names that warrant an
+// immediate push notification to all subscribed browsers.
+var criticalTriggers = map[string]bool{
+	"cve.critical":      true,
+	"security.critical": true,
+	"container.crash":   true,
+	"port.new":          true,
+	"sshkey.added":      true,
+}
+
+// isCriticalTrigger returns true when the webhook trigger string should also
+// be sent as a Web Push notification.
+func isCriticalTrigger(trigger string) bool {
+	return criticalTriggers[trigger]
 }

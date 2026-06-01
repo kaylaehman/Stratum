@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Bell,
   Plus,
@@ -13,6 +13,7 @@ import {
   ChevronUp,
   Clock,
   AlertTriangle,
+  Smartphone,
 } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
@@ -41,6 +42,197 @@ import type {
   PolicyMatch,
   DeliveryStatus,
 } from '../lib/api/alertpolicy'
+import {
+  useVAPIDKey,
+  useSubscribePush,
+  useUnsubscribePush,
+  useTestPush,
+  isPushSupported,
+  requestPermission,
+  subscribeToPush,
+  unsubscribeFromPush,
+  getCurrentSubscription,
+} from '../lib/api/push'
+
+// ---------------------------------------------------------------------------
+// Push Notifications subsection
+// ---------------------------------------------------------------------------
+
+type PushState = 'unsupported' | 'denied' | 'subscribed' | 'unsubscribed' | 'loading'
+
+function PushNotificationsSection({ isAdmin }: { isAdmin: boolean }) {
+  const { data: vapidData } = useVAPIDKey()
+  const { mutate: subscribe, isPending: subscribing } = useSubscribePush()
+  const { mutate: unsubscribe, isPending: unsubscribing } = useUnsubscribePush()
+  const { mutate: sendTest, isPending: testPending } = useTestPush()
+
+  const [pushState, setPushState] = useState<PushState>('loading')
+  const [statusMsg, setStatusMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isPushSupported()) {
+      setPushState('unsupported')
+      return
+    }
+    if (Notification.permission === 'denied') {
+      setPushState('denied')
+      return
+    }
+    getCurrentSubscription()
+      .then((sub) => setPushState(sub ? 'subscribed' : 'unsubscribed'))
+      .catch(() => setPushState('unsubscribed'))
+  }, [])
+
+  async function handleEnable() {
+    if (!vapidData?.public_key) return
+    const permission = await requestPermission()
+    if (permission === 'denied') {
+      setPushState('denied')
+      return
+    }
+    if (permission !== 'granted') return
+    const sub = await subscribeToPush(vapidData.public_key)
+    if (!sub) return
+    subscribe(sub, {
+      onSuccess: () => {
+        setPushState('subscribed')
+        setStatusMsg('Push notifications enabled.')
+        setTimeout(() => setStatusMsg(null), 3000)
+      },
+      onError: () => setStatusMsg('Failed to save subscription.'),
+    })
+  }
+
+  async function handleDisable() {
+    const endpoint = await unsubscribeFromPush()
+    if (!endpoint) {
+      setPushState('unsubscribed')
+      return
+    }
+    unsubscribe(endpoint, {
+      onSuccess: () => {
+        setPushState('unsubscribed')
+        setStatusMsg('Push notifications disabled.')
+        setTimeout(() => setStatusMsg(null), 3000)
+      },
+      onError: () => setStatusMsg('Failed to remove subscription.'),
+    })
+  }
+
+  function handleTest() {
+    sendTest(undefined, {
+      onSuccess: () => setStatusMsg('Test push sent.'),
+      onError: () => setStatusMsg('Test push failed.'),
+    })
+    setTimeout(() => setStatusMsg(null), 4000)
+  }
+
+  return (
+    <div
+      className="rounded border"
+      style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+    >
+      {/* Section header */}
+      <div
+        className="flex items-center gap-2.5 px-4 py-3 border-b"
+        style={{ borderColor: 'var(--border)' }}
+      >
+        <Smartphone size={14} style={{ color: 'var(--accent)' }} />
+        <span
+          className="text-xs uppercase tracking-wider font-mono font-medium"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          Push Notifications
+        </span>
+        <span
+          className="ml-auto text-xs font-mono"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          {pushState === 'subscribed' ? 'Enabled' : pushState === 'unsupported' ? 'Not supported' : pushState === 'denied' ? 'Blocked' : 'Disabled'}
+        </span>
+      </div>
+
+      <div className="px-4 py-4 flex flex-col gap-3">
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          Receive browser push notifications for critical incidents (CVEs, container crashes, port
+          exposures) even when Stratum is not in the foreground. Opt-in per browser — you can
+          disable at any time.
+        </p>
+
+        {pushState === 'unsupported' && (
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Your browser does not support Web Push or the page is not served over HTTPS.
+          </p>
+        )}
+
+        {pushState === 'denied' && (
+          <p className="text-xs" style={{ color: '#f59e0b' }}>
+            Notification permission has been blocked. Re-enable it in your browser's site
+            settings, then reload this page.
+          </p>
+        )}
+
+        {(pushState === 'subscribed' || pushState === 'unsubscribed') && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {pushState === 'unsubscribed' ? (
+              <button
+                type="button"
+                onClick={() => void handleEnable()}
+                disabled={subscribing || !vapidData}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded"
+                style={{
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  opacity: subscribing || !vapidData ? 0.6 : 1,
+                }}
+              >
+                {subscribing ? <Loader size={12} className="animate-spin" /> : <Bell size={12} />}
+                Enable push
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleDisable()}
+                disabled={unsubscribing}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              >
+                {unsubscribing ? <Loader size={12} className="animate-spin" /> : <X size={12} />}
+                Disable push
+              </button>
+            )}
+
+            {isAdmin && pushState === 'subscribed' && (
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testPending}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              >
+                {testPending ? <Loader size={12} className="animate-spin" /> : <Send size={12} />}
+                Send test
+              </button>
+            )}
+          </div>
+        )}
+
+        {statusMsg && (
+          <p className="text-xs" style={{ color: 'var(--accent)' }}>
+            {statusMsg}
+          </p>
+        )}
+
+        {pushState === 'subscribed' && (
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Quick actions are available in the notification: acknowledge or restart directly from
+            the notification without opening the app.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ---- Trigger helpers ----
 
@@ -1881,6 +2073,9 @@ export default function Notifications() {
             webhooks={data?.webhooks ?? []}
           />
         )}
+
+        {/* Push Notifications — opt-in, visible to all authenticated users */}
+        <PushNotificationsSection isAdmin={isAdmin} />
       </div>
 
       {/* Create modal */}
@@ -1938,3 +2133,6 @@ export default function Notifications() {
     </AppShell>
   )
 }
+
+// Re-export PushNotificationsSection for potential standalone use.
+export { PushNotificationsSection }

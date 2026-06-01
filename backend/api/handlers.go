@@ -22,6 +22,8 @@ import (
 	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/drexport"
 	"github.com/kaylaehman/stratum/backend/features"
+	"github.com/kaylaehman/stratum/backend/placement"
+	"github.com/kaylaehman/stratum/backend/push"
 	"github.com/kaylaehman/stratum/backend/filewatch"
 	"github.com/kaylaehman/stratum/backend/forecast"
 	"github.com/kaylaehman/stratum/backend/fs"
@@ -93,6 +95,8 @@ type Handlers struct {
 	Forecast       *forecast.Service
 	AlertPolicy    *alertpolicy.Service
 	DRExportSvc    *drexport.Service
+	Placement      *placement.Service
+	Push           *push.Service
 	Logger         *slog.Logger
 	StartedAt      time.Time
 
