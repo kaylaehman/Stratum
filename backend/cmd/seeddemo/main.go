@@ -27,6 +27,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/crypto"
 	appdb "github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/kaylaehman/stratum/backend/nodes"
 )
 
 // demoTOTPSecret is a well-known base32 TOTP seed used only in demo DBs.
@@ -93,6 +94,50 @@ func run() error {
 	cipher, err := crypto.New(keyBytes)
 	if err != nil {
 		return fmt.Errorf("new cipher: %w", err)
+	}
+
+	// --- lab-node mode --------------------------------------------------
+	// SEED_MODE=labnode registers a REAL throwaway standalone node backed by a
+	// local docker-in-docker sandbox (SSH on localhost:12222, Docker on
+	// tcp://localhost:12375) so the live "why is this broken?" diagnostic and
+	// UID/GID visualizer have a real container to inspect. Idempotent: replaces
+	// any existing demo-lab node. Demo-only credentials (never real infra).
+	if os.Getenv("SEED_MODE") == "labnode" {
+		creds := nodes.NodeCredentials{
+			Method:         nodes.MethodSSHPassword,
+			SSHUser:        "root",
+			SSHPassword:    "demopass123",
+			DockerEndpoint: "tcp://localhost:12375",
+		}
+		blob, err := creds.Seal(cipher)
+		if err != nil {
+			return fmt.Errorf("seal lab creds: %w", err)
+		}
+		existing, _ := store.ListNodes(ctx)
+		for _, n := range existing {
+			if n.Name == "demo-lab" {
+				_ = store.DeleteNode(ctx, n.ID)
+			}
+		}
+		node := appdb.Node{
+			ID:                   uuid.NewString(),
+			Name:                 "demo-lab",
+			Type:                 "standalone",
+			Host:                 "localhost",
+			Port:                 12222,
+			AuthMethod:           nodes.MethodSSHPassword,
+			OSType:               "alpine",
+			CapabilitiesJSON:     `{"proxmox":false,"docker":true,"agent":false,"systemd":false,"cron":false}`,
+			CredentialsEncrypted: blob,
+			CredentialsVersion:   1,
+			DockerEndpoint:       creds.DockerEndpoint,
+			Status:               "ok",
+		}
+		if err := store.CreateNode(ctx, node); err != nil {
+			return fmt.Errorf("create lab node: %w", err)
+		}
+		fmt.Printf("seeddemo: registered demo-lab (standalone) host=localhost:12222 docker=%s\n", creds.DockerEndpoint)
+		return nil
 	}
 
 	// --- IDs (stable across one seed run) --------------------------------
