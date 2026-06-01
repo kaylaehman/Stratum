@@ -214,7 +214,7 @@ async function main() {
       const rgba = new Uint8Array(png.data.buffer, png.data.byteOffset, png.data.length)
       const palette = quantize(rgba, 256)
       const index = applyPalette(rgba, palette)
-      enc.writeFrame(index, png.width, png.height, { palette, delay: 110 })
+      enc.writeFrame(index, png.width, png.height, { palette, delay: 240 })
     }
     enc.finish()
     fs.writeFileSync(gif, Buffer.from(enc.bytes()))
