@@ -8,6 +8,41 @@ import type {
   StartGuestBackupResponse,
 } from '../../types/api'
 
+// ---- Local types (not in types/api.ts) ----
+
+export interface RestoreDockerRequest {
+  archive_path: string
+  target_path: string
+}
+
+export interface RestoreDockerResponse {
+  output: string
+}
+
+export interface RestoreGuestRequest {
+  pve_node: string
+  archive_path: string
+  target_storage: string
+  target_vmid?: number
+}
+
+export interface RestoreGuestResponse {
+  output: string
+}
+
+export interface VerifyResult {
+  passed: boolean
+  file_count: number
+  total_bytes: number
+  archive_path: string
+  checked_at: string
+  error?: string
+}
+
+export interface VerifyResultsResponse {
+  results: VerifyResult[]
+}
+
 export function backupsKey() {
   return ['backups'] as const
 }
@@ -57,5 +92,73 @@ export function useStartGuestBackup() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: backupsKey() })
     },
+  })
+}
+
+// ---- Restore hooks ----
+
+interface RestoreDockerVars {
+  nodeId: string
+  archivePath: string
+  targetPath: string
+}
+
+/** POST /api/nodes/{id}/backups/restore — admin + step-up */
+export function useRestoreDocker() {
+  return useMutation({
+    mutationFn: ({ nodeId, archivePath, targetPath }: RestoreDockerVars) =>
+      apiPost<RestoreDockerResponse>(`/api/nodes/${nodeId}/backups/restore`, {
+        archive_path: archivePath,
+        target_path: targetPath,
+      } satisfies RestoreDockerRequest),
+  })
+}
+
+interface RestoreGuestVars {
+  nodeId: string
+  pveNode: string
+  archivePath: string
+  targetStorage: string
+  targetVmid?: number
+}
+
+/** POST /api/nodes/{id}/backups/restore-guest — admin + step-up */
+export function useRestoreGuest() {
+  return useMutation({
+    mutationFn: ({ nodeId, pveNode, archivePath, targetStorage, targetVmid }: RestoreGuestVars) =>
+      apiPost<RestoreGuestResponse>(`/api/nodes/${nodeId}/backups/restore-guest`, {
+        pve_node: pveNode,
+        archive_path: archivePath,
+        target_storage: targetStorage,
+        ...(targetVmid !== undefined ? { target_vmid: targetVmid } : {}),
+      } satisfies RestoreGuestRequest),
+  })
+}
+
+// ---- Verify hooks ----
+
+function verifyResultsKey(nodeId: string) {
+  return ['backups', 'verify', nodeId] as const
+}
+
+/** POST /api/nodes/{id}/backups/verify — operator */
+export function useVerifyBackup(nodeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiPost<VerifyResult>(`/api/nodes/${nodeId}/backups/verify`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: verifyResultsKey(nodeId) })
+    },
+  })
+}
+
+/** GET /api/nodes/{id}/backups/verify — past verify results */
+export function useVerifyResults(nodeId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: verifyResultsKey(nodeId),
+    queryFn: () => apiGet<VerifyResultsResponse>(`/api/nodes/${nodeId}/backups/verify`),
+    enabled,
+    staleTime: 30_000,
   })
 }

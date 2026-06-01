@@ -28,6 +28,7 @@ import Backups from './pages/Backups'
 import Settings from './pages/Settings'
 import Certs from './pages/Certs'
 import Skills from './pages/Skills'
+import Runbooks from './pages/Runbooks'
 import Assistant from './pages/Assistant'
 import TerminalPage from './pages/Terminal'
 import Infrastructure from './pages/Infrastructure'
@@ -245,6 +246,14 @@ function AppRoutes() {
           element={
             <AuthGuard>
               <Skills />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/runbooks"
+          element={
+            <AuthGuard>
+              <Runbooks />
             </AuthGuard>
           }
         />

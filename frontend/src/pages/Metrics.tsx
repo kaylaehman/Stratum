@@ -1,15 +1,17 @@
 import { useState, useCallback, useRef } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
-import { TrendingUp, Loader, Download, AlertTriangle } from 'lucide-react'
+import { TrendingUp, Loader, Download, AlertTriangle, Activity } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { ContainerPicker, containerColor } from '../components/metrics/ContainerPicker'
 import { RangeSelector } from '../components/metrics/RangeSelector'
 import { LineChart } from '../components/metrics/LineChart'
 import { useContainerMetrics, exportMetricsCsv } from '../lib/api/metrics'
 import { useTree } from '../lib/api/tree'
+import { useNodeForecast, fmtEta, fmtMetricLabel, etaUrgency } from '../lib/api/forecast'
 import type { MetricsRange } from '../lib/api/metrics'
 import type { MetricSample, MetricSpike } from '../types/api'
 import type { SeriesPoint, Series } from '../components/metrics/LineChart'
+import type { ForecastProjection, ContainerForecast } from '../lib/api/forecast'
 
 // ---- Helpers ----
 
@@ -366,6 +368,330 @@ function ChartWithTooltip({ series, height, yFormatter, spikes, spikeToMs }: Cha
   )
 }
 
+// ---- Capacity Forecasting Panel ----
+
+interface WatchlistEntry {
+  containerId: string
+  containerName: string
+  projection: ForecastProjection
+}
+
+interface CapacityPanelProps {
+  nodeId: string | null
+  containerNameFn: (id: string) => string
+}
+
+function CapacityPanel({ nodeId, containerNameFn }: CapacityPanelProps) {
+  const { data, isLoading, isError } = useNodeForecast(nodeId)
+
+  if (!nodeId) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '80px',
+          color: 'var(--text-muted)',
+          fontSize: '12px',
+          border: '1px dashed var(--border-subtle)',
+          borderRadius: '3px',
+        }}
+      >
+        Select a node above to view capacity projections.
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '16px',
+          color: 'var(--text-muted)',
+          fontSize: '12px',
+        }}
+      >
+        <Loader size={12} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        Loading capacity forecasts…
+      </div>
+    )
+  }
+
+  if (isError || !data) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '10px',
+          color: 'var(--status-error)',
+          fontSize: '12px',
+          border: '1px solid rgba(232,64,64,0.2)',
+          borderRadius: '3px',
+          backgroundColor: 'rgba(232,64,64,0.06)',
+        }}
+      >
+        <AlertTriangle size={11} />
+        Failed to load forecast data for this node.
+      </div>
+    )
+  }
+
+  // Build watchlist: projections with a real ETA, sorted soonest first
+  const watchlist: WatchlistEntry[] = data.forecast
+    .flatMap((cf: ContainerForecast) =>
+      cf.projections
+        .filter((p) => p.eta_seconds >= 0 && p.trend === 'rising')
+        .map((p) => ({
+          containerId: cf.container_id,
+          containerName: containerNameFn(cf.container_id),
+          projection: p,
+        })),
+    )
+    .sort((a, b) => a.projection.eta_seconds - b.projection.eta_seconds)
+
+  const stableCount = data.forecast.flatMap((cf) =>
+    cf.projections.filter((p) => p.eta_seconds < 0 || p.trend !== 'rising'),
+  ).length
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      {/* Watchlist — soonest-to-hit projections */}
+      {watchlist.length === 0 ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '10px 12px',
+            color: 'var(--text-muted)',
+            fontSize: '12px',
+            backgroundColor: 'rgba(0,200,100,0.05)',
+            border: '1px solid rgba(0,200,100,0.15)',
+            borderRadius: '3px',
+          }}
+        >
+          <span style={{ fontSize: '11px' }}>All metrics stable — no thresholds projected to be reached.</span>
+          {stableCount > 0 && (
+            <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>
+              ({stableCount} metric{stableCount !== 1 ? 's' : ''} monitored)
+            </span>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {watchlist.map((entry, idx) => {
+            const urgency = etaUrgency(entry.projection.eta_seconds)
+            const borderColor =
+              urgency === 'critical'
+                ? 'rgba(232,64,64,0.6)'
+                : urgency === 'warning'
+                  ? 'rgba(220,160,0,0.6)'
+                  : 'var(--border-subtle)'
+            const bgColor =
+              urgency === 'critical'
+                ? 'rgba(232,64,64,0.07)'
+                : urgency === 'warning'
+                  ? 'rgba(220,160,0,0.07)'
+                  : 'var(--bg-elevated)'
+            const textColor =
+              urgency === 'critical'
+                ? 'var(--status-error)'
+                : urgency === 'warning'
+                  ? '#e0a000'
+                  : 'var(--text-secondary)'
+
+            return (
+              <div
+                key={`${entry.containerId}:${entry.projection.metric}:${idx}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  padding: '8px 10px',
+                  backgroundColor: bgColor,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: '3px',
+                  fontSize: '12px',
+                }}
+              >
+                <AlertTriangle
+                  size={11}
+                  style={{ color: textColor, flexShrink: 0, marginTop: '1px' }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ color: textColor, fontWeight: 500 }}>
+                    {fmtMetricLabel(entry.projection.metric)}
+                  </span>
+                  <span style={{ color: 'var(--text-secondary)', marginLeft: '4px' }}>
+                    on
+                  </span>
+                  <span
+                    style={{
+                      color: 'var(--text-primary)',
+                      marginLeft: '4px',
+                      fontFamily: 'var(--font-mono, monospace)',
+                      fontSize: '11px',
+                    }}
+                  >
+                    {entry.containerName}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>
+                    projected to hit threshold in
+                  </span>
+                  <span style={{ color: textColor, fontWeight: 600, marginLeft: '4px' }}>
+                    {fmtEta(entry.projection.eta_seconds)}
+                  </span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      marginLeft: '8px',
+                      color: 'var(--text-muted)',
+                      fontSize: '11px',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    ({entry.projection.trend})
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Per-container detail rows */}
+      {data.forecast.length > 0 && (
+        <div
+          style={{
+            marginTop: '4px',
+            borderTop: '1px solid var(--border-subtle)',
+            paddingTop: '10px',
+          }}
+        >
+          <div
+            className="text-xs font-medium uppercase tracking-wider mb-2"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            All Containers
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {data.forecast.map((cf: ContainerForecast) => {
+              const name = containerNameFn(cf.container_id)
+              const activeProjections = cf.projections.filter(
+                (p) => p.eta_seconds >= 0 && p.trend === 'rising',
+              )
+              return (
+                <div
+                  key={cf.container_id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '5px 8px',
+                    backgroundColor: 'var(--bg-elevated)',
+                    borderRadius: '3px',
+                    fontSize: '11px',
+                  }}
+                >
+                  <span
+                    style={{
+                      color: 'var(--text-primary)',
+                      fontFamily: 'var(--font-mono, monospace)',
+                      minWidth: '120px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {name}
+                  </span>
+                  {activeProjections.length === 0 ? (
+                    <span style={{ color: 'var(--text-muted)' }}>Stable — no projections</span>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {activeProjections.map((p) => {
+                        const urg = etaUrgency(p.eta_seconds)
+                        const chipColor =
+                          urg === 'critical'
+                            ? 'rgba(232,64,64,0.15)'
+                            : urg === 'warning'
+                              ? 'rgba(220,160,0,0.15)'
+                              : 'var(--bg-surface)'
+                        const chipText =
+                          urg === 'critical'
+                            ? 'var(--status-error)'
+                            : urg === 'warning'
+                              ? '#e0a000'
+                              : 'var(--text-secondary)'
+                        return (
+                          <span
+                            key={p.metric}
+                            style={{
+                              backgroundColor: chipColor,
+                              color: chipText,
+                              borderRadius: '2px',
+                              padding: '1px 5px',
+                              fontSize: '10px',
+                              fontWeight: 500,
+                            }}
+                          >
+                            {fmtMetricLabel(p.metric)} {fmtEta(p.eta_seconds)}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- Node selector for capacity panel ----
+
+interface NodeSelectorProps {
+  nodes: { id: string; name: string }[]
+  value: string | null
+  onChange: (id: string | null) => void
+}
+
+function NodeSelector({ nodes, value, onChange }: NodeSelectorProps) {
+  return (
+    <select
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value || null)}
+      style={{
+        backgroundColor: 'var(--bg-elevated)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '3px',
+        color: 'var(--text-primary)',
+        fontSize: '12px',
+        padding: '4px 8px',
+        cursor: 'pointer',
+        outline: 'none',
+      }}
+    >
+      <option value="">Select a node…</option>
+      {nodes.map((n) => (
+        <option key={n.id} value={n.id}>
+          {n.name}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 // ---- Main Metrics page ----
 
 export default function Metrics() {
@@ -373,6 +699,7 @@ export default function Metrics() {
   const [range, setRange] = useState<MetricsRange>('1h')
   const [seriesMap, setSeriesMap] = useState<Record<string, ContainerSeriesData>>({})
   const [exportingId, setExportingId] = useState<string | null>(null)
+  const [capacityNodeId, setCapacityNodeId] = useState<string | null>(null)
 
   const { data: tree } = useTree()
 
@@ -660,6 +987,53 @@ export default function Metrics() {
               </>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Capacity Forecasting section */}
+      <div
+        className="flex flex-col flex-1 min-h-0 w-full max-w-full px-6 pb-6"
+        style={{ maxWidth: '1200px', margin: '0 auto' }}
+      >
+        <div
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '3px',
+            padding: '16px',
+          }}
+        >
+          {/* Section header */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '14px',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Activity size={13} style={{ color: 'var(--text-secondary)' }} />
+              <span
+                className="text-xs font-medium uppercase tracking-wider"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                Capacity Forecasting
+              </span>
+            </div>
+            <NodeSelector
+              nodes={(tree?.nodes ?? []).map((n) => ({ id: n.id, name: n.name }))}
+              value={capacityNodeId}
+              onChange={setCapacityNodeId}
+            />
+          </div>
+
+          <CapacityPanel
+            nodeId={capacityNodeId}
+            containerNameFn={containerName}
+          />
         </div>
       </div>
     </AppShell>

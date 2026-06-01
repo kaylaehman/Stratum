@@ -1,10 +1,32 @@
 import { useState } from 'react'
-import { Archive, Play, Loader, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
+import {
+  Archive,
+  Play,
+  Loader,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  RotateCcw,
+  ShieldCheck,
+  Download,
+  ChevronDown,
+} from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
 import { useVolumes } from '../lib/api/volumes'
-import { useBackups, useStartBackup, useStartGuestBackup } from '../lib/api/backups'
+import {
+  useBackups,
+  useStartBackup,
+  useStartGuestBackup,
+  useRestoreDocker,
+  useRestoreGuest,
+  useVerifyBackup,
+  useVerifyResults,
+} from '../lib/api/backups'
+import { downloadDRExport } from '../lib/api/drexport'
+import type { DRExportFormat } from '../lib/api/drexport'
+import type { VerifyResult } from '../lib/api/backups'
 import { ApiError } from '../lib/api'
 import type { Backup, BackupStatus, TreeNode, VM } from '../types/api'
 
@@ -93,14 +115,589 @@ function StatusChip({ status, error }: { status: BackupStatus; error?: string })
   )
 }
 
+// ---- Restore confirm dialog ----
+
+interface RestoreDialogProps {
+  backup: Backup
+  nodeName: string
+  onClose: () => void
+}
+
+function RestoreDialog({ backup, nodeName, onClose }: RestoreDialogProps) {
+  const isGuest = backup.kind === 'proxmox-guest'
+
+  // Docker-specific fields
+  const [targetPath, setTargetPath] = useState('')
+
+  // Proxmox-specific fields
+  const [pveNode, setPveNode] = useState('')
+  const [targetStorage, setTargetStorage] = useState('local')
+  const [targetVmid, setTargetVmid] = useState('')
+
+  const [result, setResult] = useState<{ output: string } | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const { mutate: restoreDocker, isPending: pendingDocker } = useRestoreDocker()
+  const { mutate: restoreGuest, isPending: pendingGuest } = useRestoreGuest()
+  const isPending = pendingDocker || pendingGuest
+
+  const inputStyle: React.CSSProperties = {
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-default)',
+    color: 'var(--text-primary)',
+    borderRadius: '3px',
+    padding: '5px 8px',
+    fontSize: '12px',
+    fontFamily: 'inherit',
+    width: '100%',
+  }
+
+  function handleRestore() {
+    setErr(null)
+    setResult(null)
+
+    if (isGuest) {
+      if (!pveNode.trim() || !targetStorage.trim()) {
+        setErr('PVE node and target storage are required.')
+        return
+      }
+      restoreGuest(
+        {
+          nodeId: backup.node_id,
+          pveNode: pveNode.trim(),
+          archivePath: backup.dest_path,
+          targetStorage: targetStorage.trim(),
+          targetVmid: targetVmid.trim() !== '' ? parseInt(targetVmid.trim(), 10) : undefined,
+        },
+        {
+          onSuccess: (res) => setResult({ output: res.output }),
+          onError: (e) => setErr(e instanceof ApiError ? errorLabel(e.body) : 'Restore failed.'),
+        },
+      )
+    } else {
+      if (!targetPath.trim()) {
+        setErr('Target path is required.')
+        return
+      }
+      restoreDocker(
+        {
+          nodeId: backup.node_id,
+          archivePath: backup.dest_path,
+          targetPath: targetPath.trim(),
+        },
+        {
+          onSuccess: (res) => setResult({ output: res.output }),
+          onError: (e) => setErr(e instanceof ApiError ? errorLabel(e.body) : 'Restore failed.'),
+        },
+      )
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 200,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '4px',
+          padding: '24px',
+          width: '480px',
+          maxWidth: '95vw',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2 mb-4">
+          <RotateCcw size={14} style={{ color: 'var(--status-error)' }} />
+          <span className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>
+            Restore Backup
+          </span>
+        </div>
+
+        {/* Destructive warning */}
+        <div
+          className="flex items-start gap-2 mb-4 px-3 py-2 text-xs"
+          style={{
+            backgroundColor: 'rgba(232,64,64,0.08)',
+            border: '1px solid rgba(232,64,64,0.3)',
+            borderRadius: '3px',
+            color: 'var(--status-error)',
+          }}
+        >
+          <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
+          <div>
+            <strong>Destructive operation.</strong> This will overwrite the target{' '}
+            {isGuest ? 'guest' : 'path'} with the contents of this archive. This cannot be undone.
+          </div>
+        </div>
+
+        {/* Archive info */}
+        <div className="mb-4 text-xs" style={{ color: 'var(--text-secondary)' }}>
+          <div><span style={{ color: 'var(--text-muted)' }}>Node:</span> {nodeName}</div>
+          <div className="mt-1 font-mono" style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+            <span style={{ color: 'var(--text-muted)', fontFamily: 'inherit' }}>Archive:</span>{' '}
+            {backup.dest_path}
+          </div>
+          <div className="mt-1">
+            <span style={{ color: 'var(--text-muted)' }}>Size:</span> {humanBytes(backup.size_bytes)}
+            {' '}&middot; backed up {fmtTime(backup.finished_at)}
+          </div>
+        </div>
+
+        {/* Fields */}
+        {!result && (
+          <div className="flex flex-col gap-3 mb-4">
+            {isGuest ? (
+              <>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                    PVE Node <span style={{ color: 'var(--status-error)' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="pve"
+                    value={pveNode}
+                    onChange={(e) => setPveNode(e.target.value)}
+                    style={inputStyle}
+                    className="font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                    Target Storage <span style={{ color: 'var(--status-error)' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="local"
+                    value={targetStorage}
+                    onChange={(e) => setTargetStorage(e.target.value)}
+                    style={inputStyle}
+                    className="font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                    Target VMID <span style={{ color: 'var(--text-muted)' }}>(leave blank to auto-assign)</span>
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="optional"
+                    value={targetVmid}
+                    onChange={(e) => setTargetVmid(e.target.value)}
+                    style={inputStyle}
+                    className="font-mono"
+                  />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Restore to path <span style={{ color: 'var(--status-error)' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="/var/lib/docker/volumes/myvolume/_data"
+                  value={targetPath}
+                  onChange={(e) => setTargetPath(e.target.value)}
+                  style={inputStyle}
+                  className="font-mono"
+                />
+                <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Contents of the archive will be extracted into this directory.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Error */}
+        {err && (
+          <div
+            className="flex items-center gap-2 mb-3 px-2 py-1.5 text-xs"
+            style={{
+              backgroundColor: 'rgba(232,64,64,0.08)',
+              border: '1px solid rgba(232,64,64,0.3)',
+              borderRadius: '3px',
+              color: 'var(--status-error)',
+            }}
+          >
+            <AlertTriangle size={11} style={{ flexShrink: 0 }} />
+            {err}
+          </div>
+        )}
+
+        {/* Success: output */}
+        {result && (
+          <div
+            className="mb-4"
+            style={{
+              backgroundColor: 'rgba(64,200,120,0.06)',
+              border: '1px solid rgba(64,200,120,0.25)',
+              borderRadius: '3px',
+              padding: '10px 12px',
+            }}
+          >
+            <div className="flex items-center gap-1.5 mb-2 text-xs font-medium" style={{ color: 'var(--status-ok, #40c878)' }}>
+              <CheckCircle size={12} />
+              Restore completed
+            </div>
+            <pre
+              className="text-xs font-mono overflow-auto"
+              style={{
+                color: 'var(--text-secondary)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                maxHeight: '200px',
+              }}
+            >
+              {result.output || '(no output)'}
+            </pre>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-2 justify-end mt-2">
+          <button
+            onClick={onClose}
+            className="text-xs px-3 py-1.5"
+            style={{
+              backgroundColor: 'transparent',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+              borderRadius: '3px',
+              cursor: 'pointer',
+            }}
+          >
+            {result ? 'Close' : 'Cancel'}
+          </button>
+
+          {!result && (
+            <button
+              onClick={handleRestore}
+              disabled={isPending}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+              style={{
+                backgroundColor: 'rgba(232,64,64,0.12)',
+                border: '1px solid rgba(232,64,64,0.5)',
+                color: 'var(--status-error)',
+                borderRadius: '3px',
+                cursor: isPending ? 'default' : 'pointer',
+                opacity: isPending ? 0.6 : 1,
+              }}
+            >
+              {isPending
+                ? <><Loader size={11} className="animate-spin" />Restoring…</>
+                : <><RotateCcw size={11} />Restore</>
+              }
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- Verify panel ----
+
+interface VerifyPanelProps {
+  nodeId: string
+  isOperator: boolean
+}
+
+function VerifyPanel({ nodeId, isOperator }: VerifyPanelProps) {
+  const [expanded, setExpanded] = useState(false)
+  const { mutate: runVerify, isPending, data: latestResult, error } = useVerifyBackup(nodeId)
+  const { data: history } = useVerifyResults(nodeId, expanded)
+
+  const verifyResults: VerifyResult[] = history?.results ?? []
+
+  const lastRun = latestResult ?? verifyResults[0] ?? null
+
+  function chipFor(passed: boolean) {
+    return passed
+      ? (
+        <span
+          className="flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
+          style={{
+            color: 'var(--status-ok, #40c878)',
+            background: 'rgba(64,200,120,0.1)',
+            border: '1px solid rgba(64,200,120,0.35)',
+            borderRadius: '3px',
+            fontSize: '11px',
+          }}
+        >
+          <CheckCircle size={9} />passed
+        </span>
+      )
+      : (
+        <span
+          className="flex items-center gap-1 font-mono text-xs px-1.5 py-0.5 uppercase tracking-wider"
+          style={{
+            color: 'var(--status-error)',
+            background: 'rgba(232,64,64,0.1)',
+            border: '1px solid rgba(232,64,64,0.3)',
+            borderRadius: '3px',
+            fontSize: '11px',
+          }}
+        >
+          <XCircle size={9} />failed
+        </span>
+      )
+  }
+
+  return (
+    <div
+      style={{
+        backgroundColor: 'var(--bg-elevated)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '3px',
+        padding: '14px 18px',
+        marginBottom: '16px',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <ShieldCheck size={13} style={{ color: 'var(--text-secondary)' }} />
+        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>
+          Backup Verification
+        </span>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="ml-auto flex items-center gap-1 text-xs"
+          style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          {expanded ? 'Hide history' : 'Show history'}
+          <ChevronDown
+            size={11}
+            style={{
+              transform: expanded ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.15s',
+            }}
+          />
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        {isOperator && (
+          <button
+            onClick={() => { runVerify() }}
+            disabled={isPending}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+            style={{
+              backgroundColor: 'var(--accent-glow)',
+              border: '1px solid var(--accent)',
+              color: 'var(--accent)',
+              borderRadius: '3px',
+              cursor: isPending ? 'default' : 'pointer',
+              opacity: isPending ? 0.6 : 1,
+            }}
+          >
+            {isPending
+              ? <><Loader size={11} className="animate-spin" />Verifying…</>
+              : <><ShieldCheck size={11} />Verify latest</>
+            }
+          </button>
+        )}
+
+        {lastRun && (
+          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+            {chipFor(lastRun.passed)}
+            <span className="font-mono">{lastRun.file_count} files</span>
+            <span style={{ color: 'var(--text-muted)' }}>&middot;</span>
+            <span className="font-mono">{humanBytes(lastRun.total_bytes)}</span>
+            <span style={{ color: 'var(--text-muted)' }}>&middot;</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{fmtTime(lastRun.checked_at)}</span>
+          </div>
+        )}
+
+        {error && (
+          <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--status-error)' }}>
+            <AlertTriangle size={11} />
+            {error instanceof ApiError ? errorLabel(error.body) : 'Verify failed.'}
+          </span>
+        )}
+      </div>
+
+      {expanded && verifyResults.length > 0 && (
+        <div
+          style={{
+            marginTop: '12px',
+            borderTop: '1px solid var(--border-subtle)',
+            paddingTop: '10px',
+          }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Result', 'Files', 'Size', 'Archive', 'Checked At'].map((col) => (
+                  <th
+                    key={col}
+                    className="px-2 py-1 text-left text-xs uppercase tracking-wider font-medium"
+                    style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', whiteSpace: 'nowrap' }}
+                  >
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {verifyResults.map((r, i) => (
+                <tr key={i}>
+                  <td className="px-2 py-1.5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    {chipFor(r.passed)}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-xs" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
+                    {r.file_count}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-xs" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
+                    {humanBytes(r.total_bytes)}
+                  </td>
+                  <td
+                    className="px-2 py-1.5 font-mono text-xs"
+                    style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', maxWidth: '200px' }}
+                  >
+                    <span className="truncate block" title={r.archive_path}>{r.archive_path}</span>
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', fontSize: '11px' }}>
+                    {fmtTime(r.checked_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {expanded && verifyResults.length === 0 && (
+        <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
+          No verify runs recorded yet.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ---- DR Export dropdown ----
+
+function DRExportDropdown() {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function handleExport(fmt: DRExportFormat) {
+    setOpen(false)
+    setBusy(true)
+    setErr(null)
+    try {
+      await downloadDRExport(fmt)
+    } catch {
+      setErr('DR export failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)',
+          color: 'var(--text-secondary)',
+          borderRadius: '3px',
+          cursor: busy ? 'default' : 'pointer',
+          opacity: busy ? 0.6 : 1,
+        }}
+      >
+        {busy
+          ? <><Loader size={11} className="animate-spin" />Exporting…</>
+          : <><Download size={11} />Export DR manifest<ChevronDown size={10} /></>
+        }
+      </button>
+
+      {open && (
+        <>
+          {/* backdrop */}
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+            onClick={() => setOpen(false)}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 'calc(100% + 4px)',
+              zIndex: 100,
+              backgroundColor: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              borderRadius: '3px',
+              minWidth: '140px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            }}
+          >
+            {(['json', 'yaml', 'md'] as const).map((fmt) => (
+              <button
+                key={fmt}
+                onClick={() => { void handleExport(fmt) }}
+                className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--bg-surface)'
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'
+                }}
+              >
+                <Download size={10} style={{ color: 'var(--text-muted)' }} />
+                <span className="font-mono uppercase">{fmt}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {err && (
+        <span
+          className="absolute text-xs mt-1"
+          style={{ color: 'var(--status-error)', top: '100%', right: 0, whiteSpace: 'nowrap' }}
+        >
+          {err}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ---- History table row ----
 
 interface BackupRowProps {
   backup: Backup
   nodeName: string
+  isAdmin: boolean
+  onRestore: (backup: Backup) => void
 }
 
-function BackupRow({ backup, nodeName }: BackupRowProps) {
+function BackupRow({ backup, nodeName, isAdmin, onRestore }: BackupRowProps) {
   return (
     <tr>
       <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -126,6 +723,25 @@ function BackupRow({ backup, nodeName }: BackupRowProps) {
       </td>
       <td className="px-3 py-2 font-mono text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', maxWidth: '200px' }}>
         <span className="truncate block" title={backup.dest_path}>{backup.dest_path}</span>
+      </td>
+      <td className="px-3 py-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+        {isAdmin && backup.status === 'ok' && backup.dest_path && (
+          <button
+            onClick={() => onRestore(backup)}
+            className="flex items-center gap-1 text-xs px-2 py-1"
+            style={{
+              backgroundColor: 'rgba(232,64,64,0.08)',
+              border: '1px solid rgba(232,64,64,0.3)',
+              color: 'var(--status-error)',
+              borderRadius: '3px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <RotateCcw size={10} />
+            Restore
+          </button>
+        )}
       </td>
     </tr>
   )
@@ -465,7 +1081,7 @@ function TriggerPanel({ dockerNodes, proxmoxNodes, volumeOptions, onDockerNodeCh
         border: '1px solid var(--border-default)',
         borderRadius: '3px',
         padding: '16px 20px',
-        marginBottom: '24px',
+        marginBottom: '16px',
       }}
     >
       <div className="flex items-center gap-2 mb-3">
@@ -512,11 +1128,12 @@ function TriggerPanel({ dockerNodes, proxmoxNodes, volumeOptions, onDockerNodeCh
 
 // ---- Main page ----
 
-const TABLE_COLS = ['Node', 'Kind', 'Target', 'Status', 'Size', 'Started', 'Finished', 'Destination']
+const TABLE_COLS = ['Node', 'Kind', 'Target', 'Status', 'Size', 'Started', 'Finished', 'Destination', '']
 
 export default function Backups() {
   const { data: me } = useMe()
   const isAdmin = me?.role === 'admin'
+  const isOperator = me?.role === 'admin' || me?.role === 'operator'
 
   const { data: tree } = useTree()
   const nodes = tree?.nodes ?? []
@@ -534,11 +1151,15 @@ export default function Backups() {
   const backups = data?.backups ?? []
 
   const [selectedDockerNodeId, setSelectedDockerNodeId] = useState<string>('')
+  const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null)
 
   const activeDockerNodeId = selectedDockerNodeId || dockerNodes[0]?.id || ''
   const volumeOptions = allVolumes
     .filter((v) => v.node_id === activeDockerNodeId)
     .map((v) => v.name)
+
+  // Use first docker node for verify panel; per-node in future
+  const verifyNodeId = dockerNodes[0]?.id ?? proxmoxNodes[0]?.id ?? ''
 
   function nodeName(nodeId: string): string {
     return nodes.find((n) => n.id === nodeId)?.name ?? nodeId
@@ -580,6 +1201,9 @@ export default function Backups() {
           >
             Backup Orchestration
           </h1>
+          <div className="ml-auto">
+            <DRExportDropdown />
+          </div>
         </div>
 
         {/* Trigger panel */}
@@ -589,6 +1213,11 @@ export default function Backups() {
           volumeOptions={volumeOptions}
           onDockerNodeChange={setSelectedDockerNodeId}
         />
+
+        {/* Verify panel */}
+        {verifyNodeId && (
+          <VerifyPanel nodeId={verifyNodeId} isOperator={isOperator} />
+        )}
 
         {/* History header */}
         <div
@@ -649,9 +1278,9 @@ export default function Backups() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {TABLE_COLS.map((col) => (
+                  {TABLE_COLS.map((col, i) => (
                     <th
-                      key={col}
+                      key={i}
                       className="px-3 py-2 text-left text-xs uppercase tracking-wider font-medium"
                       style={{
                         color: 'var(--text-muted)',
@@ -666,13 +1295,28 @@ export default function Backups() {
               </thead>
               <tbody>
                 {backups.map((b) => (
-                  <BackupRow key={b.id} backup={b} nodeName={nodeName(b.node_id)} />
+                  <BackupRow
+                    key={b.id}
+                    backup={b}
+                    nodeName={nodeName(b.node_id)}
+                    isAdmin={isAdmin}
+                    onRestore={setRestoreTarget}
+                  />
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {/* Restore dialog */}
+      {restoreTarget && (
+        <RestoreDialog
+          backup={restoreTarget}
+          nodeName={nodeName(restoreTarget.node_id)}
+          onClose={() => setRestoreTarget(null)}
+        />
+      )}
     </AppShell>
   )
 }
