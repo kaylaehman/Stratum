@@ -36,9 +36,11 @@ await p.getByRole('button', { name: /verify|sign in|continue|submit/i }).first()
 await p.waitForURL((u) => !u.pathname.endsWith('/login'), { timeout: 12000 })
 
 const frames = []
-const grab = async () => { await light(p); frames.push(await p.screenshot({ type: 'png' })) }
+const DUMP = process.env.DUMP_FRAMES ? path.join(ROOT, 'assets', 'screenshots', '.tmp-frames') : null
+if (DUMP) fs.mkdirSync(DUMP, { recursive: true })
+const grab = async () => { await light(p); const b = await p.screenshot({ type: 'png' }); if (DUMP) fs.writeFileSync(path.join(DUMP, `${String(frames.length).padStart(2, '0')}.png`), b); frames.push(b) }
 const dwell = async (n, ms = 320) => { for (let i = 0; i < n; i++) { await grab(); await sleep(ms) } }
-const visit = async (url) => { await p.goto(`${BASE}${url}`, { waitUntil: 'networkidle' }); await sleep(700) }
+const visit = async (url) => { await p.goto(`${BASE}${url}`, { waitUntil: 'domcontentloaded' }); await sleep(1200); console.log('  at', p.url()) }
 
 await visit('/'); await dwell(6)
 await visit('/resources'); await dwell(2)
@@ -58,7 +60,7 @@ for (const buf of frames) {
   const rgba = new Uint8Array(png.data.buffer, png.data.byteOffset, png.data.length)
   const palette = quantize(rgba, 256)
   const index = applyPalette(rgba, palette)
-  enc.writeFrame(index, png.width, png.height, { palette, delay: 110 })
+  enc.writeFrame(index, png.width, png.height, { palette, delay: 240 })
 }
 enc.finish()
 fs.writeFileSync(gif, Buffer.from(enc.bytes()))
