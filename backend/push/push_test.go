@@ -65,6 +65,16 @@ func (s *stubStore) DeletePushSubscription(_ context.Context, endpoint string) e
 	return nil
 }
 
+func (s *stubStore) DeletePushSubscriptionByUser(_ context.Context, userID, endpoint string) error {
+	for i, sub := range s.subs {
+		if sub.UserID == userID && sub.Endpoint == endpoint {
+			s.subs = append(s.subs[:i], s.subs[i+1:]...)
+			return nil
+		}
+	}
+	return db.ErrNotFound
+}
+
 func newTestService(t *testing.T, store push.Store) *push.Service {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -101,7 +111,7 @@ func TestSubscribeRoundTrip(t *testing.T) {
 	svc := newTestService(t, store)
 	ctx := context.Background()
 
-	sub := push.Subscription{Endpoint: "https://push.example.com/abc"}
+	sub := push.Subscription{Endpoint: "https://fcm.googleapis.com/fcm/send/abc"}
 	sub.Keys.P256DH = "dGVzdHB1YmxpY2tleQ=="
 	sub.Keys.Auth = "dGVzdGF1dGg="
 
@@ -116,12 +126,46 @@ func TestSubscribeRoundTrip(t *testing.T) {
 		t.Errorf("unexpected subscription row: %+v", subs[0])
 	}
 
-	if err := svc.Unsubscribe(ctx, sub.Endpoint); err != nil {
+	// A different user must NOT be able to delete user-1's subscription (IDOR).
+	if err := svc.Unsubscribe(ctx, "user-2", sub.Endpoint); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("cross-user unsubscribe: want ErrNotFound, got %v", err)
+	}
+	if subs, _ = store.ListPushSubscriptions(ctx); len(subs) != 1 {
+		t.Fatalf("cross-user unsubscribe must not delete, got %d subs", len(subs))
+	}
+
+	if err := svc.Unsubscribe(ctx, "user-1", sub.Endpoint); err != nil {
 		t.Fatalf("Unsubscribe: %v", err)
 	}
 	subs, _ = store.ListPushSubscriptions(ctx)
 	if len(subs) != 0 {
 		t.Fatalf("expected 0 subscriptions after unsubscribe, got %d", len(subs))
+	}
+}
+
+// TestSubscribeRejectsSSRF ensures only real web-push hosts are accepted; an
+// endpoint pointing at an internal/arbitrary host is refused (anti-SSRF).
+func TestSubscribeRejectsSSRF(t *testing.T) {
+	store := &stubStore{}
+	svc := newTestService(t, store)
+	ctx := context.Background()
+	bad := []string{
+		"http://fcm.googleapis.com/x",          // not https
+		"https://169.254.169.254/latest/meta",  // metadata service
+		"https://localhost:8080/x",             // loopback
+		"https://internal.example.com/x",       // arbitrary host
+		"https://evil.com/fcm.googleapis.com",  // host not in allowlist
+	}
+	for _, ep := range bad {
+		sub := push.Subscription{Endpoint: ep}
+		sub.Keys.P256DH = "dGVzdHB1YmxpY2tleQ=="
+		sub.Keys.Auth = "dGVzdGF1dGg="
+		if err := svc.Subscribe(ctx, "user-1", sub); err == nil {
+			t.Errorf("expected rejection for endpoint %q, got nil", ep)
+		}
+	}
+	if subs, _ := store.ListPushSubscriptions(ctx); len(subs) != 0 {
+		t.Fatalf("no bad endpoint should be stored, got %d", len(subs))
 	}
 }
 
@@ -175,7 +219,7 @@ func TestCreatedAtSet(t *testing.T) {
 	svc := newTestService(t, store)
 	ctx := context.Background()
 
-	sub := push.Subscription{Endpoint: "https://push.example.com/xyz"}
+	sub := push.Subscription{Endpoint: "https://updates.push.services.mozilla.com/wpush/v2/xyz"}
 	sub.Keys.P256DH = "dGVzdHB1YmxpY2tleQ=="
 	sub.Keys.Auth = "dGVzdGF1dGg="
 	_ = svc.Subscribe(ctx, "user-2", sub)

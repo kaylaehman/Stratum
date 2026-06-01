@@ -91,12 +91,29 @@ func (s *Store) UpsertPushSubscription(ctx context.Context, sub appdb.PushSubscr
 	return nil
 }
 
-// DeletePushSubscription removes a push subscription by endpoint URL.
+// DeletePushSubscription removes a push subscription by endpoint URL. Used for
+// system cleanup of dead endpoints (HTTP 410), not user-initiated unsubscribe.
 func (s *Store) DeletePushSubscription(ctx context.Context, endpoint string) error {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM push_subscriptions WHERE endpoint = ?`, endpoint)
 	if err != nil {
 		return fmt.Errorf("sqlite: delete push subscription: %w", err)
+	}
+	return nil
+}
+
+// DeletePushSubscriptionByUser removes a subscription scoped to its owner so a
+// user cannot delete another user's subscription by endpoint (IDOR). Returns
+// appdb.ErrNotFound when no matching row exists (so existence isn't leaked).
+func (s *Store) DeletePushSubscriptionByUser(ctx context.Context, userID, endpoint string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?`, userID, endpoint)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete push subscription by user: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return appdb.ErrNotFound
 	}
 	return nil
 }
