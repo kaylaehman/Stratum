@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/middleware"
 	"github.com/kaylaehman/stratum/backend/push"
 )
@@ -61,6 +63,12 @@ func (h *Handlers) PushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	u, ok := middleware.UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body struct {
 		Endpoint string `json:"endpoint"`
 	}
@@ -69,7 +77,13 @@ func (h *Handlers) PushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Push.Unsubscribe(r.Context(), body.Endpoint); err != nil {
+	// Scope the delete to the authenticated user (anti-IDOR). A missing row
+	// returns 404 without revealing whether it belongs to another user.
+	if err := h.Push.Unsubscribe(r.Context(), u.ID, body.Endpoint); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			http.Error(w, "subscription not found", http.StatusNotFound)
+			return
+		}
 		h.Logger.Warn("push unsubscribe failed", "err", err)
 		http.Error(w, "failed to remove subscription", http.StatusInternalServerError)
 		return

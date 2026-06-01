@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -27,6 +29,45 @@ type Store interface {
 	ListPushSubscriptionsByUser(ctx context.Context, userID string) ([]db.PushSubscription, error)
 	UpsertPushSubscription(ctx context.Context, sub db.PushSubscription) error
 	DeletePushSubscription(ctx context.Context, endpoint string) error
+	DeletePushSubscriptionByUser(ctx context.Context, userID, endpoint string) error
+}
+
+// allowedPushHostSuffixes restricts the subscription endpoint to the real
+// browser push services. The endpoint is a URL the SERVER later POSTs to, so an
+// unvalidated value is an SSRF vector (point it at an internal host). A strict
+// host allowlist closes that — only the known FCM/Mozilla/Windows/Apple push
+// gateways are accepted, which inherently excludes internal IPs/hostnames.
+var allowedPushHostSuffixes = []string{
+	"fcm.googleapis.com",          // Chrome / Chromium (exact host)
+	".push.services.mozilla.com",  // Firefox
+	".notify.windows.com",         // Edge / Windows (WNS)
+	".push.apple.com",             // Safari / Apple (incl. web.push.apple.com)
+}
+
+// validateEndpoint rejects any subscription endpoint that is not an https URL on
+// a recognized web-push service host (anti-SSRF).
+func validateEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("push: invalid endpoint url: %w", err)
+	}
+	if u.Scheme != "https" {
+		return errors.New("push: endpoint must be https")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return errors.New("push: endpoint missing host")
+	}
+	for _, suf := range allowedPushHostSuffixes {
+		if strings.HasPrefix(suf, ".") {
+			if host == strings.TrimPrefix(suf, ".") || strings.HasSuffix(host, suf) {
+				return nil
+			}
+		} else if host == suf {
+			return nil
+		}
+	}
+	return fmt.Errorf("push: endpoint host %q is not a recognized web-push service", host)
 }
 
 // Subscription is the JSON shape POSTed by the browser (Web Push subscription object).
@@ -84,6 +125,9 @@ func (s *Service) Subscribe(ctx context.Context, userID string, sub Subscription
 	if sub.Endpoint == "" || sub.Keys.P256DH == "" || sub.Keys.Auth == "" {
 		return errors.New("push: missing required subscription fields")
 	}
+	if err := validateEndpoint(sub.Endpoint); err != nil {
+		return err
+	}
 	return s.store.UpsertPushSubscription(ctx, db.PushSubscription{
 		ID:        uuid.NewString(),
 		UserID:    userID,
@@ -94,12 +138,13 @@ func (s *Service) Subscribe(ctx context.Context, userID string, sub Subscription
 	})
 }
 
-// Unsubscribe removes a push subscription by endpoint URL.
-func (s *Service) Unsubscribe(ctx context.Context, endpoint string) error {
+// Unsubscribe removes a push subscription, scoped to the owning user so one user
+// cannot delete another user's subscription by guessing its endpoint (IDOR).
+func (s *Service) Unsubscribe(ctx context.Context, userID, endpoint string) error {
 	if endpoint == "" {
 		return errors.New("push: endpoint required")
 	}
-	return s.store.DeletePushSubscription(ctx, endpoint)
+	return s.store.DeletePushSubscriptionByUser(ctx, userID, endpoint)
 }
 
 // SendToAll dispatches a push to every stored subscription.
