@@ -87,6 +87,26 @@ tasks:
       - task: backend:test
       - task: agent:test
 
+  seed:demo:
+    desc: Populate a throwaway SQLite DB with fake demo data (never touches real infra)
+    dir: backend
+    vars:
+      DEMO_DB_PATH: '{{.DEMO_DB_PATH | default "C:/Users/kayla/Projects/Stratum/.demo/stratum-demo.db"}}'
+      DEMO_ENC_KEY: '{{.ENCRYPTION_KEY | default "09ac40ae1f3604f38e843215752593e099fd71e6b9a488b99887651176909c76"}}'
+    cmds:
+      - mkdir -p ../.demo
+      - cmd: >-
+          DATABASE_URL=sqlite:///{{.DEMO_DB_PATH}}
+          ENCRYPTION_KEY={{.DEMO_ENC_KEY}}
+          GOWORK=off go run ./cmd/seeddemo
+        silent: false
+    notes: |
+      Demo env:
+        DATABASE_URL=sqlite:///C:/Users/kayla/Projects/Stratum/.demo/stratum-demo.db
+        ENCRYPTION_KEY=09ac40ae1f3604f38e843215752593e099fd71e6b9a488b99887651176909c76
+      Printed creds: demo-admin / demo-admin-pw  TOTP: JBSWY3DPEHPK3PXP
+      Expects a fresh DB — delete .demo/stratum-demo.db before re-seeding.
+
   dev:
     desc: Run backend + frontend dev servers (use two terminals or a runner)
     cmds:

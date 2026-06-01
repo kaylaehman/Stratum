@@ -114,3 +114,15 @@ ruvector.db
 # Playwright e2e artifacts
 frontend/test-results/
 frontend/playwright-report/
+
+# ─── Demo / seed artifacts ─────────────────────────────────────────────────
+# The .demo/ directory holds throwaway SQLite databases seeded by `task seed:demo`.
+# Never commit them — they contain bcrypt hashes and sealed AES blobs.
+.demo/
+*-demo.db
+*-demo.db-wal
+*-demo.db-shm
+# Capture-script auth state (login tokens written by demo capture scripts)
+scripts/.auth/
+# Temporary screenshot staging area (committed PNGs live in assets/screenshots/)
+assets/screenshots/.tmp/
