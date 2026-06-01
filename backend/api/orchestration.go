@@ -35,14 +35,20 @@ func (h *Handlers) OrchestrationPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.Action == "stop" {
+	// Gate by an explicit allowlist so an unknown/new action can never default to
+	// the operator tier: stop is destructive (admin), start/restart are operator.
+	switch body.Action {
+	case "stop":
 		if !h.requireAdmin(w, r) {
 			return
 		}
-	} else {
+	case "start", "restart":
 		if !h.requireOperator(w, r) {
 			return
 		}
+	default:
+		writeError(w, http.StatusBadRequest, "unknown_action")
+		return
 	}
 
 	req := toServiceRequest(body)
@@ -64,17 +70,23 @@ func (h *Handlers) OrchestrationExecute(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if body.Action == "stop" {
+	// Explicit allowlist: stop is destructive (admin + TOTP step-up); start/restart
+	// are operator. Any other action string is rejected, never operator-by-default.
+	switch body.Action {
+	case "stop":
 		if !h.requireAdmin(w, r) {
 			return
 		}
 		if !h.requireStepUp(w, r) {
 			return
 		}
-	} else {
+	case "start", "restart":
 		if !h.requireOperator(w, r) {
 			return
 		}
+	default:
+		writeError(w, http.StatusBadRequest, "unknown_action")
+		return
 	}
 
 	if e := activity.FromContext(r.Context()); e != nil {
