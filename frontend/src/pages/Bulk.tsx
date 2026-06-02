@@ -587,9 +587,13 @@ export default function Bulk() {
         )}
       </div>
 
-      {/* Action bar */}
+      {/* Action bar — pinned to the bottom so Action/Dry Run/Execute stay
+          visible when a long selection scrolls the list. */}
       <div
         style={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 10,
           padding: '10px 16px',
           borderTop: '1px solid var(--border-subtle)',
           display: 'flex',

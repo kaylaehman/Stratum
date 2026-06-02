@@ -166,17 +166,20 @@ function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
         </span>
         <div className="flex items-center gap-1 shrink-0">
           {skill.source === 'custom' && <CustomBadge />}
+          {/* Count of catalogued troubleshooting guides, not live alarms — so use
+              calm neutral styling and the word "guides", not amber "issues". */}
           <span
             className="font-mono px-1.5 py-0.5"
+            title="Troubleshooting guides catalogued for this skill"
             style={{
-              background: skill.issue_count > 0 ? 'rgba(240,160,32,0.12)' : 'rgba(74,82,104,0.2)',
-              border: `1px solid ${skill.issue_count > 0 ? 'rgba(240,160,32,0.4)' : 'var(--border-default)'}`,
-              color: skill.issue_count > 0 ? 'var(--status-warn)' : 'var(--text-muted)',
+              background: 'rgba(74,82,104,0.2)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-muted)',
               borderRadius: '3px',
               fontSize: '12px',
             }}
           >
-            {skill.issue_count} {skill.issue_count === 1 ? 'issue' : 'issues'}
+            {skill.issue_count} {skill.issue_count === 1 ? 'guide' : 'guides'}
           </span>
         </div>
       </div>
