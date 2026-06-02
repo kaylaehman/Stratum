@@ -1,10 +1,57 @@
 package stacks
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"text/template"
 )
+
+// TestFindComposeUsesRawNameForDockerLabel is the C3 regression: the Docker
+// compose-project label filter must use the RAW project name (Docker stores the
+// real name), not the sanitized one — otherwise running stacks whose project
+// name contains '.', uppercase, etc. fail discovery ("No compose file located").
+func TestFindComposeUsesRawNameForDockerLabel(t *testing.T) {
+	f := newFakeFileIO() // statFound=false, Exec returns "" -> all discovery misses
+	s := &Service{files: f}
+
+	_, _ = s.FindCompose(context.Background(), "node1", "My.App")
+
+	rawFilter := "label=com.docker.compose.project=My.App"
+	sanitizedFilter := "label=com.docker.compose.project=My-App"
+	var sawRaw bool
+	for _, c := range f.execCalls {
+		for _, a := range c.args {
+			if a == rawFilter {
+				sawRaw = true
+			}
+			if a == sanitizedFilter {
+				t.Errorf("docker label filter used sanitized name %q; must use raw name", sanitizedFilter)
+			}
+		}
+	}
+	if !sawRaw {
+		t.Errorf("expected a docker label filter with the raw project name %q; exec calls: %+v", rawFilter, f.execCalls)
+	}
+}
+
+// TestFindComposeSanitizesPathFallback verifies the directory fallback still
+// sanitizes the project name so a traversal value cannot escape the search roots.
+func TestFindComposeSanitizesPathFallback(t *testing.T) {
+	f := newFakeFileIO() // statFound=false so we exercise (and miss) every candidate
+	s := &Service{files: f}
+
+	_, _ = s.FindCompose(context.Background(), "node1", "../../etc")
+
+	if len(f.statPaths) == 0 {
+		t.Fatal("expected directory-fallback StatEntry probes")
+	}
+	for _, p := range f.statPaths {
+		if strings.Contains(p, "..") {
+			t.Errorf("path-fallback candidate %q contains traversal; project name not sanitized", p)
+		}
+	}
+}
 
 func TestFirstConfigFile(t *testing.T) {
 	cases := []struct {
@@ -173,10 +220,10 @@ func TestInspectComposeLabelTemplateSyntax(t *testing.T) {
 
 func TestRemapUnderMount(t *testing.T) {
 	cases := []struct {
-		name                      string
-		containerPath, dest, src  string
-		wantPath                  string
-		wantOK                    bool
+		name                     string
+		containerPath, dest, src string
+		wantPath                 string
+		wantOK                   bool
 	}{
 		{
 			"portainer data dir", "/data/compose/42/docker-compose.yml",

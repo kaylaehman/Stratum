@@ -26,8 +26,9 @@ type execCall struct {
 type fakeFileIO struct {
 	execCalls []execCall
 	writes    map[string][]byte
-	execErrs  map[string]error  // keyed by cmd; err is returned when cmd matches
-	statFound bool              // when true, StatEntry succeeds (file exists)
+	execErrs  map[string]error // keyed by cmd; err is returned when cmd matches
+	statFound bool             // when true, StatEntry succeeds (file exists)
+	statPaths []string         // records every path passed to StatEntry
 }
 
 func newFakeFileIO() *fakeFileIO {
@@ -50,7 +51,8 @@ func (f *fakeFileIO) Write(_ context.Context, _ string, p string, data []byte, _
 	return nil
 }
 
-func (f *fakeFileIO) StatEntry(_ context.Context, _ string, _ string) (fs.Entry, error) {
+func (f *fakeFileIO) StatEntry(_ context.Context, _ string, p string) (fs.Entry, error) {
+	f.statPaths = append(f.statPaths, p)
 	if f.statFound {
 		return fs.Entry{}, nil
 	}
@@ -124,10 +126,10 @@ func TestCreateStack_ProjectValidation(t *testing.T) {
 		errMsg  string // substring that must appear in error; empty = no validation error
 	}{
 		{"", "required"},
-		{"../evil", "not allowed"},   // sanitize changes it → rejected
-		{"my stack", "not allowed"},  // space → sanitize → mismatch
-		{"proj.v2", "not allowed"},   // dot → mismatch
-		{"valid-project_01", ""},     // ok; any error is from I/O not validation
+		{"../evil", "not allowed"},  // sanitize changes it → rejected
+		{"my stack", "not allowed"}, // space → sanitize → mismatch
+		{"proj.v2", "not allowed"},  // dot → mismatch
+		{"valid-project_01", ""},    // ok; any error is from I/O not validation
 	}
 
 	for _, tc := range cases {

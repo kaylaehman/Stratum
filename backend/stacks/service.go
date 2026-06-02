@@ -73,7 +73,6 @@ func New(store db.Store, files *fs.Service, cipher *crypto.Cipher) *Service {
 	return &Service{store: store, files: files, cipher: cipher}
 }
 
-
 // FindCompose discovers the compose file path for a project on a node.
 //
 // It first asks Docker where the project's compose file actually is — every
@@ -91,14 +90,21 @@ func New(store db.Store, files *fs.Service, cipher *crypto.Cipher) *Service {
 // for a dir matching the project name. Returns "" when nothing is found
 // (degraded gracefully).
 func (s *Service) FindCompose(ctx context.Context, nodeID, projectName string) (string, error) {
-	// SECURITY: the project name comes from a URL param. Sanitize before it is
-	// ever joined into a filesystem path so a value like "../../etc" cannot
-	// escape the search roots (path.Join would otherwise resolve the traversal).
-	// Legitimate compose project names are already restricted to [a-z0-9_-].
-	projectName = sanitizeProject(projectName)
+	// Use the RAW project name for Docker label matching: Docker stores the real,
+	// unsanitized compose project name, so sanitizing here would miss any project
+	// whose name contains '.', uppercase, or other characters (common for imported
+	// or manually-deployed stacks) — the cause of "No compose file could be
+	// located" for running stacks. SSH args are shell-quoted (injection-safe), so
+	// the raw value is safe to pass to docker, and findComposeByLabel never joins
+	// it into a filesystem path.
+	rawName := projectName
+	// SECURITY: sanitize before joining into a filesystem path so a value like
+	// "../../etc" cannot escape the search roots (path.Join would otherwise resolve
+	// the traversal). Only the directory fallback below joins paths.
+	safeName := sanitizeProject(projectName)
 
 	// 1. Ask Docker for the project's real compose path via the compose label.
-	if p, err := s.findComposeByLabel(ctx, nodeID, projectName); err == nil && p != "" {
+	if p, err := s.findComposeByLabel(ctx, nodeID, rawName); err == nil && p != "" {
 		return p, nil
 	}
 
@@ -107,7 +113,7 @@ func (s *Service) FindCompose(ctx context.Context, nodeID, projectName string) (
 	// /opt/stratum-stacks is the template-deploy default.
 	searchRoots := []string{"/opt", "/srv", "/home", "/root", "/var/lib", "/mnt", "/opt/stratum-stacks"}
 	for _, root := range searchRoots {
-		dir := path.Join(root, projectName)
+		dir := path.Join(root, safeName)
 		for _, fname := range composeFilenames {
 			candidate := path.Join(dir, fname)
 			if _, err := s.files.StatEntry(ctx, nodeID, candidate); err == nil {
