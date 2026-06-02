@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -13,6 +14,11 @@ import (
 	"github.com/kaylaehman/stratum/backend/middleware"
 	"github.com/kaylaehman/stratum/backend/security"
 )
+
+// securityFreshenBudget bounds how long a security GET waits for an in-progress
+// refresh before serving cached data. A cold full scan (serial Docker inspects)
+// can take many seconds; without this bound the first page load blocked on it.
+const securityFreshenBudget = 1500 * time.Millisecond
 
 // ensureSecurityForDockerNodes re-scans every docker-capable node (best-effort).
 func (h *Handlers) ensureSecurityForDockerNodes(ctx context.Context) {
@@ -24,6 +30,40 @@ func (h *Handlers) ensureSecurityForDockerNodes(ctx context.Context) {
 		caps, _ := capabilities.Parse([]byte(n.CapabilitiesJSON))
 		if caps.Docker {
 			_ = h.Security.EnsureFresh(ctx, n.ID)
+		}
+	}
+}
+
+// freshenDockerSecurity refreshes all docker nodes' security data WITHOUT
+// blocking the request on a cold full scan. The scan is detached to a background
+// context so it completes (and warms the cache) even after the response is sent;
+// the request waits only securityFreshenBudget. A warm/fast scan returns inline
+// with fresh data; a cold scan returns cached now and finishes in the background,
+// so the next load is instant and fresh. Fixes the ~10s first-load hang.
+func (h *Handlers) freshenDockerSecurity() {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ensureSecurityForDockerNodes(context.Background())
+	}()
+	select {
+	case <-done:
+	case <-time.After(securityFreshenBudget):
+	}
+}
+
+// freshenNodeSecurity is freshenDockerSecurity for a single node: it kicks the
+// security + image-update refreshes detached and waits only the shared budget.
+func (h *Handlers) freshenNodeSecurity(nodeID string) {
+	done := make(chan struct{}, 2)
+	go func() { _ = h.Security.EnsureFresh(context.Background(), nodeID); done <- struct{}{} }()
+	go func() { _ = h.Updater.EnsureFresh(context.Background(), nodeID); done <- struct{}{} }()
+	deadline := time.After(securityFreshenBudget)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-deadline:
+			return
 		}
 	}
 }
@@ -68,7 +108,7 @@ func (h *Handlers) Privileged(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
-	h.ensureSecurityForDockerNodes(r.Context())
+	h.freshenDockerSecurity()
 	rows, err := h.Store.ListContainerSecurity(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
@@ -97,7 +137,7 @@ func (h *Handlers) Ports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	h.ensureSecurityForDockerNodes(ctx)
+	h.freshenDockerSecurity()
 	ports, err := h.Store.ListAllPortExposures(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
@@ -109,7 +149,7 @@ func (h *Handlers) Ports(w http.ResponseWriter, r *http.Request) {
 		ports = []db.PortExposureRow{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ports":                 ports,
+		"ports":                ports,
 		"non_docker_listeners": h.nonDockerListeners(ctx, ports),
 	})
 }

@@ -9,7 +9,6 @@ import (
 	"github.com/kaylaehman/stratum/backend/capabilities"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/security"
-	"github.com/kaylaehman/stratum/backend/sshkeys"
 )
 
 // NodePosture computes a security/health posture score for one node by composing
@@ -30,6 +29,14 @@ func (h *Handlers) NodePosture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
+
+	// Freshen the security + image-update caches without blocking on a cold full
+	// scan, so the posture page doesn't hang ~10s on first load. The collectors
+	// below then read cached data; a cold scan finishes in the background and
+	// warms the next load.
+	if caps.Docker {
+		h.freshenNodeSecurity(node.ID)
+	}
 
 	in := security.PostureInputs{
 		CriticalCVEs:         -1,
@@ -55,8 +62,11 @@ func (h *Handlers) NodePosture(w http.ResponseWriter, r *http.Request) {
 		in.ExposedAllIfaceCount = collectExposedPortCount(r, h, node.ID)
 	}
 
-	// --- SSH key staleness (best-effort over SSH; skip if unavailable) ---
-	in.StaleSSHKeyCount = collectStaleSSHKeyCount(r, h, node.ID)
+	// --- SSH key staleness ---
+	// Left at -1 (unavailable): Stratum has no last-used data source for keys yet
+	// (that needs sshd-log parsing, not persisted). The previous code did a real
+	// SSH round-trip per node here and discarded the result, only adding latency
+	// to the posture hot path — so it is intentionally not invoked.
 
 	// --- Containers with available image updates ---
 	if caps.Docker {
@@ -101,7 +111,7 @@ func collectCVECounts(r *http.Request, h *Handlers, nodeID string) (critical, hi
 // at least one unacknowledged security flag.
 func collectPrivilegedCount(r *http.Request, h *Handlers, nodeID string) int {
 	ctx := r.Context()
-	_ = h.Security.EnsureFresh(ctx, nodeID)
+	// Cache is freshened up-front by NodePosture (freshenNodeSecurity); read only.
 	rows, err := h.Store.ListContainerSecurity(ctx)
 	if err != nil {
 		return 0
@@ -137,32 +147,11 @@ func collectExposedPortCount(r *http.Request, h *Handlers, nodeID string) int {
 	return count
 }
 
-// collectStaleSSHKeyCount audits SSH keys on the node over SSH (best-effort).
-// Because Stratum does not store last-used timestamps for keys (that requires
-// sshd log parsing which is agent-dependent), we return -1 (unavailable) when
-// no usage data is available rather than mis-reporting. If the SSH key audit
-// itself fails, we return -1.
-func collectStaleSSHKeyCount(r *http.Request, h *Handlers, nodeID string) int {
-	// SSH key audit runs over SSH; failure gracefully returns -1.
-	keys, err := sshkeys.Audit(r.Context(), nodeID, h.Files.Exec)
-	if err != nil {
-		return -1
-	}
-	// Stratum currently has no last-used data source for keys — that data comes
-	// from sshd log parsing which is not yet persisted. Return count of all keys
-	// as "potentially stale" only when the count is known, but since we can't
-	// distinguish age we skip this factor entirely (return -1) rather than
-	// reporting false positives. This matches the spec: "best-effort; skip
-	// gracefully if data absent."
-	_ = keys
-	return -1
-}
-
 // collectUpdateCount returns the count of containers on the node with status
 // "update_available".
 func collectUpdateCount(r *http.Request, h *Handlers, nodeID string) int {
 	ctx := r.Context()
-	_ = h.Updater.EnsureFresh(ctx, nodeID)
+	// Cache is freshened up-front by NodePosture (freshenNodeSecurity); read only.
 	rows, err := h.Updater.ListAll(ctx)
 	if err != nil {
 		return 0
