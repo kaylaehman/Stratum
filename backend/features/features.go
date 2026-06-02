@@ -28,7 +28,7 @@ type Flag struct {
 // catalog is the known flag set. Default reflects whether the feature is built
 // and on by default; the two not-yet-implemented features default off.
 var catalog = []Flag{
-	{Key: "feature.automations", Label: "Automations", Default: true, Description: "Autonomous automation engine (8 configurable automations)."},
+	{Key: "feature.automations", Label: "Automations", Default: true, Description: "Autonomous automation engine. The Automations page lists the configurable automations."},
 	{Key: "feature.config_versions", Label: "Config Versions", Default: true, Description: "Track config file version history and detect drift."},
 	{Key: "feature.config_git", Label: "Config Git Backend", Default: false, Description: "Push config snapshots to a remote git repository (not yet implemented)."},
 	{Key: "feature.alert_policies", Label: "Alert Policies", Default: true, Description: "Route and suppress alerts via configurable policies."},

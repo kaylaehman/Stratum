@@ -107,7 +107,7 @@ Shipped and working, newer / hardening:
 - **Incident timeline** — "what changed?" across the activity log, metric spikes, restarts, and file events
 - **Uptime monitoring** — HTTP/TCP/ICMP checks with history and uptime %
 - **Stacks edit & redeploy** — edit live Compose stacks with Secrets-backed env injection (never written to disk)
-- **Automations engine** — 13 user-configurable autonomous automations (self-heal, update, security, maintenance) built on the remediation engine and existing services, each independently toggled with its own schedule; destructive ones default off and dry-run, every run audited (`feature.automations`, `backend/automation`, `/automations`)
+- **Automations engine** — 15 user-configurable autonomous automations (self-heal, update, security, maintenance) built on the remediation engine and existing services, each independently toggled with its own schedule; destructive ones default off and dry-run, every run audited (`feature.automations`, `backend/automation`, `/automations`)
 
 ### Planned
 

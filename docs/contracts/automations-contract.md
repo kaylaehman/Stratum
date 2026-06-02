@@ -1,25 +1,37 @@
 # Automations engine — contract (Wave 6)
 
-A dedicated `/automations` page exposing 8 independently-configurable autonomous
+A dedicated `/automations` page exposing 15 independently-configurable autonomous
 automations on top of the existing services + remediation engine. Pattern mirrors
 `features` (code-defined catalog + DB overrides) and the background-loop services
 (`uptimeSvc.Run(ctx)` started in `main.go`).
 
-## The 8 automations (code-defined catalog; stable keys)
+> The single source of truth for the count and keys is the code catalog in
+> `backend/automation/catalog.go` (`automation.Catalog()`); `TestCatalogHandlerParity`
+> keeps it in lock-step with the executable handlers. This table started at 8 and
+> grew to 15 — update it from the catalog, never hand-count.
+
+## The 15 automations (code-defined catalog; stable keys)
 | key | category | label | wires to | default |
 |---|---|---|---|---|
 | `restart_unhealthy` | self_heal | Restart unhealthy containers | container restart lifecycle | off |
 | `auto_remediate_low` | self_heal | Auto-run low-risk remediation | remediation.Generate→Execute, ONLY when `ClassifyRisk`==low (never high/destructive) | off |
+| `restart_on_resource_spike` | self_heal | Restart on resource spike | container restart on sustained CPU/RAM spike | off |
+| `fix_bind_mount_perms` | self_heal | Fix bind-mount permissions | agent/SSH permission repair on bind mounts | off |
+| `run_runbooks_on_alert` | self_heal | Run runbooks on alert | remediation runbooks triggered by alerts | off |
 | `auto_pull_updates` | update | Auto-pull latest images | updates service (pull only, NO recreate) | off |
 | `auto_update_containers` | update | Auto-update containers | recreate/update (pull+recreate); per-project allowlist in config | off |
 | `scheduled_cve_scan` | security | Scheduled CVE scan | cve bulk scan over running images | off |
 | `security_alerts` | security | Security change alerts | notifications/webhooks on new Critical CVE / new exposed port / new privileged / new SSH key | off |
+| `patch_critical_cves` | security | Patch critical CVEs | recreate to a fixed image when a Critical CVE has a fix | off |
 | `prune_unused_volumes` | maintenance | Prune unused volumes | volumes.PruneUnused | off |
 | `scheduled_backups` | maintenance | Scheduled backups | backups.StartBackup | off |
+| `prune_disk_pressure` | maintenance | Prune on disk pressure | prune images/volumes when disk crosses a threshold | off |
+| `verify_backup` | maintenance | Verify backups | verify backup integrity + notify | off |
+| `capacity_warn` | maintenance | Capacity warning | forecast-based capacity alerts | off |
 
 All default **disabled**; destructive ones (`auto_update_containers`,
-`prune_unused_volumes`) stay off until an admin opts in. Each run is audited and
-failures fire a notification.
+`prune_unused_volumes`, `patch_critical_cves`, `prune_disk_pressure`) stay off
+until an admin opts in. Each run is audited and failures fire a notification.
 
 ## Catalog entry (code) + DB override
 Code defines: `key, label, description, category, defaultIntervalSeconds, configSchema/defaults`. DB stores only user overrides.
