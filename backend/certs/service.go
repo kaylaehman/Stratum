@@ -194,10 +194,14 @@ type certBlock struct {
 }
 
 // scanScript finds candidate cert files under the scan paths and emits each as a
-// "===FILE:<path>===" marker followed by its base64 contents.
+// "===FILE:<path>===" marker followed by its base64 contents. The system trust
+// store (/etc/ssl/certs and the ca-certificates / ca-bundle files) is pruned so
+// it neither wastes the maxFiles budget nor surfaces CA roots — those are not
+// serving certs (leafCert also filters CA certs as a second line of defense).
 func scanScript() string {
 	return `for f in $(find ` + strings.Join(scanPaths, " ") +
-		` -type f \( -name '*.pem' -o -name '*.crt' -o -name '*.cer' \) 2>/dev/null | head -n ` +
+		` -type f \( -name '*.pem' -o -name '*.crt' -o -name '*.cer' \)` +
+		` -not -path '*/ssl/certs/*' -not -name 'ca-certificates.crt' -not -name 'ca-bundle.crt' 2>/dev/null | head -n ` +
 		fmt.Sprint(maxFiles) + `); do echo "===FILE:$f==="; base64 "$f" 2>/dev/null; done`
 }
 
@@ -224,8 +228,13 @@ func parseBlocks(out string) []certBlock {
 	return blocks
 }
 
-// leafCert returns the first parseable certificate in a PEM bundle (the leaf in
-// a fullchain), or nil if none.
+// leafCert returns the first parseable SERVING (non-CA) certificate in a PEM
+// bundle — the leaf of a fullchain. CA certificates are skipped: a serving cert
+// is never a CA, so this prevents a system trust-store bundle (all roots/
+// intermediates, e.g. /etc/ssl/certs/ca-certificates.crt) from being reported as
+// a serving cert — the cause of the bogus identical "ACCVRAIZ1" expiry on every
+// node. Returns nil when the bundle holds no serving cert (e.g. a CA bundle or a
+// private key file).
 func leafCert(pemBytes []byte) *x509.Certificate {
 	rest := pemBytes
 	for {
@@ -235,7 +244,7 @@ func leafCert(pemBytes []byte) *x509.Certificate {
 			return nil
 		}
 		if block.Type == "CERTIFICATE" {
-			if c, err := x509.ParseCertificate(block.Bytes); err == nil {
+			if c, err := x509.ParseCertificate(block.Bytes); err == nil && !c.IsCA {
 				return c
 			}
 		}
