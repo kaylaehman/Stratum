@@ -96,4 +96,8 @@ type Conn struct {
 	// from the container's bind mounts. Used by file-based adapters
 	// (e.g. cloudflared) to locate their config before falling back to defaults.
 	MountCandidates []string
+	// Config carries non-secret adapter-specific configuration parsed from the
+	// node's proxy_config.config_json (e.g. Cloudflare account_id / tunnel_id).
+	// Nil for adapters that don't need it.
+	Config map[string]string
 }

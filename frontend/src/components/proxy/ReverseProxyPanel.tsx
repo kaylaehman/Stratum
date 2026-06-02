@@ -1,11 +1,35 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Globe, Lock, Save, Loader, Network } from 'lucide-react'
+import { Globe, Lock, Save, Loader, Network, Cloud } from 'lucide-react'
 import { useNodeProxy, useSetProxyConfig } from '../../lib/api/proxy'
 import { useCan } from '../../lib/roles'
 import { ApiError } from '../../lib/api'
 import { resourceLink } from '../../lib/resourceLink'
+import { CloudflareApiForm } from './CloudflareApiForm'
 import type { ProxyRule, SupportedProxy } from '../../types/api'
+
+// Small underline-style button used for the cloudflare-api entry points.
+function LinkButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1.5 font-mono text-xs self-start mt-2"
+      style={{
+        background: 'none',
+        border: 'none',
+        color: 'var(--accent)',
+        cursor: 'pointer',
+        padding: 0,
+        textDecoration: 'underline',
+        textDecorationColor: 'var(--accent-dim)',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
 
 interface ReverseProxyPanelProps {
   nodeId: string
@@ -392,6 +416,9 @@ function CloudflaredSshNotice() {
 export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
   const { isAdmin } = useCan()
   const { data, isLoading, isError } = useNodeProxy(nodeId)
+  // Toggles the cloudflare-api setup/edit form (empty state, dashboard-managed
+  // cloudflared notice, or editing an existing cloudflare-api connection).
+  const [cfFormOpen, setCfFormOpen] = useState(false)
 
   if (!isAdmin) return null
 
@@ -460,6 +487,16 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
             <SupportedCatalog tools={data.supported} />
           </>
         )}
+        {/* Cloudflare API: connect a dashboard-managed tunnel (no local container). */}
+        {cfFormOpen ? (
+          <CloudflareApiForm nodeId={nodeId} hasToken={data.has_token} onClose={() => setCfFormOpen(false)} />
+        ) : (
+          <LinkButton
+            icon={<Cloud size={12} />}
+            label="Connect a Cloudflare tunnel via API"
+            onClick={() => setCfFormOpen(true)}
+          />
+        )}
       </div>
     )
   }
@@ -492,9 +529,21 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
   // they read from the host filesystem. Only show the form for API-based adapters
   // when they are unconfigured or in error.
   const isFileBased = data.detected === 'cloudflared'
+  const isCloudflareApi = data.detected === 'cloudflare-api'
+  // The generic endpoint ConfigForm only applies to HTTP-admin adapters
+  // (traefik, NPM, caddy). cloudflared is file-based; cloudflare-api has its own
+  // token/tunnel form, so both are excluded here.
   const needsConfig =
-    !isFileBased && (!data.configured || (data.rule_error !== undefined && data.rule_error !== ''))
+    !isFileBased &&
+    !isCloudflareApi &&
+    (!data.configured || (data.rule_error !== undefined && data.rule_error !== ''))
   const showConfigForm = hasListCapability && needsConfig
+
+  // cloudflare-api: show its setup form when unconfigured, in error, or when the
+  // user opts to edit an existing connection.
+  const showCloudflareForm =
+    isCloudflareApi &&
+    (!data.configured || cfFormOpen || (data.rule_error !== undefined && data.rule_error !== ''))
 
   // Detect the specific case: cloudflared + rule_error indicating SSH is missing.
   // The backend surfaces this as a rule_error when SSH access is unavailable.
@@ -516,27 +565,44 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
       </div>
 
       {/* cloudflared: dashboard-managed tunnel — ingress is defined in the
-          Cloudflare Zero Trust dashboard, not in a local config file.         */}
+          Cloudflare Zero Trust dashboard, not in a local config file. Offer to
+          read the routes over the Cloudflare API instead.                      */}
       {isFileBased && data.dashboard_managed && (
-        <p
-          className="font-mono text-xs mb-2"
-          style={{
-            color: 'var(--text-secondary)',
-            background: 'rgba(100,149,237,0.07)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '3px',
-            padding: '4px 8px',
-          }}
-        >
-          cloudflared tunnel detected — ingress managed in the Cloudflare dashboard. Rules are not available locally.
-        </p>
+        <>
+          <p
+            className="font-mono text-xs mb-2"
+            style={{
+              color: 'var(--text-secondary)',
+              background: 'rgba(100,149,237,0.07)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '3px',
+              padding: '4px 8px',
+            }}
+          >
+            cloudflared tunnel detected — ingress managed in the Cloudflare dashboard. Rules are not
+            available locally, but Stratum can read them over the Cloudflare API.
+          </p>
+          {cfFormOpen ? (
+            <CloudflareApiForm
+              nodeId={nodeId}
+              hasToken={data.has_token}
+              onClose={() => setCfFormOpen(false)}
+            />
+          ) : (
+            <LinkButton
+              icon={<Cloud size={12} />}
+              label="Read routes via Cloudflare API"
+              onClick={() => setCfFormOpen(true)}
+            />
+          )}
+        </>
       )}
 
       {/* cloudflared: SSH not configured — actionable notice with link to add credentials */}
       {cloudflaredNeedsSsh && <CloudflaredSshNotice />}
 
-      {/* Rule-fetch error notice — for API-based adapters only (not cloudflared) */}
-      {data.rule_error && !data.dashboard_managed && !isFileBased && (
+      {/* Rule-fetch error notice — HTTP-admin adapters only (not cloudflared/cloudflare-api) */}
+      {data.rule_error && !data.dashboard_managed && !isFileBased && !isCloudflareApi && (
         <p
           className="font-mono text-xs mb-2"
           style={{
@@ -553,7 +619,24 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         </p>
       )}
 
-      {/* Config form when unconfigured or in error — API-based adapters only */}
+      {/* cloudflare-api: surface the Cloudflare error verbatim (bad token,
+          missing scope, tunnel not found, locally-managed tunnel). */}
+      {isCloudflareApi && data.rule_error && (
+        <p
+          className="font-mono text-xs mb-2"
+          style={{
+            color: 'var(--status-warn)',
+            background: 'rgba(255,180,0,0.07)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '3px',
+            padding: '4px 8px',
+          }}
+        >
+          {data.rule_error}
+        </p>
+      )}
+
+      {/* Config form when unconfigured or in error — HTTP-admin adapters only */}
       {showConfigForm && (
         <ConfigForm
           nodeId={nodeId}
@@ -563,8 +646,28 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         />
       )}
 
+      {/* cloudflare-api setup/edit form */}
+      {showCloudflareForm && (
+        <CloudflareApiForm
+          nodeId={nodeId}
+          hasToken={data.has_token}
+          currentAccountId={data.cf_account_id}
+          currentTunnelId={data.cf_tunnel_id}
+          onClose={cfFormOpen ? () => setCfFormOpen(false) : undefined}
+        />
+      )}
+
+      {/* cloudflare-api: edit affordance when a connection is active with rules */}
+      {isCloudflareApi && !showCloudflareForm && data.configured && (
+        <LinkButton
+          icon={<Cloud size={12} />}
+          label="Edit Cloudflare connection"
+          onClick={() => setCfFormOpen(true)}
+        />
+      )}
+
       {/* Rules table */}
-      {!showConfigForm && data.rules.length > 0 && (
+      {!showConfigForm && !showCloudflareForm && data.rules.length > 0 && (
         <>
           <div className="flex items-center gap-1.5 mb-1">
             <span
@@ -583,7 +686,7 @@ export function ReverseProxyPanel({ nodeId }: ReverseProxyPanelProps) {
         </>
       )}
 
-      {!showConfigForm && data.rules.length === 0 && !data.rule_error && !data.dashboard_managed && (
+      {!showConfigForm && !showCloudflareForm && data.rules.length === 0 && !data.rule_error && !data.dashboard_managed && (
         <p className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
           No proxy rules found.
         </p>
