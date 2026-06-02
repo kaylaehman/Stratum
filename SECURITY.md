@@ -12,14 +12,17 @@ Stratum itself guarantees — not what the underlying host OS or network provide
 |---|---|
 | Operator / Admin role | Fully trusted. Admin users have full platform access. |
 | JWT sessions | Signed with `JWT_SECRET` (min 32 bytes). Compromise of the secret allows session forgery. |
-| Node SSH credentials | Stored or used only at connection time. Private key material is never written to the DB. |
+| Node SSH credentials | Stored **encrypted at rest** in `nodes.credentials_encrypted` — AES-256-GCM sealed with the same `ENCRYPTION_KEY`/cipher as the secrets vault (`NodeCredentials.Seal`). Private keys, passwords, and tokens are decrypted into memory only at connection time, and are never returned over the API or written to logs/activity. They are NOT stored in plaintext, but they ARE persisted (encrypted) — so the vault key is what protects them. |
 | Agent mTLS certificates | Issued by an internal CA at agent registration time. The CA private key is operator-controlled. |
 | Secrets vault (AES-256) | Encrypted at rest using `ENCRYPTION_KEY` (32-byte AES-256 GCM). Raw secrets are never logged or written to disk outside the vault. |
 
 ### What Stratum does not trust
 
 - **Network-adjacent clients** — all API routes require a valid JWT session except
-  `/health` and `/api/auth/login`. No unauthenticated data-plane access.
+  `/health`, the first-run setup endpoints (`/api/setup/status`, `/api/setup/admin`),
+  and the auth endpoints (`/api/auth/login`, `/api/auth/refresh`, which uses the
+  refresh cookie). No unauthenticated data-plane access. This is enforced
+  structurally by `TestAllRoutesRequireAuth`, which walks the whole route table.
 - **Operator- or AI-generated commands** — every remediation command is classified
   by a risk engine before it reaches the SSH layer. The engine uses a positive
   allowlist (not a denylist). Any command not explicitly recognized as safe
@@ -76,6 +79,42 @@ through the API; rows are inserted only, never updated or soft-deleted.
   error messages.
 - Secrets stored in the vault are decrypted only on explicit user action (the
   "reveal" flow), which is itself gated by re-authentication and logged.
+- Neither `ENCRYPTION_KEY` nor `JWT_SECRET` appearing in startup validation
+  errors is enforced by `TestConfigErrorsNeverEchoSecrets`.
+
+### Blast radius — if the Stratum host is compromised
+
+This is the question to ask first, and the honest answer matters more than any
+control table. **Stratum is a high-value target by design: it holds the keys to
+every node it manages.** If an attacker gains code execution on the Stratum host
+*and* can read the `ENCRYPTION_KEY`, they can decrypt:
+
+- every node's SSH credentials (private keys, passwords) in
+  `nodes.credentials_encrypted`,
+- every stored API token (Proxmox, Cloudflare, registry, AI providers),
+- the entire AES-256 secrets vault.
+
+That is effectively lateral movement to every managed node. The encryption at
+rest protects against database theft *without* the key (a stolen `.db` file or
+backup is useless alone); it does **not** protect against a full host compromise
+where the key is also readable.
+
+Recommended mitigations (defense in depth — Stratum cannot enforce these for you):
+
+- **Isolate the host.** Put Stratum on a management VLAN; do not expose `:8080`
+  to the internet. Front it with a reverse proxy + your own auth if remote access
+  is required.
+- **Supply the key out-of-band.** Use `ENCRYPTION_KEY_FILE` pointing at a secret
+  mount (Docker/K8s secret, tmpfs) rather than the raw `ENCRYPTION_KEY` env var,
+  so the key is not in `docker inspect`, the process environment, or shell
+  history. Keep it off the same disk as the database backups.
+- **Least-privilege SSH per node.** Give Stratum a dedicated, non-root SSH
+  account per node with only the access each feature needs, rather than a shared
+  root key. A host compromise then yields scoped accounts, not root everywhere.
+- **Restrict and rotate.** Rotate node credentials and `ENCRYPTION_KEY` if the
+  host is ever suspected compromised; revoke the agent CA and re-enrol.
+- **Back up the database encrypted and off-host**, and never store the key
+  alongside the backup.
 
 ---
 
