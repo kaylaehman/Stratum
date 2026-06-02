@@ -1,0 +1,31 @@
+{
+  "success": true,
+  "errors": [],
+  "messages": [],
+  "result": {
+    "tunnel_id": "f70a3a6b-4f8e-4a1f-9c2d-1a2b3c4d5e6f",
+    "version": 7,
+    "config": {
+      "ingress": [
+        {
+          "hostname": "app.example.com",
+          "service": "http://localhost:8080"
+        },
+        {
+          "hostname": "api.example.com",
+          "path": "/v1",
+          "service": "http://api:3000"
+        },
+        {
+          "hostname": "grafana.example.com",
+          "service": "http://198.51.100.20:3000"
+        },
+        {
+          "service": "http_status:404"
+        }
+      ],
+      "warp-routing": { "enabled": false }
+    },
+    "source": "cloudflare"
+  }
+}

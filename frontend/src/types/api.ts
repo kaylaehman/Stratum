@@ -1497,11 +1497,48 @@ export interface ProxyStatus {
   /** cloudflared: ingress is managed in the Cloudflare Zero Trust dashboard (no local config). */
   dashboard_managed: boolean
   supported: SupportedProxy[]
+  /** cloudflare-api: the stored account/tunnel selection (non-secret), for edit pre-fill. */
+  cf_account_id?: string
+  cf_tunnel_id?: string
 }
 
 export interface SetProxyConfigRequest {
   endpoint: string
   token?: string
+  /** Provider override: '' keeps existing, 'auto' reverts to image detection,
+   *  'cloudflare-api' selects the Cloudflare-API provider (uses the ids below). */
+  kind?: string
+  account_id?: string
+  tunnel_id?: string
+}
+
+/** A Cloudflare account the API token can access (cloudflare-api setup picker). */
+export interface CloudflareAccount {
+  id: string
+  name: string
+}
+
+/** A cloudflared tunnel in an account (cloudflare-api setup picker). */
+export interface CloudflareTunnel {
+  id: string
+  name: string
+}
+
+/** Result of probing a Cloudflare API token: accounts it can see and the
+ *  tunnels of the effective (chosen/single) account. */
+export interface CloudflareDiscovery {
+  accounts: CloudflareAccount[]
+  tunnels: CloudflareTunnel[]
+  account_id: string
+  /** Non-fatal discovery error (accounts fetched but tunnel listing failed). */
+  error?: string
+}
+
+export interface DiscoverCloudflareRequest {
+  /** Optional token override; falls back to the node's stored token when empty. */
+  token?: string
+  /** Optional account to resolve tunnels for (when the token sees several). */
+  account_id?: string
 }
 
 // Feature Flags types

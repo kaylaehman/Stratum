@@ -280,7 +280,11 @@ type ProxyConfig struct {
 	NodeID         string
 	Endpoint       string
 	TokenEncrypted []byte
-	UpdatedAt      time.Time
+	// ConfigJSON holds non-secret provider config (a provider-kind override plus
+	// provider-specific fields like Cloudflare account_id/tunnel_id). Defaults to
+	// "{}"; secrets stay in TokenEncrypted.
+	ConfigJSON string
+	UpdatedAt  time.Time
 }
 
 // DNSConfig is a node's DNS admin endpoint + sealed API token (Feature F3).

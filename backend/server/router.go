@@ -166,6 +166,9 @@ func NewRouter(d *Deps) http.Handler {
 
 			// Reverse proxy detection + rules (admin gate in handler; config audited below).
 			r.Get("/nodes/{id}/proxy", d.Handlers.NodeProxy)
+			// Cloudflare account/tunnel discovery for the cloudflare-api provider
+			// setup picker (admin gate in handler; read-only, token used in-memory).
+			r.Post("/nodes/{id}/proxy/cloudflare/discover", d.Handlers.DiscoverProxyCloudflare)
 
 			// DNS detection + records (admin gate in handler; config audited below).
 			r.Get("/nodes/{id}/dns", d.Handlers.NodeDNS)

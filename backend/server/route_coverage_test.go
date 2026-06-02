@@ -41,12 +41,13 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 	// log subscribe/unsubscribe only grant/drop a per-session WebSocket topic
 	// (auditing them would be high-volume noise with no mutation to record).
 	nonMutatingPost := map[string]bool{
-		"POST /api/containers/{id}/diagnostic": true,
-		"POST /api/logs/subscribe":             true,
-		"POST /api/logs/unsubscribe":           true,
-		"POST /api/webhooks/{id}/test":         true, // sends a test message; no Stratum state change
-		"POST /api/templates/{id}/render":      true, // pure string substitution; no state change
-		"POST /api/runbooks/{id}/validate":     true, // lints a runbook; no state change
+		"POST /api/containers/{id}/diagnostic":           true,
+		"POST /api/logs/subscribe":                       true,
+		"POST /api/logs/unsubscribe":                     true,
+		"POST /api/webhooks/{id}/test":                   true, // sends a test message; no Stratum state change
+		"POST /api/templates/{id}/render":                true, // pure string substitution; no state change
+		"POST /api/runbooks/{id}/validate":               true, // lints a runbook; no state change
+		"POST /api/nodes/{id}/proxy/cloudflare/discover": true, // read-only Cloudflare account/tunnel lookup; token used in-memory, no state change
 	}
 
 	// Per-user preference mutations (bookmarks): user-owned state, not
@@ -176,8 +177,8 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"DELETE /api/uptime/monitors/{id}": true,
 
 		// Automations engine
-		"PUT /api/automations/{key}":       true,
-		"POST /api/automations/{key}/run":  true,
+		"PUT /api/automations/{key}":      true,
+		"POST /api/automations/{key}/run": true,
 
 		// Backup restore + verify (C1)
 		"POST /api/nodes/{id}/backups/restore":       true,
