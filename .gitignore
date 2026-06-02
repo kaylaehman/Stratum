@@ -96,6 +96,7 @@ tmp/
 /CLAUDE.md
 /FEATURES.md
 /DESIGN.md
+/TODO.md
 skills-lock.json
 # Internal sub-project design specs — local-only, never committed
 docs/superpowers/specs/
