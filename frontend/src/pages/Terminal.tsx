@@ -3,6 +3,7 @@ import { SquareTerminal, RotateCw } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { TerminalView, type TerminalStatus } from '../components/terminal/TerminalView'
 import { useNodes } from '../lib/api/nodes'
+import { NodeSelect } from '../components/common/NodeSelect'
 import { useCan } from '../lib/roles'
 
 const statusMeta: Record<TerminalStatus, { color: string; label: string }> = {
@@ -57,27 +58,12 @@ export default function TerminalPage() {
               </span>
 
               {/* Node selector */}
-              <select
+              <NodeSelect
+                nodes={nodes ?? []}
                 value={nodeId ?? ''}
-                onChange={(e) => setNodeId(e.target.value)}
-                className="text-xs font-mono px-2 py-1"
-                style={{
-                  backgroundColor: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  outline: 'none',
-                }}
-              >
-                {[...(nodes ?? [])]
-                  .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-                  .map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.name} ({n.host})
-                    </option>
-                  ))}
-              </select>
+                onChange={setNodeId}
+                showHost
+              />
 
               {/* Reconnect */}
               <button

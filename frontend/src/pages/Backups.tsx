@@ -12,6 +12,7 @@ import {
   ChevronDown,
 } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
+import { NodeSelect } from '../components/common/NodeSelect'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
 import { useVolumes } from '../lib/api/volumes'
@@ -804,12 +805,15 @@ function DockerTriggerFields({ nodeOptions, volumeOptions, onNodeChange }: Docke
       <div className="flex flex-wrap gap-3 items-end">
         <div style={{ minWidth: '160px', flex: '1' }}>
           <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Node</label>
-          <select value={selectedNode} onChange={(e) => handleNodeChange(e.target.value)} style={inputStyle}>
-            {nodeOptions.length === 0 && <option value="">No Docker nodes available</option>}
-            {nodeOptions.map((n) => (
-              <option key={n.id} value={n.id}>{n.name}</option>
-            ))}
-          </select>
+          <NodeSelect
+            nodes={nodeOptions}
+            value={selectedNode}
+            onChange={handleNodeChange}
+            emptyLabel="No Docker nodes available"
+            sort={false}
+            style={inputStyle}
+            className=""
+          />
         </div>
 
         <div style={{ minWidth: '160px', flex: '1' }}>
@@ -950,12 +954,15 @@ function ProxmoxTriggerFields({ nodeOptions }: ProxmoxTriggerProps) {
       <div className="flex flex-wrap gap-3 items-end">
         <div style={{ minWidth: '160px', flex: '1' }}>
           <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Node</label>
-          <select value={selectedNode} onChange={(e) => handleNodeChange(e.target.value)} style={inputStyle}>
-            {nodeOptions.length === 0 && <option value="">No Proxmox nodes available</option>}
-            {nodeOptions.map((n) => (
-              <option key={n.id} value={n.id}>{n.name}</option>
-            ))}
-          </select>
+          <NodeSelect
+            nodes={nodeOptions}
+            value={selectedNode}
+            onChange={handleNodeChange}
+            emptyLabel="No Proxmox nodes available"
+            sort={false}
+            style={inputStyle}
+            className=""
+          />
         </div>
 
         <div style={{ minWidth: '160px', flex: '1' }}>
