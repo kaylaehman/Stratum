@@ -32,6 +32,7 @@ import { usePlacementRecommend } from '../lib/api/placement'
 import type { PlacementRecommendation } from '../lib/api/placement'
 import { useTemplates, useRenderTemplate } from '../lib/api/templates'
 import { resolveLanguage } from '../lib/codemirror'
+import { resourceLink } from '../lib/resourceLink'
 import { useCan } from '../lib/roles'
 import type { Container, TreeNode, SecretGroup, StackEnvVar, Template } from '../types/api'
 
@@ -1687,22 +1688,26 @@ function StackCard({ stack, isAdmin, secretGroups, defaultOpen = false }: StackC
           flexShrink: 0,
         }}
       >
-        {/* Header row */}
+        {/* Header row — the whole row toggles expand/collapse (not just the chevron) */}
         <div
           className="flex items-center gap-2.5 w-full px-3 py-2"
-          style={{ borderBottom: open ? '1px solid var(--border-subtle)' : 'none' }}
+          style={{ borderBottom: open ? '1px solid var(--border-subtle)' : 'none', cursor: 'pointer' }}
+          role="button"
+          tabIndex={0}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setOpen((o) => !o)
+            }
+          }}
         >
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-          >
-            {open ? (
-              <ChevronDown size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-            ) : (
-              <ChevronRight size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-            )}
-          </button>
+          {open ? (
+            <ChevronDown size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          ) : (
+            <ChevronRight size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          )}
 
           <span
             className="font-mono text-xs flex-1 truncate"
@@ -1747,7 +1752,7 @@ function StackCard({ stack, isAdmin, secretGroups, defaultOpen = false }: StackC
             <button
               type="button"
               title="Edit / redeploy stack"
-              onClick={() => setEditOpen(true)}
+              onClick={(e) => { e.stopPropagation(); setEditOpen(true) }}
               className="flex items-center justify-center shrink-0"
               style={{
                 background: 'transparent',
@@ -1773,12 +1778,23 @@ function StackCard({ stack, isAdmin, secretGroups, defaultOpen = false }: StackC
                 style={{ borderBottom: '1px solid var(--border-subtle)' }}
               >
                 <StatusDot status={c.status} />
-                <span
-                  className="font-mono text-xs flex-1 truncate"
-                  style={{ color: 'var(--text-primary)' }}
+                <button
+                  type="button"
+                  title="Open in Resources"
+                  onClick={() => navigate(resourceLink(nodeId, c.id))}
+                  className="font-mono text-xs flex-1 truncate text-left"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    color: 'var(--accent)',
+                    textDecoration: 'underline',
+                    textDecorationColor: 'var(--accent-dim)',
+                  }}
                 >
                   {c.name}
-                </span>
+                </button>
                 <span
                   className="text-xs truncate"
                   style={{ color: 'var(--text-muted)', maxWidth: '180px' }}
@@ -1788,7 +1804,7 @@ function StackCard({ stack, isAdmin, secretGroups, defaultOpen = false }: StackC
                 <button
                   type="button"
                   title="Open in Resources"
-                  onClick={() => navigate('/resources')}
+                  onClick={() => navigate(resourceLink(nodeId, c.id))}
                   className="flex items-center justify-center shrink-0"
                   style={{
                     background: 'transparent',
