@@ -68,6 +68,36 @@ func TestLoadWrongLengthEncryptionKey(t *testing.T) {
 	}
 }
 
+// TestConfigErrorsNeverEchoSecrets enforces SECURITY.md: ENCRYPTION_KEY /
+// JWT_SECRET values must never appear in error messages (logs surface these).
+// Each case feeds a distinctive sentinel secret and asserts the validation error
+// does not contain it — only a remediation hint.
+func TestConfigErrorsNeverEchoSecrets(t *testing.T) {
+	cases := []struct {
+		name, envKey, value string
+	}{
+		{"short jwt secret", "JWT_SECRET", "SENTINEL-jwt-secret-value-xyz"},
+		{"bad encryption key", "ENCRYPTION_KEY", "SENTINEL-encryption-key-zzz"},
+		{"wrong-length encryption key", "ENCRYPTION_KEY", "deadbeefSENTINEL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			baseEnv(t)
+			t.Setenv(tc.envKey, tc.value)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("expected a validation error for %s", tc.name)
+			}
+			if strings.Contains(err.Error(), tc.value) {
+				t.Errorf("error message leaks the %s value: %q", tc.envKey, err.Error())
+			}
+			if strings.Contains(err.Error(), "SENTINEL") {
+				t.Errorf("error message leaks a secret fragment: %q", err.Error())
+			}
+		})
+	}
+}
+
 func TestLoadInvalidPort(t *testing.T) {
 	baseEnv(t)
 	t.Setenv("PORT", "70000")
