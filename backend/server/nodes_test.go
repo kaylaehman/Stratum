@@ -16,25 +16,24 @@ import (
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/api"
 	"github.com/kaylaehman/stratum/backend/auth"
+	"github.com/kaylaehman/stratum/backend/backup"
+	"github.com/kaylaehman/stratum/backend/certs"
+	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/crypto"
+	"github.com/kaylaehman/stratum/backend/cve"
 	appdb "github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/kaylaehman/stratum/backend/depgraph"
+	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/kaylaehman/stratum/backend/features"
+	"github.com/kaylaehman/stratum/backend/filewatch"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
 	"github.com/kaylaehman/stratum/backend/logtail"
 	"github.com/kaylaehman/stratum/backend/mountindex"
 	"github.com/kaylaehman/stratum/backend/nodeconn"
 	"github.com/kaylaehman/stratum/backend/nodes"
-	"github.com/kaylaehman/stratum/backend/depgraph"
-	dnspkg "github.com/kaylaehman/stratum/backend/dns"
-	"github.com/kaylaehman/stratum/backend/features"
-	"github.com/kaylaehman/stratum/backend/filewatch"
-	"github.com/kaylaehman/stratum/backend/sso"
-	"github.com/kaylaehman/stratum/backend/backup"
-	"github.com/kaylaehman/stratum/backend/certs"
-	"github.com/kaylaehman/stratum/backend/chatbot"
-	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/permissions"
 	"github.com/kaylaehman/stratum/backend/proxy"
 	"github.com/kaylaehman/stratum/backend/recreate"
@@ -43,6 +42,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
 	"github.com/kaylaehman/stratum/backend/skills"
+	"github.com/kaylaehman/stratum/backend/sso"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
@@ -87,6 +87,12 @@ func buildTestServer(t *testing.T) (*httptest.Server, string, appdb.Store) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	store := sqlite.New(sqldb)
+
+	// Default the step-up 2FA gate OFF in the shared harness: the destructive-
+	// route and RBAC tests exercise route logic + role gates, not the orthogonal
+	// step-up gate (which has dedicated fail-closed coverage in
+	// stepup_enforcement_test.go). Tests needing it re-enable it via the store.
+	_ = store.SetFeatureFlag(context.Background(), features.FlagActionStepUp, false)
 
 	key := make([]byte, crypto.KeySize)
 	for i := range key {
@@ -241,7 +247,9 @@ func TestNodeCreateRequiresHostKeyAndHidesSecret(t *testing.T) {
 		"name": "ssh-host", "host": "127.0.0.1", "ssh_port": 22,
 		"credentials": map[string]string{"method": "ssh_password", "ssh_user": "root", "ssh_password": "LEAKME-PASSWORD"},
 	}))
-	if err != nil { t.Fatalf("request: %v", err) }
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -259,7 +267,9 @@ func TestProbePreviewInsecureDockerRequiresAck(t *testing.T) {
 		"host": "10.0.0.5", "docker_endpoint": "tcp://10.0.0.5:2375",
 		"credentials": map[string]string{},
 	}))
-	if err != nil { t.Fatalf("request: %v", err) }
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (insecure docker needs ack)", resp.StatusCode)

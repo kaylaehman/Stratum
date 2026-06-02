@@ -11,6 +11,11 @@ import (
 	"github.com/kaylaehman/stratum/backend/db"
 )
 
+// FlagActionStepUp gates step-up 2FA enforcement on destructive actions. When
+// disabled, the step-up gate is a no-op. Exported so the API layer checks it via
+// constant rather than a string literal.
+const FlagActionStepUp = "feature.action_2fa"
+
 // Flag is one catalog entry.
 type Flag struct {
 	Key         string `json:"key"`
@@ -32,7 +37,7 @@ var catalog = []Flag{
 	{Key: "feature.cert_management", Label: "Certificate Monitoring", Default: true, Description: "Scan and alert on TLS certificate expiry."},
 	{Key: "feature.health_check_editor", Label: "Health Check Editor", Default: true, Description: "Edit container healthchecks."},
 	{Key: "feature.wake_on_lan", Label: "Wake-on-LAN", Default: true, Description: "Send WOL magic packets to offline nodes."},
-	{Key: "feature.action_2fa", Label: "Step-up 2FA", Default: true, Description: "Require a TOTP confirmation before destructive actions."},
+	{Key: FlagActionStepUp, Label: "Step-up 2FA", Default: true, Description: "Require a TOTP confirmation before destructive actions."},
 	{Key: "feature.ai_agent", Label: "AI Assistant", Default: true, Description: "In-context AI help and agent memory."},
 	{Key: "feature.sso_passthrough", Label: "SSO Passthrough", Default: false, Description: "Add auth in front of containers (not yet implemented)."},
 	{Key: "feature.chat_integration", Label: "Chat Integration", Default: false, Description: "Inbound chat commands (not yet implemented)."},

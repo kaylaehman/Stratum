@@ -107,11 +107,12 @@ export async function apiFetch<T>(
     }
   }
 
-  // Step-up 2FA interceptor: HTTP 428 with error "2fa_required"
+  // Step-up 2FA interceptor: HTTP 428.
   if (res.status === 428) {
     let body428: unknown
     try { body428 = await res.json() } catch { body428 = {} }
-    if ((body428 as { error?: string }).error === '2fa_required') {
+    const code428 = (body428 as { error?: string }).error
+    if (code428 === '2fa_required') {
       // Show modal (coalesces concurrent challenges into one promise)
       await useStepUpStore.getState().prompt()
       // Retry the original request once after successful challenge
@@ -121,6 +122,13 @@ export async function apiFetch<T>(
       let retryBody: unknown
       try { retryBody = await res.json() } catch { retryBody = { error: res.statusText } }
       throw new ApiError(res.status, retryBody)
+    }
+    if (code428 === 'totp_enrollment_required') {
+      // Fail-closed gate: the user must enrol TOTP before this destructive
+      // action is allowed. Prompt enrolment (always rejects), then surface the
+      // original error — the action does not proceed.
+      try { await useStepUpStore.getState().promptEnroll() } catch { /* user dismissed */ }
+      throw new ApiError(428, body428)
     }
     throw new ApiError(428, body428)
   }

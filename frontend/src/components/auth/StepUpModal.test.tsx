@@ -13,6 +13,7 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { vi, beforeEach, afterEach } from 'vitest'
 
 import { StepUpModal } from './StepUpModal'
@@ -30,7 +31,8 @@ async function openModal() {
 }
 
 function renderModal() {
-  return render(<StepUpModal />)
+  // StepUpModal uses useNavigate (enrolment variant), so it needs a Router.
+  return render(<StepUpModal />, { wrapper: MemoryRouter })
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -67,6 +69,31 @@ describe('StepUpModal — visibility', () => {
     await openModal()
     renderModal()
     expect(screen.getByText(/confirm identity/i)).toBeInTheDocument()
+  })
+})
+
+describe('StepUpModal — enrolment-required variant', () => {
+  /** Open the modal in enrol mode (fail-closed gate, no TOTP enrolled). */
+  async function openEnroll() {
+    useStepUpStore.getState().promptEnroll().catch(() => undefined)
+    await Promise.resolve()
+  }
+
+  it('shows the enrolment prompt with an "Enable 2FA" action, not a code field', async () => {
+    await openEnroll()
+    renderModal()
+    expect(screen.getByText(/two-factor required/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /enable 2fa/i })).toBeInTheDocument()
+    // No TOTP code entry in this variant.
+    expect(screen.queryByPlaceholderText('000000')).toBeNull()
+  })
+
+  it('closes (rejects the pending action) when Cancel is clicked', async () => {
+    await openEnroll()
+    renderModal()
+    // The header X also has aria-label "Cancel"; target the text button.
+    await userEvent.click(screen.getByText('Cancel'))
+    expect(useStepUpStore.getState().open).toBe(false)
   })
 })
 
