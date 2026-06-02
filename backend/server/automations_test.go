@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/kaylaehman/stratum/backend/automation"
 )
 
 func TestListAutomations_AdminOnly(t *testing.T) {
@@ -23,7 +25,7 @@ func TestListAutomations_AdminOnly(t *testing.T) {
 	}
 }
 
-func TestListAutomations_ReturnsAllEight(t *testing.T) {
+func TestListAutomations_ReturnsWholeCatalog(t *testing.T) {
 	srv, adminTok := newNodeTestServer(t)
 	c := &http.Client{}
 
@@ -45,8 +47,11 @@ func TestListAutomations_ReturnsAllEight(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(body.Automations) != 8 {
-		t.Errorf("got %d automations, want 8", len(body.Automations))
+	// Single-source the count off the catalog so it can never drift (was a stale
+	// literal "8"; the catalog has grown since). automation.CatalogHandlerParity
+	// guarantees the catalog and handlers agree.
+	if want := len(automation.Catalog()); len(body.Automations) != want {
+		t.Errorf("got %d automations, want %d (len(automation.Catalog()))", len(body.Automations), want)
 	}
 }
 
