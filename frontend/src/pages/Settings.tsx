@@ -384,6 +384,7 @@ function TwoFactorSection() {
 
   return (
     <section
+      id="twofa"
       style={{
         backgroundColor: 'var(--bg-surface)',
         border: '1px solid var(--border-default)',

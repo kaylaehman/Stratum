@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { ShieldCheck, Loader, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { ShieldCheck, ShieldAlert, Loader, X } from 'lucide-react'
 import { useStepUpStore } from '../../store/stepup'
 import { submitStepUpCode, ApiError } from '../../lib/api'
 
 export function StepUpModal() {
-  const { open, resolve, reject } = useStepUpStore()
+  const { open, mode, resolve, reject } = useStepUpStore()
+  const navigate = useNavigate()
 
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -58,6 +60,11 @@ export function StepUpModal() {
     reject()
   }
 
+  function handleGoEnroll() {
+    reject() // the destructive action does not proceed; user enrols first
+    navigate('/settings#twofa')
+  }
+
   return (
     <>
       {/* Backdrop */}
@@ -108,7 +115,11 @@ export function StepUpModal() {
               gap: '8px',
             }}
           >
-            <ShieldCheck size={14} style={{ color: 'var(--accent)' }} />
+            {mode === 'enroll' ? (
+              <ShieldAlert size={14} style={{ color: 'var(--status-warn)' }} />
+            ) : (
+              <ShieldCheck size={14} style={{ color: 'var(--accent)' }} />
+            )}
             <span
               id="stepup-title"
               style={{
@@ -119,7 +130,7 @@ export function StepUpModal() {
                 textTransform: 'uppercase',
               }}
             >
-              Confirm identity
+              {mode === 'enroll' ? 'Two-factor required' : 'Confirm identity'}
             </span>
           </div>
           <button
@@ -140,7 +151,59 @@ export function StepUpModal() {
           </button>
         </div>
 
-        {/* Body */}
+        {/* Enrollment-required variant: the destructive action is blocked until
+            the user sets up TOTP. No code entry here — direct them to Settings. */}
+        {mode === 'enroll' ? (
+          <div style={{ padding: '16px 14px' }}>
+            <p
+              style={{
+                fontSize: '12px',
+                fontFamily: 'var(--font-mono, monospace)',
+                color: 'var(--text-secondary)',
+                marginBottom: '14px',
+                lineHeight: '1.5',
+              }}
+            >
+              This action requires two-factor authentication. Enable 2FA on your
+              account before performing destructive actions.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={handleCancel}
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleGoEnroll}
+                style={{
+                  background: 'var(--accent)',
+                  border: 'none',
+                  borderRadius: '3px',
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                Enable 2FA
+              </button>
+            </div>
+          </div>
+        ) : (
+        /* Body */
         <form onSubmit={(e) => { void handleSubmit(e) }} style={{ padding: '16px 14px' }}>
           <p
             style={{
@@ -250,6 +313,7 @@ export function StepUpModal() {
             </button>
           </div>
         </form>
+        )}
       </div>
     </>
   )
