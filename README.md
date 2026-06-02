@@ -28,6 +28,33 @@ Navigate host → VM → container → filesystem → file permissions in a sing
 - **UID/GID conflict visualizer.** Side-by-side host vs container user tables with mismatch highlighting — the #1 cause of silent Docker bind-mount failures.
 - **Agent is optional.** SSH-only works. The agent unlocks richer ops (real-time inotify file watch over mTLS gRPC, init-system detection) and the platform degrades gracefully without it.
 
+## What it replaces
+
+One agentless install on one host covers what is usually four or five separate
+tools. The point isn't to be best-in-class at each — it's to navigate across them
+in one pane, anchored to the resource tree.
+
+| You're running… | for | Stratum's equivalent |
+|---|---|---|
+| [Dozzle](https://dozzle.dev) | multi-container live logs | Unified multi-container log viewer (cross-node) |
+| [Dockge](https://github.com/louislam/dockge) / Portainer | compose stack edit & redeploy | Stacks: edit live Compose + Secrets-backed env injection |
+| [Uptime Kuma](https://github.com/louislam/uptime-kuma) | HTTP/TCP/ICMP uptime checks | Uptime monitoring with history + uptime % |
+| [Beszel](https://github.com/henrygd/beszel) / Netdata | per-container CPU/RAM/IO history | Resource timeline |
+| Watchtower | image-update detection/automation | Update assistant + `auto_update_containers` automation |
+| (bespoke scripts) | "why can't this container read this file?" | "Why is this broken?" diagnostic + UID/GID visualizer |
+
+### What it does NOT do (by design)
+
+- **Not a log-storage platform.** Logs are tailed live, not retained — use Loki/ELK
+  if you need long-term log search.
+- **No Kubernetes**, no cloud-provider (AWS/GCP/Azure) integration, no image
+  building, no DNS *management* (DNS records are read-only), no Windows hosts.
+- **Not an Ansible Tower/AWX replacement** — it runs saved scripts/playbooks, it
+  doesn't manage inventory at that scale.
+- **It is not a hardened multi-tenant SaaS.** It is a single-operator (or small,
+  trusted-team) self-hosted tool that holds the keys to your nodes — see
+  [SECURITY.md](SECURITY.md), especially *Blast radius*, before exposing it.
+
 ## Quickstart
 
 One command against the published images — no build step.
