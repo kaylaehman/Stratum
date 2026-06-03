@@ -246,8 +246,13 @@ func TestClassifyRisk(t *testing.T) {
 		},
 		{
 			name:     "non-sensitive read is low",
-			commands: []string{"cat /var/log/app.log"},
+			commands: []string{"cat /tmp/app.log"},
 			want:     RiskLow,
+		},
+		{
+			name:     "read under /var/log is sensitive (not auto-approvable)",
+			commands: []string{"cat /var/log/app.log"},
+			want:     RiskHigh,
 		},
 		{
 			name:     "allowlisted service status is low",

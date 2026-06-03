@@ -5,9 +5,6 @@ import type {
   CVEDetailResponse,
   CVEStatusResponse,
   CVEBulkScanResponse,
-  CVESchedulesResponse,
-  CveSchedule,
-  CreateCveScheduleRequest,
 } from '../../types/api'
 
 export function cveScansKey() {
@@ -74,54 +71,3 @@ export function useBulkScan() {
   })
 }
 
-export function cveSchedulesKey() {
-  return ['cve', 'schedules'] as const
-}
-
-export function useCVESchedules(enabled = true) {
-  return useQuery({
-    queryKey: cveSchedulesKey(),
-    queryFn: () => apiGet<CVESchedulesResponse>('/api/security/cve/schedules'),
-    staleTime: 30_000,
-    enabled,
-  })
-}
-
-export function useCreateCveSchedule() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (req: CreateCveScheduleRequest) =>
-      apiFetch<CveSchedule>('/api/security/cve/schedules', {
-        method: 'POST',
-        body: JSON.stringify(req),
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: cveSchedulesKey() })
-    },
-  })
-}
-
-export function useToggleCveSchedule() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      apiFetch<void>(`/api/security/cve/schedules/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ enabled }),
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: cveSchedulesKey() })
-    },
-  })
-}
-
-export function useDeleteCveSchedule() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<void>(`/api/security/cve/schedules/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: cveSchedulesKey() })
-    },
-  })
-}

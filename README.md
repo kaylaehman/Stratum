@@ -107,7 +107,7 @@ Then register a Linux host from the UI — Stratum probes Proxmox API → Docker
 
 **Beta.** The MVP and most of Phase 2 are shipped and running in production deployments. The platform is usable end-to-end; newer subsystems (listed under *Beta* below) are functional but less battle-tested, and a few capabilities are still *Planned*.
 
-Feature maturity is grounded in the feature-flag catalog (`backend/features/features.go`): flags shipped on-by-default are Stable, flags that are off-by-default are Planned. The toggle list is visible (and editable by admins) under **Settings → Features**.
+Feature maturity is grounded in the feature-flag catalog (`backend/features/features.go`): flags shipped on-by-default are Stable, flags that are off-by-default are Planned. The one deliberate exception is the **Automations engine** — its flag (`feature.automations`) is on by default, but the subsystem is still hardening, so it is listed under *Beta* until Wave 3 graduates it. The toggle list is visible (and editable by admins) under **Settings → Features**.
 
 ### Stable
 
@@ -123,23 +123,25 @@ Core navigation and the diagnostics that are the reason this exists:
 - Volume health · template library · secrets manager (AES-256) · scheduled tasks (cron + systemd timers) · backup orchestration
 - Smart search · bookmarks · activity log · notification hooks (Slack / Discord / Telegram) · script & Ansible runner · multi-user RBAC
 - Reverse-proxy detection (incl. **cloudflared**: host-service, containerized, and dashboard-managed tunnels) · DNS record view · certificate monitoring · health-check editor · Wake-on-LAN · step-up 2FA (TOTP) · AI assistant
+- Config-file version history + drift detection (`feature.config_versions`) · alert routing & suppression policies (`feature.alert_policies`)
 
 ### Beta
 
 Shipped and working, newer / hardening:
 
 - **Agent (gRPC over mTLS)** — real-time inotify file-watch streaming + init-system detection
-- **Agentic remediation** — propose → approve → execute host fixes, risk-classified with a positive low-risk allowlist; anything not allowlisted requires TOTP step-up; destructive needs admin
-- **Security posture score** — A–F per node composed from CVE / privileged / exposed-port / stale-key / outdated-image signals
-- **Incident timeline** — "what changed?" across the activity log, metric spikes, restarts, and file events
-- **Uptime monitoring** — HTTP/TCP/ICMP checks with history and uptime %
-- **Stacks edit & redeploy** — edit live Compose stacks with Secrets-backed env injection (never written to disk)
+- **Agentic remediation** — propose → approve → execute host fixes, risk-classified with a positive low-risk allowlist; anything not allowlisted requires TOTP step-up; destructive needs admin (`feature.remediation`)
+- **Security posture score** — A–F per node composed from CVE / privileged / exposed-port / stale-key / outdated-image signals (`feature.posture_score`)
+- **Incident timeline** — "what changed?" across the activity log, metric spikes, restarts, and file events (`feature.incident_timeline`)
+- **Uptime monitoring** — HTTP/TCP/ICMP checks with history and uptime % (`feature.uptime_monitoring`)
+- **Stacks edit & redeploy** — edit live Compose stacks with Secrets-backed env injection (never written to disk) (`feature.stacks_edit`)
 - **Automations engine** — 15 user-configurable autonomous automations (self-heal, update, security, maintenance) built on the remediation engine and existing services, each independently toggled with its own schedule; destructive ones default off and dry-run, every run audited (`feature.automations`, `backend/automation`, `/automations`)
 
 ### Planned
 
 - **SSO passthrough** — auth in front of containers (`feature.sso_passthrough`, off by default)
 - **Inbound chat command integration** (`feature.chat_integration`, off by default)
+- **Config git backend** — push config snapshots to a remote git repository (`feature.config_git`, off by default)
 - Longer term: Kubernetes, cloud-provider integrations
 
 ## Architecture

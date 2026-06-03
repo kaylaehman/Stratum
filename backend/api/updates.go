@@ -108,6 +108,49 @@ func summarizeUpdates(rows []db.ImageUpdateRow) updatesSummary {
 	return s
 }
 
+// nodeOverlap flags a host that also runs an external container-management tool
+// (Watchtower / Portainer) whose actions can conflict with Stratum updates.
+type nodeOverlap struct {
+	NodeID   string                   `json:"node_id"`
+	NodeName string                   `json:"node_name"`
+	Managers []updates.ManagementTool `json:"managers"`
+	// AutoUpdates is true when one of the tools updates containers on its own
+	// (Watchtower) — i.e. an active conflict, not just a second management UI.
+	AutoUpdates bool `json:"auto_updates"`
+}
+
+// detectOverlaps scans every docker node's container images for external
+// management tools, so the UI can warn before update actions that could
+// conflict. Best-effort: a node whose containers can't be listed is skipped.
+func (h *Handlers) detectOverlaps(r *http.Request) []nodeOverlap {
+	nodes, err := h.Store.ListNodes(r.Context())
+	if err != nil {
+		return []nodeOverlap{}
+	}
+	out := []nodeOverlap{}
+	for _, n := range nodes {
+		ctrs, err := h.Store.ListContainersByNode(r.Context(), n.ID)
+		if err != nil {
+			continue
+		}
+		images := make([]string, 0, len(ctrs))
+		for _, c := range ctrs {
+			images = append(images, c.Image)
+		}
+		managers := updates.DetectManagers(images)
+		if len(managers) == 0 {
+			continue
+		}
+		out = append(out, nodeOverlap{
+			NodeID:      n.ID,
+			NodeName:    n.Name,
+			Managers:    managers,
+			AutoUpdates: updates.HasAutoUpdater(managers),
+		})
+	}
+	return out
+}
+
 // Updates lists image update-availability across docker nodes (read-only).
 // Seeds the cache on demand (TTL-bounded).
 func (h *Handlers) Updates(w http.ResponseWriter, r *http.Request) {
@@ -122,8 +165,9 @@ func (h *Handlers) Updates(w http.ResponseWriter, r *http.Request) {
 		out[i] = toUpdateView(row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"updates": out,
-		"summary": summarizeUpdates(rows),
+		"updates":  out,
+		"summary":  summarizeUpdates(rows),
+		"overlaps": h.detectOverlaps(r),
 	})
 }
 

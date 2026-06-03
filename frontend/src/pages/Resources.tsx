@@ -5,6 +5,7 @@ import { WakeOnLan } from '../components/nodes/WakeOnLan'
 import { SSHKeys } from '../components/nodes/SSHKeys'
 import { Scheduler } from '../components/nodes/Scheduler'
 import { ReverseProxyPanel } from '../components/proxy/ReverseProxyPanel'
+import { ContainerProxySection } from '../components/proxy/ContainerProxySection'
 import { DnsPanel } from '../components/dns/DnsPanel'
 import { FileWatchPanel } from '../components/security/FileWatchPanel'
 import { AppShell } from '../components/layout/AppShell'
@@ -576,6 +577,13 @@ function ContainerDetailPane({ nodeId, containerId }: { nodeId: string; containe
       {/* SSO Passthrough config (admin only) */}
       {isAdmin && c && (
         <SSOPanel nodeId={nodeId} containerName={c.name} />
+      )}
+
+      {/* Reverse-proxy: which public hostname serves this container + add (admin) */}
+      {isAdmin && (
+        <div style={{ maxWidth: '640px' }}>
+          <ContainerProxySection containerId={containerId} />
+        </div>
       )}
 
       {/* Health Check */}

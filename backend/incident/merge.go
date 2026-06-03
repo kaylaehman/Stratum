@@ -4,6 +4,29 @@
 // into a single time-ordered stream. No new data is collected. Sources that
 // are unavailable (capability gate or empty table) are silently skipped so a
 // missing capability never fails the whole timeline.
+//
+// # Event sources and capability gates
+//
+//   Source           Capability gate  Severity rules
+//   ──────────────────────────────────────────────────────────────────────
+//   activity         none             result="error" → warning; else info
+//   container        docker=true      status="dead" → critical; "exited"|"restarting" → warning
+//   metric spike     docker=true      CPU >80% or RAM >90% for 15 min → warning
+//   file event       agent=true       any inotify event in watched paths → warning
+//
+// # Default time window
+//
+// When Query.From is zero, it defaults to 24 hours before Query.To (which
+// itself defaults to time.Now()). Callers may narrow the window with explicit
+// From/To values.
+//
+// # Node filtering
+//
+// When Query.NodeID is set, only events from that node are returned for
+// container/metric/file sources. Activity-log entries are always included
+// (they are not tagged by node at the store layer).
+//
+// See merge_test.go for table-driven tests covering all sources and edge cases.
 package incident
 
 import (

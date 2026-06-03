@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -263,14 +264,298 @@ func TestListRulesRejectsPathInjection(t *testing.T) {
 
 func TestCloudflareAPIMutationsUnsupported(t *testing.T) {
 	cf := &CloudflareAPI{}
-	if _, err := cf.CreateRule(context.Background(), Conn{}, Rule{}); err != ErrUnsupported {
-		t.Errorf("CreateRule = %v, want ErrUnsupported", err)
-	}
+	// Create is now supported (see TestCreateRule*); Update/Delete remain
+	// intentionally unsupported to bound the blast radius on live infra.
 	if err := cf.UpdateRule(context.Background(), Conn{}, "", Rule{}); err != ErrUnsupported {
 		t.Errorf("UpdateRule = %v, want ErrUnsupported", err)
 	}
 	if err := cf.DeleteRule(context.Background(), Conn{}, ""); err != ErrUnsupported {
 		t.Errorf("DeleteRule = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestCloudflareAPICapabilitiesIncludeCreate(t *testing.T) {
+	caps := (&CloudflareAPI{}).Capabilities()
+	if !caps.List || !caps.Create {
+		t.Errorf("Capabilities = %+v, want List+Create", caps)
+	}
+	if caps.Update || caps.Delete {
+		t.Errorf("Capabilities = %+v, want Update/Delete false", caps)
+	}
+}
+
+func TestInsertIngress(t *testing.T) {
+	catchAll := cfIngress{Service: "http_status:404"}
+	t.Run("inserts before catch-all", func(t *testing.T) {
+		existing := []cfIngress{{Hostname: "a.example.com", Service: "http://a:1"}, catchAll}
+		got, err := insertIngress(existing, cfIngress{Hostname: "b.example.com", Service: "http://b:2"})
+		if err != nil {
+			t.Fatalf("insertIngress: %v", err)
+		}
+		if len(got) != 3 || got[0].Hostname != "a.example.com" || got[1].Hostname != "b.example.com" || got[2].Hostname != "" {
+			t.Fatalf("order wrong: %+v", got)
+		}
+	})
+	t.Run("rejects duplicate host+path", func(t *testing.T) {
+		existing := []cfIngress{{Hostname: "a.example.com", Service: "http://a:1"}, catchAll}
+		if _, err := insertIngress(existing, cfIngress{Hostname: "a.example.com", Service: "http://x:9"}); err == nil {
+			t.Fatal("want duplicate error, got nil")
+		}
+	})
+	t.Run("appends catch-all when none present", func(t *testing.T) {
+		got, err := insertIngress(nil, cfIngress{Hostname: "b.example.com", Service: "http://b:2"})
+		if err != nil {
+			t.Fatalf("insertIngress: %v", err)
+		}
+		if len(got) != 2 || got[0].Hostname != "b.example.com" || got[1].Hostname != "" || got[1].Service != "http_status:404" {
+			t.Fatalf("want [route, catch-all], got %+v", got)
+		}
+	})
+	t.Run("same host different path is allowed", func(t *testing.T) {
+		existing := []cfIngress{{Hostname: "a.example.com", Path: "/v1", Service: "http://a:1"}, catchAll}
+		got, err := insertIngress(existing, cfIngress{Hostname: "a.example.com", Path: "/v2", Service: "http://a:2"})
+		if err != nil {
+			t.Fatalf("insertIngress: %v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("want 3 entries, got %+v", got)
+		}
+	})
+}
+
+func TestZoneCandidates(t *testing.T) {
+	got := zoneCandidates("jellyfin.kaylas.systems")
+	want := []string{"jellyfin.kaylas.systems", "kaylas.systems"}
+	if len(got) != len(want) {
+		t.Fatalf("zoneCandidates = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("zoneCandidates = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestValidateProxyHostname(t *testing.T) {
+	ok := []string{"jellyfin.kaylas.systems", "a.b.c.example.com"}
+	for _, h := range ok {
+		if err := validateProxyHostname(h); err != nil {
+			t.Errorf("validateProxyHostname(%q) = %v, want nil", h, err)
+		}
+	}
+	bad := []string{"", "nodot", "http://x.com", "x.com:8080", "*.example.com", "x..com"}
+	for _, h := range bad {
+		if err := validateProxyHostname(h); err == nil {
+			t.Errorf("validateProxyHostname(%q) = nil, want error", h)
+		}
+	}
+}
+
+func TestValidateProxyService(t *testing.T) {
+	if err := validateProxyService("http://192.168.20.9:8096"); err != nil {
+		t.Errorf("valid service rejected: %v", err)
+	}
+	for _, s := range []string{"", "ssh://x:22", "ftp://x", "http_status:404", "://nohost"} {
+		if err := validateProxyService(s); err == nil {
+			t.Errorf("validateProxyService(%q) = nil, want error", s)
+		}
+	}
+}
+
+// cfWriteServer is a fake Cloudflare API that records the PUT config + DNS POST
+// and serves discovery/config/zone/record reads, so CreateRule can be exercised
+// end-to-end without a live API.
+type cfWriteServer struct {
+	srv        *httptest.Server
+	putBody    map[string]any // captured PUT .../configurations body
+	dnsPosted  *cfDNSRecord   // captured POST .../dns_records body
+	dnsRecords []cfDNSRecord  // pre-seeded existing records (by exact name match)
+	zones      []cfZone       // zones the token can "see"
+}
+
+func newCFWriteServer(t *testing.T, configBody string) *cfWriteServer {
+	t.Helper()
+	ws := &cfWriteServer{zones: []cfZone{{ID: "zone-1", Name: "example.com"}}}
+	ws.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.URL.Path == "/accounts":
+			_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":[{"id":"acc-123","name":"Homelab"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/configurations") && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(configBody))
+		case strings.HasSuffix(r.URL.Path, "/configurations") && r.Method == http.MethodPut:
+			_ = json.NewDecoder(r.Body).Decode(&ws.putBody)
+			_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{}}`))
+		case r.URL.Path == "/zones":
+			name := r.URL.Query().Get("name")
+			var match []cfZone
+			for _, z := range ws.zones {
+				if z.Name == name {
+					match = append(match, z)
+				}
+			}
+			b, _ := json.Marshal(map[string]any{"success": true, "errors": []any{}, "result": match})
+			_, _ = w.Write(b)
+		case strings.HasSuffix(r.URL.Path, "/dns_records") && r.Method == http.MethodGet:
+			name := r.URL.Query().Get("name")
+			var match []cfDNSRecord
+			for _, rec := range ws.dnsRecords {
+				if rec.Name == name {
+					match = append(match, rec)
+				}
+			}
+			b, _ := json.Marshal(map[string]any{"success": true, "errors": []any{}, "result": match})
+			_, _ = w.Write(b)
+		case strings.HasSuffix(r.URL.Path, "/dns_records") && r.Method == http.MethodPost:
+			var rec cfDNSRecord
+			_ = json.NewDecoder(r.Body).Decode(&rec)
+			ws.dnsPosted = &rec
+			_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"id":"rec-1"}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":1003,"message":"not found"}]}`))
+		}
+	}))
+	t.Cleanup(ws.srv.Close)
+	return ws
+}
+
+func (ws *cfWriteServer) conn() Conn {
+	return Conn{
+		Endpoint: ws.srv.URL,
+		Token:    "test-token",
+		Config:   map[string]string{"account_id": "acc-123", "tunnel_id": "tun-1"},
+	}
+}
+
+func TestCreateRuleInsertsIngressAndDNS(t *testing.T) {
+	ws := newCFWriteServer(t, string(dashboardConfigFixture(t)))
+	cf := &CloudflareAPI{HTTP: ws.srv.Client()}
+	out, err := cf.CreateRule(context.Background(), ws.conn(), Rule{
+		SourceHost: "media.example.com",
+		TargetURL:  "http://192.168.20.9:8096",
+	})
+	if err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+	if out.SourceHost != "media.example.com" || !out.SSLEnabled {
+		t.Errorf("returned rule = %+v", out)
+	}
+	// PUT body must contain the new hostname, before the catch-all.
+	cfg, _ := ws.putBody["config"].(map[string]any)
+	ingress, _ := cfg["ingress"].([]any)
+	if len(ingress) == 0 {
+		t.Fatalf("no ingress in PUT body: %+v", ws.putBody)
+	}
+	last, _ := ingress[len(ingress)-1].(map[string]any)
+	if h, _ := last["hostname"].(string); h != "" {
+		t.Errorf("last ingress entry must be the catch-all, got hostname=%q", h)
+	}
+	found := false
+	for _, e := range ingress {
+		m, _ := e.(map[string]any)
+		if m["hostname"] == "media.example.com" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("new hostname not in PUT ingress: %+v", ingress)
+	}
+	// DNS CNAME must be created, proxied, pointing at the tunnel.
+	if ws.dnsPosted == nil {
+		t.Fatal("no DNS record POSTed")
+	}
+	if ws.dnsPosted.Type != "CNAME" || !ws.dnsPosted.Proxied || !strings.HasSuffix(ws.dnsPosted.Content, ".cfargotunnel.com") {
+		t.Errorf("DNS record = %+v, want proxied CNAME to *.cfargotunnel.com", *ws.dnsPosted)
+	}
+}
+
+func TestCreateRuleSkipsDNSWhenOptedOut(t *testing.T) {
+	ws := newCFWriteServer(t, string(dashboardConfigFixture(t)))
+	cf := &CloudflareAPI{HTTP: ws.srv.Client()}
+	conn := ws.conn()
+	conn.Config["create_dns"] = "false"
+	if _, err := cf.CreateRule(context.Background(), conn, Rule{SourceHost: "media.example.com", TargetURL: "http://10.0.0.1:80"}); err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+	if ws.putBody == nil {
+		t.Fatal("ingress PUT did not happen")
+	}
+	if ws.dnsPosted != nil {
+		t.Errorf("DNS record POSTed despite create_dns=false: %+v", *ws.dnsPosted)
+	}
+}
+
+func TestCreateRuleExistingTunnelDNSIsIdempotent(t *testing.T) {
+	ws := newCFWriteServer(t, string(dashboardConfigFixture(t)))
+	ws.dnsRecords = []cfDNSRecord{{Type: "CNAME", Name: "media.example.com", Content: "tun-1.cfargotunnel.com", Proxied: true}}
+	cf := &CloudflareAPI{HTTP: ws.srv.Client()}
+	if _, err := cf.CreateRule(context.Background(), ws.conn(), Rule{SourceHost: "media.example.com", TargetURL: "http://10.0.0.1:80"}); err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+	if ws.dnsPosted != nil {
+		t.Errorf("created a DNS record when a tunnel CNAME already existed: %+v", *ws.dnsPosted)
+	}
+}
+
+func TestCreateRuleConflictingDNSWarns(t *testing.T) {
+	ws := newCFWriteServer(t, string(dashboardConfigFixture(t)))
+	ws.dnsRecords = []cfDNSRecord{{Type: "A", Name: "media.example.com", Content: "203.0.113.5"}}
+	cf := &CloudflareAPI{HTTP: ws.srv.Client()}
+	_, err := cf.CreateRule(context.Background(), ws.conn(), Rule{SourceHost: "media.example.com", TargetURL: "http://10.0.0.1:80"})
+	if !errors.Is(err, ErrDNSWarning) {
+		t.Fatalf("err = %v, want ErrDNSWarning (ingress succeeded, DNS conflict)", err)
+	}
+	if ws.putBody == nil {
+		t.Error("ingress should still have been written before the DNS warning")
+	}
+}
+
+func TestCreateRuleDifferentTunnelDNSWarns(t *testing.T) {
+	ws := newCFWriteServer(t, string(dashboardConfigFixture(t)))
+	// An existing CNAME points the hostname at a DIFFERENT tunnel.
+	ws.dnsRecords = []cfDNSRecord{{Type: "CNAME", Name: "media.example.com", Content: "other-tunnel.cfargotunnel.com", Proxied: true}}
+	cf := &CloudflareAPI{HTTP: ws.srv.Client()}
+	_, err := cf.CreateRule(context.Background(), ws.conn(), Rule{SourceHost: "media.example.com", TargetURL: "http://10.0.0.1:80"})
+	if !errors.Is(err, ErrDNSWarning) {
+		t.Fatalf("err = %v, want ErrDNSWarning for a different-tunnel CNAME", err)
+	}
+	if !strings.Contains(err.Error(), "different tunnel") {
+		t.Errorf("warning = %q, want it to mention a different tunnel", err.Error())
+	}
+	if ws.dnsPosted != nil {
+		t.Error("must not create/overwrite a record that points at another tunnel")
+	}
+	if ws.putBody == nil {
+		t.Error("the ingress route should still have been written")
+	}
+}
+
+func TestCreateRuleRejectsDuplicateHostname(t *testing.T) {
+	ws := newCFWriteServer(t, string(dashboardConfigFixture(t)))
+	cf := &CloudflareAPI{HTTP: ws.srv.Client()}
+	// app.example.com is already in the fixture ingress.
+	_, err := cf.CreateRule(context.Background(), ws.conn(), Rule{SourceHost: "app.example.com", TargetURL: "http://10.0.0.1:80"})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("err = %v, want duplicate-route error", err)
+	}
+	if ws.putBody != nil {
+		t.Error("config was PUT despite a duplicate hostname")
+	}
+}
+
+func TestCreateRuleRejectsLocallyManaged(t *testing.T) {
+	ws := newCFWriteServer(t, locallyManagedFixture)
+	cf := &CloudflareAPI{HTTP: ws.srv.Client()}
+	_, err := cf.CreateRule(context.Background(), ws.conn(), Rule{SourceHost: "media.example.com", TargetURL: "http://10.0.0.1:80"})
+	if err == nil || !strings.Contains(err.Error(), "locally-managed") {
+		t.Fatalf("err = %v, want locally-managed rejection", err)
+	}
+	if ws.putBody != nil {
+		t.Error("config was PUT for a locally-managed tunnel")
 	}
 }
 

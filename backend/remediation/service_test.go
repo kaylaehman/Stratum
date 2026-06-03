@@ -192,20 +192,6 @@ func (s *stubStore) ReplaceCVEResults(_ context.Context, _ string, _ []db.CVERes
 func (s *stubStore) ListCVEResults(_ context.Context, _ string) ([]db.CVEResultRow, error) {
 	panic("not used")
 }
-func (s *stubStore) CreateCveSchedule(_ context.Context, _ db.CveSchedule) error { panic("not used") }
-func (s *stubStore) ListCveSchedules(_ context.Context) ([]db.CveSchedule, error) {
-	panic("not used")
-}
-func (s *stubStore) GetCveSchedule(_ context.Context, _ string) (db.CveSchedule, error) {
-	panic("not used")
-}
-func (s *stubStore) UpdateCveScheduleEnabled(_ context.Context, _ string, _ bool) error {
-	panic("not used")
-}
-func (s *stubStore) UpdateCveScheduleLastRun(_ context.Context, _ string, _ time.Time) error {
-	panic("not used")
-}
-func (s *stubStore) DeleteCveSchedule(_ context.Context, _ string) error { panic("not used") }
 func (s *stubStore) UpsertUserTOTP(_ context.Context, _ db.UserTOTP) error { panic("not used") }
 func (s *stubStore) GetUserTOTP(_ context.Context, _ string) (db.UserTOTP, error) {
 	panic("not used")

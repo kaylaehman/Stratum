@@ -182,21 +182,6 @@ type PortExposureRow struct {
 	LastSeen       time.Time  `json:"last_seen"`
 }
 
-// CveSchedule is a recurring CVE scan schedule (Feature 20 extension).
-// TargetType is "node" (all containers on the node) or "container" (single
-// container). IntervalSeconds is the minimum time between scans.
-type CveSchedule struct {
-	ID              string     `json:"id"`
-	TargetType      string     `json:"target_type"`
-	TargetID        string     `json:"target_id"`
-	Label           string     `json:"label"`
-	IntervalSeconds int        `json:"interval_seconds"`
-	Enabled         bool       `json:"enabled"`
-	CreatedBy       string     `json:"created_by"`
-	CreatedAt       time.Time  `json:"created_at"`
-	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
-}
-
 // ImageScanRow is a cached CVE scan summary for an image digest (Feature 20).
 type ImageScanRow struct {
 	ImageDigest string
@@ -689,14 +674,6 @@ type Store interface {
 	GetImageScan(ctx context.Context, imageDigest string) (ImageScanRow, error)
 	ReplaceCVEResults(ctx context.Context, imageDigest string, rows []CVEResultRow) error
 	ListCVEResults(ctx context.Context, imageDigest string) ([]CVEResultRow, error)
-
-	// CVE schedules (Feature 20 extension — recurring scans)
-	CreateCveSchedule(ctx context.Context, s CveSchedule) error
-	ListCveSchedules(ctx context.Context) ([]CveSchedule, error)
-	GetCveSchedule(ctx context.Context, id string) (CveSchedule, error)
-	UpdateCveScheduleEnabled(ctx context.Context, id string, enabled bool) error
-	UpdateCveScheduleLastRun(ctx context.Context, id string, t time.Time) error
-	DeleteCveSchedule(ctx context.Context, id string) error
 
 	// TOTP 2FA (Feature 7)
 	UpsertUserTOTP(ctx context.Context, t UserTOTP) error

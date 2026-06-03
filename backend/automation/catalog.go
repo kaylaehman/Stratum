@@ -63,12 +63,12 @@ var catalog = []Entry{
 		DefaultConfig:          map[string]any{"projects": []string{}},
 	},
 	{
-		Key:                    "scheduled_cve_scan",
-		Label:                  "Scheduled CVE scan",
-		Description:            "Run a full CVE scan across all running container images on a schedule.",
-		Category:               CategorySecurity,
+		Key:         "scheduled_cve_scan",
+		Label:       "Scheduled CVE scan",
+		Description: "Run a CVE scan on a schedule. config.targets is a list of {node_id, container_id} objects — empty means scan all running containers.",
+		Category:    CategorySecurity,
 		DefaultIntervalSeconds: 86400,
-		DefaultConfig:          map[string]any{},
+		DefaultConfig: map[string]any{"targets": []any{}},
 	},
 	{
 		Key:   "security_alerts",

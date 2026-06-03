@@ -39,6 +39,14 @@ var catalog = []Flag{
 	{Key: "feature.wake_on_lan", Label: "Wake-on-LAN", Default: true, Description: "Send WOL magic packets to offline nodes."},
 	{Key: FlagActionStepUp, Label: "Step-up 2FA", Default: true, Description: "Require a TOTP confirmation before destructive actions."},
 	{Key: "feature.ai_agent", Label: "AI Assistant", Default: true, Description: "In-context AI help and agent memory."},
+	// Previously-unflagged Beta subsystems (audit-reconciliation §2): each now has
+	// a flag (default on) so admins can toggle them and Wave 3 can graduate them
+	// by flipping defaults. The frontend hides the page/panel when a flag is off.
+	{Key: "feature.remediation", Label: "Agentic Remediation", Default: true, Description: "Propose → approve → execute host fixes (risk-classified, step-up gated)."},
+	{Key: "feature.posture_score", Label: "Security Posture Score", Default: true, Description: "A–F per-node posture grade from CVE / privileged / exposed-port / key signals."},
+	{Key: "feature.incident_timeline", Label: "Incident Timeline", Default: true, Description: "Correlated \"what changed?\" view across activity, spikes, restarts, file events."},
+	{Key: "feature.uptime_monitoring", Label: "Uptime Monitoring", Default: true, Description: "HTTP/TCP/ICMP checks with history and uptime %."},
+	{Key: "feature.stacks_edit", Label: "Stacks Edit & Redeploy", Default: true, Description: "Edit live Compose stacks with Secrets-backed env injection."},
 	{Key: "feature.sso_passthrough", Label: "SSO Passthrough", Default: false, Description: "Add auth in front of containers (not yet implemented)."},
 	{Key: "feature.chat_integration", Label: "Chat Integration", Default: false, Description: "Inbound chat commands (not yet implemented)."},
 }

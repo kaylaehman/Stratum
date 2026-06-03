@@ -38,6 +38,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useBookmarks, useRemoveBookmark } from '../../lib/api/bookmarks'
 import { useCan } from '../../lib/roles'
+import { useFeatures } from '../../lib/api/features'
 import { resourceLink } from '../../lib/resourceLink'
 import type { BookmarkResourceType, Bookmark } from '../../types/api'
 
@@ -47,6 +48,8 @@ interface NavLeaf {
   to: string
   adminOnly?: boolean
   operatorOnly?: boolean
+  /** Hide this item when the named feature flag is disabled. */
+  featureFlag?: string
 }
 
 interface NavGroup {
@@ -84,8 +87,8 @@ const navGroups: NavGroup[] = [
     children: [
       { icon: <TrendingUp size={14} />, label: 'Metrics', to: '/metrics' },
       { icon: <ScrollText size={14} />, label: 'Logs', to: '/logs' },
-      { icon: <Radio size={14} />, label: 'Uptime', to: '/uptime' },
-      { icon: <AlertCircle size={14} />, label: 'Incidents', to: '/incidents' },
+      { icon: <Radio size={14} />, label: 'Uptime', to: '/uptime', featureFlag: 'feature.uptime_monitoring' },
+      { icon: <AlertCircle size={14} />, label: 'Incidents', to: '/incidents', featureFlag: 'feature.incident_timeline' },
       { icon: <Activity size={14} />, label: 'Activity', to: '/activity' },
     ],
   },
@@ -99,7 +102,7 @@ const navGroups: NavGroup[] = [
       { icon: <NetworkIcon size={14} />, label: 'Infrastructure', to: '/infrastructure' },
       { icon: <Share2 size={14} />, label: 'Network', to: '/network' },
       { icon: <Workflow size={14} />, label: 'Dependencies', to: '/dependencies' },
-      { icon: <Layers size={14} />, label: 'Stacks', to: '/stacks' },
+      { icon: <Layers size={14} />, label: 'Stacks', to: '/stacks', featureFlag: 'feature.stacks_edit' },
     ],
   },
   {
@@ -107,7 +110,6 @@ const navGroups: NavGroup[] = [
     label: 'Operations',
     children: [
       { icon: <ArrowUpCircle size={14} />, label: 'Updates', to: '/updates' },
-      { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
       { icon: <LayoutTemplate size={14} />, label: 'Templates', to: '/templates' },
       { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
       { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },
@@ -129,7 +131,7 @@ const navGroups: NavGroup[] = [
     label: 'Assist',
     children: [
       { icon: <Bot size={14} />, label: 'Assistant', to: '/chat', operatorOnly: true },
-      { icon: <Zap size={14} />, label: 'Automations', to: '/automations', operatorOnly: true },
+      { icon: <Zap size={14} />, label: 'Automations', to: '/automations', operatorOnly: true, featureFlag: 'feature.automations' },
       { icon: <Wrench size={14} />, label: 'Skills', to: '/skills' },
       { icon: <ListChecks size={14} />, label: 'Runbooks', to: '/runbooks', operatorOnly: true },
     ],
@@ -363,7 +365,15 @@ function BookmarksSection() {
 
 export function Sidebar() {
   const { isAdmin, isOperator } = useCan()
+  const { data: featuresData } = useFeatures()
   const navRef = useRef<HTMLElement>(null)
+
+  // A nav item is hidden only when its flag is explicitly disabled; while the
+  // flag list loads (or a key is absent) it stays visible, so nothing flickers.
+  function featureEnabled(key?: string): boolean {
+    if (!key || !featuresData) return true
+    return featuresData.features.find((f) => f.key === key)?.enabled ?? true
+  }
 
   // Restore scroll position on mount (covers the rare full-remount case).
   useEffect(() => {
@@ -384,11 +394,12 @@ export function Sidebar() {
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
-  /** Filter a leaf list by the current user's role. */
+  /** Filter a leaf list by the current user's role and feature flags. */
   function visibleLeaves(leaves: NavLeaf[]): NavLeaf[] {
     return leaves.filter((item) => {
       if (item.adminOnly && !isAdmin) return false
       if (item.operatorOnly && !isOperator) return false
+      if (!featureEnabled(item.featureFlag)) return false
       return true
     })
   }
@@ -397,6 +408,7 @@ export function Sidebar() {
   function renderPinnedLeaf(item: NavLeaf) {
     if (item.adminOnly && !isAdmin) return null
     if (item.operatorOnly && !isOperator) return null
+    if (!featureEnabled(item.featureFlag)) return null
     return (
       <li key={item.to}>
         <NavLink

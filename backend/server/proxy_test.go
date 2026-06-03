@@ -61,3 +61,38 @@ func TestProxyEndpointAdminGate(t *testing.T) {
 		t.Errorf("good endpoint = %d, want 200", s)
 	}
 }
+
+// TestContainerProxyEndpoints verifies the per-container reverse-proxy routes are
+// admin-only, validate their body, and gate adds on a create-capable proxy.
+func TestContainerProxyEndpoints(t *testing.T) {
+	srv, adminTok := newNodeTestServer(t)
+	c := &http.Client{}
+
+	createUser(t, c, srv.URL, adminTok, "viewer", "viewer")
+	viewerTok := loginAs(t, c, srv.URL, "viewer")
+
+	getURL := srv.URL + "/api/containers/cid/proxy"
+	if s := status(t, c, authReq(t, http.MethodGet, getURL, viewerTok, nil)); s != http.StatusForbidden {
+		t.Errorf("viewer GET container proxy = %d, want 403", s)
+	}
+	if s := status(t, c, authReq(t, http.MethodPost, getURL, viewerTok, map[string]any{
+		"proxy_node_id": "n", "source_host": "x.example.com", "target_url": "http://10.0.0.1:80",
+	})); s != http.StatusForbidden {
+		t.Errorf("viewer POST container proxy = %d, want 403", s)
+	}
+
+	// Admin: a body missing required fields is a 400 before any work.
+	if s := status(t, c, authReq(t, http.MethodPost, getURL, adminTok, map[string]any{
+		"source_host": "x.example.com",
+	})); s != http.StatusBadRequest {
+		t.Errorf("missing fields = %d, want 400", s)
+	}
+
+	// Admin: a well-formed add against a node with no create-capable proxy is a
+	// 400 (cannot add route) — exercises the gating path without inventory.
+	if s := status(t, c, authReq(t, http.MethodPost, getURL, adminTok, map[string]any{
+		"proxy_node_id": "no-such-node", "source_host": "x.example.com", "target_url": "http://10.0.0.1:80",
+	})); s != http.StatusBadRequest {
+		t.Errorf("add with no proxy = %d, want 400", s)
+	}
+}

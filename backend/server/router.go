@@ -112,8 +112,6 @@ func NewRouter(d *Deps) http.Handler {
 			// Image CVE scans (admin-gated; on-demand scan is audited below).
 			r.Get("/security/cve", d.Handlers.CVEScans)
 			r.Get("/security/cve/status", d.Handlers.CVEStatus)
-			// CVE schedules list (read-only).
-			r.Get("/security/cve/schedules", d.Handlers.CVEListSchedules)
 			r.Get("/security/cve/{digest}", d.Handlers.CVEDetail)
 
 			// Volume health (read-only; cross-node).
@@ -128,6 +126,9 @@ func NewRouter(d *Deps) http.Handler {
 
 			// Rollback snapshots list (read-only; update/snapshot/rollback audited below).
 			r.Get("/containers/{id}/snapshots", d.Handlers.ListSnapshots)
+
+			// Per-container reverse-proxy view (admin gate in handler).
+			r.Get("/containers/{id}/proxy", d.Handlers.ContainerProxy)
 
 			// Network topology (read-only; per node).
 			r.Get("/nodes/{id}/topology", d.Handlers.NodeTopology)
@@ -325,13 +326,11 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/nodes/{id}/cron", d.Handlers.SetCron)
 			audited.Post("/containers/{id}/cve-scan", d.Handlers.CVEScanContainer)
 			audited.Post("/security/cve/bulk-scan", d.Handlers.CVEBulkScan)
-			audited.Post("/security/cve/schedules", d.Handlers.CVECreateSchedule)
-			audited.Put("/security/cve/schedules/{id}", d.Handlers.CVEToggleSchedule)
-			audited.Delete("/security/cve/schedules/{id}", d.Handlers.CVEDeleteSchedule)
 			audited.Post("/containers/{id}/update", d.Handlers.UpdateContainer)
 			audited.Post("/containers/{id}/snapshot", d.Handlers.SnapshotContainer)
 			audited.Post("/containers/{id}/rollback/{snap}", d.Handlers.RollbackContainer)
 			audited.Put("/containers/{id}/healthcheck", d.Handlers.SetHealthcheck)
+			audited.Post("/containers/{id}/proxy", d.Handlers.AddContainerProxy)
 			audited.Post("/scripts", d.Handlers.CreateScript)
 			audited.Put("/scripts/{id}", d.Handlers.UpdateScript)
 			audited.Delete("/scripts/{id}", d.Handlers.DeleteScript)

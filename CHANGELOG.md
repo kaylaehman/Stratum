@@ -9,6 +9,10 @@ how you tell the difference.
 
 ## [Unreleased]
 
+_Nothing yet — add new changes here._
+
+## [0.4.0] - 2026-06-02
+
 ### Security
 
 - **Admin step-up 2FA no longer fails open.** Destructive actions are gated by a
@@ -63,5 +67,5 @@ how you tell the difference.
 ---
 
 > **Releases.** Tagging `vX.Y.Z` triggers the GHCR multi-arch build + GitHub
-> release. Cut the first tag (`v0.1.0`) once the changes above are merged to
-> `main`, so the release contains them.
+> release. The latest tag is `v0.4.0`; record new work under `[Unreleased]` above
+> and move it under a dated `vX.Y.Z` heading when you cut the next tag.

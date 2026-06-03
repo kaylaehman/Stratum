@@ -156,3 +156,88 @@ func (h *Handlers) DiscoverProxyCloudflare(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, res)
 }
+
+// ContainerProxy returns the reverse-proxy state for one container: the public
+// hostnames already routing to it, the proxies that can add a route, and
+// suggested target URLs from its published ports. Admin-gated.
+func (h *Handlers) ContainerProxy(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	st, err := h.Proxy.ContainerProxy(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+type addRouteRequest struct {
+	ProxyNodeID string `json:"proxy_node_id"`
+	SourceHost  string `json:"source_host"`
+	TargetURL   string `json:"target_url"`
+	Path        string `json:"path,omitempty"`
+	CreateDNS   bool   `json:"create_dns"`
+	DryRun      bool   `json:"dry_run"`
+}
+
+// AddContainerProxy adds (or previews, when dry_run) a reverse-proxy route to a
+// container. Admin-gated; a real add is audited, a dry-run is suppressed (it
+// performs no mutation). Adapter/validation errors map to 400; the live
+// Cloudflare error message is surfaced verbatim.
+func (h *Handlers) AddContainerProxy(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	containerID := chi.URLParam(r, "id")
+	var req addRouteRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body")
+		return
+	}
+	if req.ProxyNodeID == "" || req.SourceHost == "" || req.TargetURL == "" {
+		writeError(w, http.StatusBadRequest, "missing_fields")
+		return
+	}
+
+	plan, err := h.Proxy.AddContainerProxy(r.Context(), proxy.AddRouteRequest{
+		ProxyNodeID: req.ProxyNodeID,
+		SourceHost:  req.SourceHost,
+		TargetURL:   req.TargetURL,
+		Path:        req.Path,
+		CreateDNS:   req.CreateDNS,
+		DryRun:      req.DryRun,
+	})
+	if err != nil {
+		// A dry-run that failed validation, or a real add that failed: don't write
+		// an audit row for a no-op preview.
+		if req.DryRun {
+			if e := activity.FromContext(r.Context()); e != nil {
+				e.Suppressed = true
+			}
+		}
+		status := http.StatusBadGateway // default: upstream Cloudflare error
+		switch {
+		case errors.Is(err, proxy.ErrCannotAddRoute),
+			errors.Is(err, proxy.ErrProxyNotConfigured),
+			errors.Is(err, proxy.ErrInvalidHostname),
+			errors.Is(err, proxy.ErrInvalidService):
+			status = http.StatusBadRequest
+		case errors.Is(err, proxy.ErrNoAdapter):
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if e := activity.FromContext(r.Context()); e != nil {
+		if req.DryRun {
+			e.Suppressed = true // preview only — nothing changed
+		} else {
+			e.Action = activity.ActionProxyRouteAdd
+			e.TargetType = ptr(activity.TargetContainer)
+			e.TargetID = &containerID
+		}
+	}
+	writeJSON(w, http.StatusOK, plan)
+}

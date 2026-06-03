@@ -4,7 +4,7 @@ import { AppShell } from '../components/layout/AppShell'
 import { useMe } from '../hooks/useMe'
 import { useTree } from '../lib/api/tree'
 import { useUpdates, useRescanUpdates } from '../lib/api/updates'
-import type { UpdatesSummary, UnknownBreakdownItem } from '../lib/api/updates'
+import type { UpdatesSummary, UnknownBreakdownItem, OverlapNode } from '../lib/api/updates'
 import { useUpdateContainer } from '../lib/api/recreate'
 import { ApiError } from '../lib/api'
 import type { ImageUpdate, UpdateStatus, TreeNode } from '../types/api'
@@ -431,6 +431,52 @@ function UnknownReasonBanner({ summary }: UnknownReasonBannerProps) {
   )
 }
 
+// ---- Overlap (Watchtower/Portainer) banner ----
+
+function OverlapBanner({ overlaps }: { overlaps: OverlapNode[] }) {
+  if (overlaps.length === 0) return null
+
+  // Any auto-updater (Watchtower) makes this an active conflict, not just a note.
+  const hasConflict = overlaps.some((o) => o.auto_updates)
+  const accent = hasConflict ? 'var(--status-warn)' : 'var(--text-muted)'
+
+  return (
+    <div
+      className="px-3 py-2.5 mb-3 text-xs"
+      style={{
+        backgroundColor: hasConflict ? 'rgba(255,180,0,0.07)' : 'var(--bg-surface)',
+        border: `1px solid ${hasConflict ? 'var(--status-warn)' : 'var(--border-subtle)'}`,
+        borderRadius: '3px',
+      }}
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={13} style={{ color: accent, flexShrink: 0, marginTop: '1px' }} />
+        <div className="flex flex-col gap-1">
+          <span style={{ color: 'var(--text-secondary)' }}>
+            Another container-management tool is running on{' '}
+            {overlaps.length === 1 ? 'a host' : `${overlaps.length} hosts`}. Updating here may
+            conflict with it.
+          </span>
+          <div className="flex flex-col gap-0.5 pl-0.5">
+            {overlaps.map((o) => (
+              <span key={o.node_id} className="font-mono" style={{ color: 'var(--text-muted)' }}>
+                {o.node_name}: {o.managers.map((m) => m.name).join(', ')}
+                {o.auto_updates && (
+                  <span style={{ color: 'var(--status-warn)' }}>
+                    {' '}
+                    — auto-updates containers; Stratum skips these hosts in the auto-update
+                    automation
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---- Main page ----
 
 const TABLE_COLS = ['Container', 'Node', 'Image', 'Status', 'Last Checked', '']
@@ -510,6 +556,7 @@ export default function Updates() {
         {/* Content */}
         {!isLoading && (
           <>
+            <OverlapBanner overlaps={data?.overlaps ?? []} />
             {updates.length === 0 ? (
               <div
                 className="px-3 py-4 text-xs"

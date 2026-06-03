@@ -13,6 +13,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { useCan } from '../../lib/roles'
+import { useFeatureEnabled } from '../../lib/api/features'
 import {
   useProposals,
   useApproveProposal,
@@ -354,9 +355,12 @@ interface RemediationPanelProps {
 
 export function RemediationPanel({ nodeId }: RemediationPanelProps) {
   const { isAdmin, isOperator } = useCan()
+  const remediationEnabled = useFeatureEnabled('feature.remediation')
   const { data, isLoading } = useProposals(nodeId)
 
   if (!isOperator) return null
+  // Hidden when the agentic-remediation feature is disabled.
+  if (!remediationEnabled) return null
 
   const proposals = data?.proposals ?? []
 

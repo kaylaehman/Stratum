@@ -18,8 +18,9 @@ import (
 	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
 )
 
-// reconnectDelay is the pause between stream reconnect attempts.
-const reconnectDelay = 5 * time.Second
+// streamBackoff is the reconnection schedule for WatchFiles streams.
+// Production: base=1s, factor=2, cap=30s, full jitter.
+var streamBackoff = defaultBackoff
 
 // Client wraps a gRPC connection to one agent instance.
 type Client struct {
@@ -130,30 +131,51 @@ func (m *Manager) Close() {
 	}
 }
 
+// InvalidateAll closes and removes every cached client. Used by certwatch when
+// certificates are rotated so all subsequent dials use the new credentials.
+func (m *Manager) InvalidateAll() {
+	m.mu.Lock()
+	ids := make([]string, 0, len(m.clients))
+	for id := range m.clients {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		m.Invalidate(id)
+	}
+}
+
 // DetectInit calls DetectInit on the agent and returns the raw response.
 func (c *Client) DetectInit(ctx context.Context) (*stratumv1.DetectInitResponse, error) {
 	return c.rpc.DetectInit(ctx, &stratumv1.DetectInitRequest{})
 }
 
 // StreamEvents opens a WatchFiles stream and delivers FileEvent values on the
-// returned channel. The stream reconnects automatically if it drops. The
-// caller must cancel ctx to stop streaming.
+// returned channel. The stream reconnects automatically on drop using
+// exponential backoff with full jitter (base=1s, cap=30s). The caller must
+// cancel ctx to stop streaming.
 func (c *Client) StreamEvents(ctx context.Context, paths []string, recursive bool) <-chan *stratumv1.WatchFilesResponse {
 	ch := make(chan *stratumv1.WatchFilesResponse, 256)
 	go func() {
 		defer close(ch)
+		attempt := 0
 		for {
 			if err := c.streamOnce(ctx, paths, recursive, ch); err != nil {
 				if ctx.Err() != nil {
 					return
 				}
+				delay := streamBackoff.next(attempt)
+				attempt++
 				c.logger.Warn("agent: stream error; will reconnect",
-					"node", c.nodeID, "error", err, "delay", reconnectDelay)
+					"node", c.nodeID, "error", err, "attempt", attempt, "delay", delay)
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(reconnectDelay):
+				case <-time.After(delay):
 				}
+			} else {
+				// Clean exit (EOF or ctx cancelled): reset backoff counter.
+				attempt = 0
 			}
 		}
 	}()

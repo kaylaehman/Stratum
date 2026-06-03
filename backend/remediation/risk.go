@@ -55,7 +55,7 @@ var shellMetacharacters = regexp.MustCompile("[;&|`\\n]|\\$\\(")
 // sensitivePath matches references to system paths where any mutation is
 // high-blast-radius. Combined with a mutating verb this escalates to
 // RiskDestructive (see classifyOne).
-var sensitivePath = ci(`(^|\s)/(etc|boot|usr|bin|sbin|lib|lib64|dev|sys|proc|root|var/lib|var/run|run)(/|\s|$)|\s/(\s|$)`)
+var sensitivePath = ci(`(^|\s)/(etc|boot|usr|bin|sbin|lib|lib64|dev|sys|proc|root|var/lib|var/log|var/run|run)(/|\s|$)|\s/(\s|$)`)
 
 // mutatingVerb matches commands that write/alter state (as opposed to read-only
 // inspection). Used only to decide whether a sensitivePath reference is risky.
