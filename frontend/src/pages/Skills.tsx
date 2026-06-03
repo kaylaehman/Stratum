@@ -17,6 +17,7 @@ import {
   Copy,
   Sparkles,
   Save,
+  BookText,
 } from 'lucide-react'
 import CodeMirror from '@uiw/react-codemirror'
 import type { LanguageSupport } from '@codemirror/language'
@@ -31,9 +32,12 @@ import {
   useDeleteSkill,
   useGenerateSkill,
 } from '../lib/api/skills'
+import { useCreateRunbook } from '../lib/api/runbooks'
 import { useTree } from '../lib/api/tree'
 import { resolveLanguage } from '../lib/codemirror'
-import type { SkillSummary, SkillStep, Container } from '../types/api'
+import { useCan } from '../lib/roles'
+import { RunbookForm } from '../components/ai/RunbooksSection'
+import type { SkillSummary, SkillStep, SkillIssue, Container, RunbookRequest } from '../types/api'
 
 // Minimal commented YAML scaffold shown when creating a brand-new skill.
 const NEW_SKILL_TEMPLATE = `# Stratum troubleshooting skill
@@ -814,6 +818,78 @@ function DeleteConfirm({
   )
 }
 
+// ---- Promote to runbook modal ----
+
+interface PromoteToRunbookModalProps {
+  initial: Partial<RunbookRequest>
+  onClose: () => void
+  onSaved: () => void
+}
+
+function PromoteToRunbookModal({ initial, onClose, onSaved }: PromoteToRunbookModalProps) {
+  const create = useCreateRunbook()
+
+  function handleCreate(body: RunbookRequest) {
+    create.mutate(body, { onSuccess: onSaved })
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '3px',
+          width: '560px',
+          maxWidth: '100%',
+          maxHeight: 'calc(100vh - 48px)',
+          overflow: 'auto',
+        }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center gap-2 px-4 py-3"
+          style={{ borderBottom: '1px solid var(--border-subtle)' }}
+        >
+          <BookText size={13} style={{ color: 'var(--accent)' }} />
+          <span
+            className="text-xs font-medium uppercase tracking-wider flex-1"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            Promote to Runbook
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
+            title="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="p-4">
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)', lineHeight: '1.5' }}>
+            Review and edit the pre-filled details below, then save to add this as an AI Runbook.
+          </p>
+          <RunbookForm
+            initial={initial}
+            isPending={create.isPending}
+            error={create.isError ? create.error : null}
+            onSubmit={handleCreate}
+            onCancel={onClose}
+            submitLabel="Create Runbook"
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---- Detail panel ----
 
 interface SkillDetailPanelProps {
@@ -822,10 +898,12 @@ interface SkillDetailPanelProps {
   onEdit: (id: string) => void
   onClone: (id: string) => void
   onDelete: (skill: { id: string; name: string }) => void
+  onPromoteToRunbook: (issue: SkillIssue) => void
 }
 
-function SkillDetailPanel({ id, onClose, onEdit, onClone, onDelete }: SkillDetailPanelProps) {
+function SkillDetailPanel({ id, onClose, onEdit, onClone, onDelete, onPromoteToRunbook }: SkillDetailPanelProps) {
   const { data: skill, isLoading } = useSkill(id, true)
+  const { isOperator } = useCan()
   const [openIssue, setOpenIssue] = useState<string | null>(null)
 
   return (
@@ -989,25 +1067,45 @@ function SkillDetailPanel({ id, onClose, onEdit, onClone, onDelete }: SkillDetai
                         borderRadius: '3px',
                       }}
                     >
-                      <button
-                        type="button"
-                        onClick={() => setOpenIssue(isOpen ? null : issue.id)}
-                        className="flex items-center gap-2 w-full px-3 py-2 text-left"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                      >
-                        {isOpen ? (
-                          <ChevronDown size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-                        ) : (
-                          <ChevronRight size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                      <div className="flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => setOpenIssue(isOpen ? null : issue.id)}
+                          className="flex items-center gap-2 flex-1 px-3 py-2 text-left"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 0 }}
+                        >
+                          {isOpen ? (
+                            <ChevronDown size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                          ) : (
+                            <ChevronRight size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                          )}
+                          <AlertTriangle size={12} style={{ color: 'var(--status-warn)', flexShrink: 0 }} />
+                          <span className="text-sm font-medium flex-1" style={{ color: 'var(--text-primary)' }}>
+                            {issue.name}
+                          </span>
+                          <span className="font-mono text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
+                            {issue.steps.length} {issue.steps.length === 1 ? 'step' : 'steps'}
+                          </span>
+                        </button>
+                        {isOperator && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onPromoteToRunbook(issue) }}
+                            title="Promote to Runbook"
+                            className="flex items-center gap-1 font-mono text-xs px-2 py-1 mr-2 shrink-0"
+                            style={{
+                              background: 'var(--accent-glow)',
+                              border: '1px solid var(--accent-dim)',
+                              color: 'var(--accent)',
+                              borderRadius: '3px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <BookText size={10} />
+                            Runbook
+                          </button>
                         )}
-                        <AlertTriangle size={12} style={{ color: 'var(--status-warn)', flexShrink: 0 }} />
-                        <span className="text-sm font-medium flex-1" style={{ color: 'var(--text-primary)' }}>
-                          {issue.name}
-                        </span>
-                        <span className="font-mono text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
-                          {issue.steps.length} {issue.steps.length === 1 ? 'step' : 'steps'}
-                        </span>
-                      </button>
+                      </div>
 
                       {isOpen && (
                         <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
@@ -1083,6 +1181,7 @@ export default function Skills() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const deleteMut = useDeleteSkill()
+  const [promoteIssue, setPromoteIssue] = useState<Partial<RunbookRequest> | null>(null)
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -1107,6 +1206,17 @@ export default function Skills() {
     }
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
   }, [filtered])
+
+  function handlePromoteToRunbook(issue: SkillIssue) {
+    const steps = issue.steps.map((s) =>
+      s.command ? `${s.description}: \`${s.command}\`` : s.description,
+    )
+    setPromoteIssue({
+      name: issue.name,
+      trigger_conditions: issue.symptoms,
+      steps,
+    })
+  }
 
   function handleConfirmDelete() {
     if (!deleteTarget) return
@@ -1265,6 +1375,7 @@ export default function Skills() {
                   setDeleteError(null)
                   setDeleteTarget(s)
                 }}
+                onPromoteToRunbook={handlePromoteToRunbook}
               />
             )}
           </div>
@@ -1293,6 +1404,14 @@ export default function Skills() {
             setDeleteTarget(null)
             setDeleteError(null)
           }}
+        />
+      )}
+
+      {promoteIssue && (
+        <PromoteToRunbookModal
+          initial={promoteIssue}
+          onClose={() => setPromoteIssue(null)}
+          onSaved={() => setPromoteIssue(null)}
         />
       )}
     </AppShell>

@@ -199,7 +199,7 @@ function StringListEditor({ label, items, onChange, placeholder, ordered }: Stri
 
 // ── RunbookForm ───────────────────────────────────────────────────────────────
 
-interface RunbookFormProps {
+export interface RunbookFormProps {
   initial?: Partial<RunbookRequest>
   isPending: boolean
   error: unknown
@@ -208,7 +208,7 @@ interface RunbookFormProps {
   submitLabel: string
 }
 
-function RunbookForm({ initial, isPending, error, onSubmit, onCancel, submitLabel }: RunbookFormProps) {
+export function RunbookForm({ initial, isPending, error, onSubmit, onCancel, submitLabel }: RunbookFormProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [triggerConditions, setTriggerConditions] = useState<string[]>(initial?.trigger_conditions ?? [])
