@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Workflow, Loader, AlertTriangle, Info } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
+import { NodeSelect } from '../components/common/NodeSelect'
 import { DependencyGraph } from '../components/depgraph/DependencyGraph'
 import { useTree } from '../lib/api/tree'
 import { useNodeDepGraph } from '../lib/api/depgraph'
@@ -361,18 +362,12 @@ export default function Dependencies() {
             {dockerNodes.length > 0 && (
               <div className="flex items-center gap-2">
                 <SectionLabel>Node</SectionLabel>
-                <select
+                <NodeSelect
+                  nodes={dockerNodes}
                   value={activeNodeId ?? ''}
-                  onChange={(e) => handleNodeChange(e.target.value)}
-                  className="text-xs font-mono px-2 py-1"
+                  onChange={handleNodeChange}
                   style={selectStyle()}
-                >
-                  {dockerNodes.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
             )}
 

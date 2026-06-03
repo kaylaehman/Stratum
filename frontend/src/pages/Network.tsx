@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { Share2, Loader, AlertTriangle, Info } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { TopologyGraph, type GraphSelection } from '../components/network/TopologyGraph'
+import { NodeSelect } from '../components/common/NodeSelect'
 import { useTree } from '../lib/api/tree'
 import { useNodeTopology } from '../lib/api/topology'
 import { ApiError } from '../lib/api'
@@ -285,28 +286,14 @@ export default function Network() {
           {allNodes.length > 0 && (
             <div className="flex items-center gap-2">
               <SectionLabel>Node</SectionLabel>
-              <select
+              <NodeSelect
+                nodes={allNodes}
                 value={activeNodeId ?? ''}
-                onChange={(e) => {
-                  setSelectedNodeId(e.target.value || null)
+                onChange={(id) => {
+                  setSelectedNodeId(id || null)
                   setGraphSelection(null)
                 }}
-                className="text-xs font-mono px-2 py-1"
-                style={{
-                  backgroundColor: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  outline: 'none',
-                }}
-              >
-                {allNodes.map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.name}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           )}
         </div>

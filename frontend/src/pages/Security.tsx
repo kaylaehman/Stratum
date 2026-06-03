@@ -13,6 +13,8 @@ import { useIncidentTimeline } from '../lib/api/incidents'
 import type { IncidentEntry } from '../lib/api/incidents'
 import { PostureCard } from '../components/security/PostureCard'
 import { EventDetailDrawer } from '../components/security/EventDetailDrawer'
+import { NodeSelect } from '../components/common/NodeSelect'
+import { useFeatureEnabled } from '../lib/api/features'
 import type {
   FlaggedContainer,
   SecurityFlag,
@@ -461,6 +463,7 @@ export default function Security() {
 
   const { data: tree } = useTree()
   const nodes = tree?.nodes ?? []
+  const postureEnabled = useFeatureEnabled('feature.posture_score')
 
   const [postureNodeId, setPostureNodeId] = useState('')
   const [selectedEvent, setSelectedEvent] = useState<IncidentEntry | null>(null)
@@ -542,46 +545,47 @@ export default function Security() {
         {isAdmin && !isLoading && (
           <>
             {/* Section 0: Posture score (per-node) */}
-            <div className="mb-8">
-              <SectionHeader label="Security Posture Score" />
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
-                  Node
-                </span>
-                <select
-                  value={postureNodeId}
-                  onChange={(e) => setPostureNodeId(e.target.value)}
-                  className="text-xs px-2 py-1 flex-1"
-                  style={{
-                    backgroundColor: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-secondary)',
-                    borderRadius: '3px',
-                    maxWidth: '260px',
-                  }}
-                >
-                  <option value="">— select a node —</option>
-                  {nodes.map((n) => (
-                    <option key={n.id} value={n.id}>{n.name}</option>
-                  ))}
-                </select>
-              </div>
-              {postureNodeId ? (
-                <PostureCard nodeId={postureNodeId} />
-              ) : (
-                <div
-                  className="px-3 py-4 text-xs"
-                  style={{
-                    color: 'var(--text-muted)',
-                    backgroundColor: 'var(--bg-surface)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: '3px',
-                  }}
-                >
-                  Select a node above to view its posture score.
+            {postureEnabled && (
+              <div className="mb-8">
+                <SectionHeader label="Security Posture Score" />
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+                    Node
+                  </span>
+                  <NodeSelect
+                    nodes={nodes}
+                    value={postureNodeId}
+                    onChange={setPostureNodeId}
+                    placeholder="— select a node —"
+                    className="text-xs px-2 py-1 flex-1"
+                    style={{
+                      backgroundColor: 'var(--bg-elevated)',
+                      border: '1px solid var(--border-default)',
+                      color: 'var(--text-secondary)',
+                      borderRadius: '3px',
+                      maxWidth: '260px',
+                      outline: 'none',
+                      cursor: 'pointer',
+                    }}
+                  />
                 </div>
-              )}
-            </div>
+                {postureNodeId ? (
+                  <PostureCard nodeId={postureNodeId} />
+                ) : (
+                  <div
+                    className="px-3 py-4 text-xs"
+                    style={{
+                      color: 'var(--text-muted)',
+                      backgroundColor: 'var(--bg-surface)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '3px',
+                    }}
+                  >
+                    Select a node above to view its posture score.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Section 1: Privileged & flagged containers */}
             <div className="mb-8">
