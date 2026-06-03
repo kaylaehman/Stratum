@@ -70,11 +70,8 @@ const (
 
 	ActionCronSet = "cron.set"
 
-	ActionCVEScan           = "cve.scan"
-	ActionCVEBulkScan       = "cve.bulk_scan"
-	ActionCVEScheduleCreate = "cve.schedule_create"
-	ActionCVEScheduleToggle = "cve.schedule_toggle"
-	ActionCVEScheduleDelete = "cve.schedule_delete"
+	ActionCVEScan     = "cve.scan"
+	ActionCVEBulkScan = "cve.bulk_scan"
 
 	ActionScriptCreate = "script.create"
 	ActionScriptUpdate = "script.update"
@@ -267,9 +264,6 @@ var actionCatalog = []ActionInfo{
 
 	{ActionCVEScan, "Image CVE scan", "cve", TargetContainer},
 	{ActionCVEBulkScan, "Bulk CVE scan", "cve", TargetContainer},
-	{ActionCVEScheduleCreate, "CVE schedule created", "cve", TargetNode},
-	{ActionCVEScheduleToggle, "CVE schedule toggled", "cve", TargetNode},
-	{ActionCVEScheduleDelete, "CVE schedule deleted", "cve", TargetNode},
 
 	{ActionScriptCreate, "Script created", "script", TargetScript},
 	{ActionScriptUpdate, "Script updated", "script", TargetScript},

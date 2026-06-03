@@ -282,32 +282,86 @@ func autoUpdateContainersHandler(store db.Store, conn *nodeconn.Manager, recreat
 	}
 }
 
-// scheduledCVEScanHandler runs a bulk CVE scan over all running containers.
+// cveScanTarget holds one entry from config.targets for scheduled_cve_scan.
+// NodeID targets all running containers on a node; ContainerID targets a single
+// container. Both may appear in the same list. Empty targets = scan everything.
+type cveScanTarget struct {
+	NodeID      string `json:"node_id"`
+	ContainerID string `json:"container_id"`
+}
+
+// cveScanCfgFromDB reads config.targets for scheduled_cve_scan. Returns nil
+// (meaning "scan everything") when no config row exists or targets is empty.
+func cveScanCfgFromDB(ctx context.Context, store db.Store) []cveScanTarget {
+	row, err := store.GetAutomation(ctx, "scheduled_cve_scan")
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Targets []cveScanTarget `json:"targets"`
+	}
+	if err := json.Unmarshal([]byte(row.ConfigJSON), &cfg); err != nil {
+		return nil
+	}
+	return cfg.Targets
+}
+
+// scheduledCVEScanHandler runs a bulk CVE scan over running containers.
+// When config.targets is non-empty it limits the scan to those nodes/containers;
+// an empty (or absent) targets list scans all running containers.
 func scheduledCVEScanHandler(store db.Store, cveSvc *cve.Service) Handler {
 	return func(ctx context.Context) (string, error) {
 		if cveSvc == nil || !cveSvc.Available() {
 			return "skipped: CVE scanner (trivy/grype) not available", nil
 		}
-		nodes, err := store.ListNodes(ctx)
-		if err != nil {
-			return "", fmt.Errorf("list nodes: %w", err)
-		}
+		targets := cveScanCfgFromDB(ctx, store)
 		var toScan []db.Container
-		for _, n := range nodes {
-			caps, _ := capabilities.Parse([]byte(n.CapabilitiesJSON))
-			if !caps.Docker {
-				continue
-			}
-			ctrs, err := store.ListContainersByNode(ctx, n.ID)
+
+		if len(targets) == 0 {
+			// Default: scan all running containers across all docker-capable nodes.
+			nodes, err := store.ListNodes(ctx)
 			if err != nil {
-				continue
+				return "", fmt.Errorf("list nodes: %w", err)
 			}
-			for _, c := range ctrs {
-				if c.Status == "running" {
+			for _, n := range nodes {
+				caps, _ := capabilities.Parse([]byte(n.CapabilitiesJSON))
+				if !caps.Docker {
+					continue
+				}
+				ctrs, err := store.ListContainersByNode(ctx, n.ID)
+				if err != nil {
+					continue
+				}
+				for _, c := range ctrs {
+					if c.Status == "running" {
+						toScan = append(toScan, c)
+					}
+				}
+			}
+		} else {
+			// Targeted: honour the per-node / per-container list from config.
+			for _, t := range targets {
+				switch {
+				case t.ContainerID != "":
+					c, err := store.GetContainer(ctx, t.ContainerID)
+					if err != nil || c.Status != "running" {
+						continue
+					}
 					toScan = append(toScan, c)
+				case t.NodeID != "":
+					ctrs, err := store.ListContainersByNode(ctx, t.NodeID)
+					if err != nil {
+						continue
+					}
+					for _, c := range ctrs {
+						if c.Status == "running" {
+							toScan = append(toScan, c)
+						}
+					}
 				}
 			}
 		}
+
 		if len(toScan) == 0 {
 			return "no running containers to scan", nil
 		}
