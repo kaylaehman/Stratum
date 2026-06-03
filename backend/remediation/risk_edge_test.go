@@ -121,12 +121,13 @@ func TestSensitivePath_StatBoot_IsNotLow(t *testing.T) {
 	}
 }
 
-func TestSensitivePath_TailVarLog_IsLow(t *testing.T) {
-	// /var/log is NOT in sensitivePath (only /var/lib and /var/run match),
-	// so tail /var/log/syslog is on the allowlist and non-sensitive.
+func TestSensitivePath_TailVarLog_IsHigh(t *testing.T) {
+	// /var/log IS a sensitive path: even an allowlisted read like `tail` is not
+	// auto-approvable there (logs can hold secrets/tokens), so it falls through to
+	// RiskHigh and requires step-up rather than running autonomously.
 	risk := ClassifyRisk([]string{"tail /var/log/syslog"})
-	if risk != RiskLow {
-		t.Errorf("tail /var/log/syslog: got %q; want RiskLow (/var/log is not a sensitive path)", risk)
+	if risk != RiskHigh {
+		t.Errorf("tail /var/log/syslog: got %q; want RiskHigh (/var/log is a sensitive path)", risk)
 	}
 }
 
