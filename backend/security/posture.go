@@ -1,3 +1,42 @@
+// Package-level scoring reference (posture.go):
+//
+// # Security Posture Score — scoring inputs, weights, and grade boundaries
+//
+// Score() computes a 0-100 score and an A-F grade for one node. Each signal
+// contributes a weighted penalty. When a data source is unavailable (-1), its
+// weight is excluded from the pool so the score is never artificially deflated.
+//
+// ## Factor table
+//
+//   Factor               Max weight  Penalty per unit  Cap
+//   ─────────────────────────────────────────────────────────
+//   CVE (critical)       35 pts      15 per CVE        35
+//   CVE (high)           35 pts      5 per CVE         35 (shared with critical)
+//   Privileged flags     30 pts      10 per container  30
+//   Exposed ports        15 pts      3 per port        15
+//   Stale SSH keys       10 pts      5 per key         10
+//   Pending updates      10 pts      2 per container   10
+//   ─────────────────────────────────────────────────────────
+//   Total                100 pts
+//
+// Scaling: scaledPenalty = (totalPenalty × 100) / totalAvailableWeight; capped at 100.
+// Final score = 100 − scaledPenalty.
+//
+// ## Grade thresholds
+//
+//   A  90–100   B  75–89   C  60–74   D  40–59   F  0–39
+//
+// ## Remediation severity map
+//
+//   Metric    Severity
+//   cve       critical (CriticalCVEs > 0) / high (HighCVEs > 0 only)
+//   flags     critical
+//   ports     high
+//   sshkeys   medium
+//   updates   low
+//
+// See posture_test.go for table-driven tests that lock every boundary.
+
 package security
 
 // PostureGrade is an A-F letter grade.
