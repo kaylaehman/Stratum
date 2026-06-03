@@ -9,20 +9,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/kaylaehman/stratum/backend/db"
 	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
 )
-
-// stubStore captures InsertFileEvent calls for assertion.
-type stubStore struct {
-	db.Store // embed interface; all methods except InsertFileEvent panic if called
-	inserted []db.FileEvent
-}
-
-func (s *stubStore) InsertFileEvent(_ context.Context, e db.FileEvent) error {
-	s.inserted = append(s.inserted, e)
-	return nil
-}
 
 func TestPersistEvents(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
