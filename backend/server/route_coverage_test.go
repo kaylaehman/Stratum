@@ -124,6 +124,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/containers/{id}/snapshot":                true,
 		"POST /api/containers/{id}/rollback/{snap}":         true,
 		"PUT /api/containers/{id}/healthcheck":              true,
+		"POST /api/containers/{id}/proxy":                   true,
 		"POST /api/scripts":                                 true,
 		"PUT /api/scripts/{id}":                             true,
 		"DELETE /api/scripts/{id}":                          true,

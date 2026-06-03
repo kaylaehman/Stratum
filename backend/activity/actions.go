@@ -103,6 +103,7 @@ const (
 	ActionSkillGenerate = "skill.generate"
 
 	ActionProxyConfig   = "proxy.config"
+	ActionProxyRouteAdd = "proxy.route.add"
 	ActionDNSConfig     = "dns.config"
 	ActionFeatureToggle = "feature.toggle"
 	ActionChatConfig    = "chat.config"
@@ -296,6 +297,7 @@ var actionCatalog = []ActionInfo{
 	{ActionSkillGenerate, "Troubleshooting skill drafted by AI", "skill", TargetSkill},
 
 	{ActionProxyConfig, "Reverse-proxy endpoint configured", "proxy", TargetNode},
+	{ActionProxyRouteAdd, "Reverse-proxy route added", "proxy", TargetContainer},
 	{ActionDNSConfig, "DNS endpoint configured", "dns", TargetNode},
 	{ActionFeatureToggle, "Feature toggled", "feature", TargetUser},
 	{ActionChatConfig, "Chat bot configured", "chat", TargetUser},

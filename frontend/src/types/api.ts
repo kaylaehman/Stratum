@@ -1541,6 +1541,53 @@ export interface DiscoverCloudflareRequest {
   account_id?: string
 }
 
+// ── Per-container reverse proxy ───────────────────────────────────────────────
+
+/** A proxy (on some node) that can add a route to this container. */
+export interface ProxyAddTarget {
+  node_id: string
+  node_name: string
+  adapter: string
+  capabilities: ProxyCapabilities
+  /** cloudflare-api: the tunnel a route would be added to. */
+  cf_tunnel_id?: string
+}
+
+/** A container's reverse-proxy state: the hostnames already routing to it, the
+ *  proxies that can add a route, and suggested target URLs from its ports. */
+export interface ContainerProxyStatus {
+  container_id: string
+  routes: ProxyRule[]
+  add_targets: ProxyAddTarget[]
+  suggested_targets: string[]
+}
+
+export interface AddProxyRouteRequest {
+  proxy_node_id: string
+  source_host: string
+  target_url: string
+  path?: string
+  create_dns: boolean
+  dry_run: boolean
+}
+
+/** Result of an add (or a dry-run preview of one). */
+export interface AddProxyRoutePlan {
+  proxy_node_id: string
+  adapter: string
+  source_host: string
+  target_url: string
+  path?: string
+  create_dns: boolean
+  /** Human-readable preview of the CNAME that would be created (cloudflare-api). */
+  dns_record?: string
+  /** True when the route was actually written (false for a dry-run). */
+  applied: boolean
+  rule?: ProxyRule
+  /** Non-fatal post-write issue (e.g. route added but DNS couldn't be ensured). */
+  warning?: string
+}
+
 // Feature Flags types
 
 export interface FeatureFlag {
