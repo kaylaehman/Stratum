@@ -17,14 +17,14 @@
 -- This migration is idempotent: if cve_schedules is already empty or the
 -- table does not exist, the INSERT/UPDATE is a no-op and the DROP succeeds.
 
--- 1. Ensure the automation row exists so we can update it.
-INSERT OR IGNORE INTO automations (key, enabled, interval_seconds, config_json, updated_at)
+-- 1. Ensure the automation row exists so we can update it. (The automations
+-- table has no updated_at column — it tracks last_run/last_status/last_detail.)
+INSERT OR IGNORE INTO automations (key, enabled, interval_seconds, config_json)
 VALUES (
     'scheduled_cve_scan',
     0,
     86400,
-    '{"targets":[]}',
-    CURRENT_TIMESTAMP
+    '{"targets":[]}'
 );
 
 -- 2+3. Merge schedule targets into the automation config. We set enabled=1
@@ -53,8 +53,7 @@ SET
     enabled = CASE
         WHEN EXISTS (SELECT 1 FROM cve_schedules WHERE enabled = 1) THEN 1
         ELSE enabled
-    END,
-    updated_at = CURRENT_TIMESTAMP
+    END
 WHERE key = 'scheduled_cve_scan';
 
 -- 4. Remove the old table.

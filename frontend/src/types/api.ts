@@ -1197,29 +1197,6 @@ export interface CVEBulkScanResponse {
   results: CVEBulkScanResult[]
 }
 
-export interface CveSchedule {
-  id: string
-  target_type: 'node' | 'container'
-  target_id: string
-  label: string
-  interval_seconds: number
-  enabled: boolean
-  created_by: string
-  created_at: string
-  last_run_at?: string
-}
-
-export interface CVESchedulesResponse {
-  schedules: CveSchedule[]
-}
-
-export interface CreateCveScheduleRequest {
-  target_type: 'node' | 'container'
-  target_id: string
-  label: string
-  interval_seconds: number
-}
-
 // Script Runner types (Feature 27)
 
 export interface Script {
