@@ -23,8 +23,18 @@ import (
 	"github.com/kaylaehman/stratum/backend/recreate"
 	"github.com/kaylaehman/stratum/backend/remediation"
 	"github.com/kaylaehman/stratum/backend/security"
+	"github.com/kaylaehman/stratum/backend/updates"
 	"github.com/kaylaehman/stratum/backend/volumes"
 )
+
+// managerNames joins detected management-tool names for a log/detail line.
+func managerNames(tools []updates.ManagementTool) string {
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		names = append(names, t.Name)
+	}
+	return strings.Join(names, "+")
+}
 
 // Deps holds all service references required to build the 15 handlers.
 // All fields that are nil cause the relevant handler to return "skipped".
@@ -229,7 +239,7 @@ func autoUpdateContainersHandler(store db.Store, conn *nodeconn.Manager, recreat
 		if err != nil {
 			return "", fmt.Errorf("list nodes: %w", err)
 		}
-		updated, errs := 0, []string{}
+		updated, errs, skipped := 0, []string{}, []string{}
 		for _, n := range containers {
 			caps, _ := capabilities.Parse([]byte(n.CapabilitiesJSON))
 			if !caps.Docker {
@@ -237,6 +247,16 @@ func autoUpdateContainersHandler(store db.Store, conn *nodeconn.Manager, recreat
 			}
 			ctrs, err := store.ListContainersByNode(ctx, n.ID)
 			if err != nil {
+				continue
+			}
+			// Overlap guard: if this host runs a tool that updates containers on
+			// its own (Watchtower), don't fight it — skip the host and report it.
+			images := make([]string, 0, len(ctrs))
+			for _, c := range ctrs {
+				images = append(images, c.Image)
+			}
+			if managers := updates.DetectManagers(images); updates.HasAutoUpdater(managers) {
+				skipped = append(skipped, fmt.Sprintf("%s (runs %s)", n.Name, managerNames(managers)))
 				continue
 			}
 			for _, c := range ctrs {
@@ -251,6 +271,9 @@ func autoUpdateContainersHandler(store db.Store, conn *nodeconn.Manager, recreat
 			}
 		}
 		detail := fmt.Sprintf("updated %d container(s) in allowlisted projects", updated)
+		if len(skipped) > 0 {
+			detail += "; skipped hosts with their own updater: " + strings.Join(skipped, ", ")
+		}
 		if len(errs) > 0 {
 			detail += "; errors: " + strings.Join(errs, "; ")
 			return detail, fmt.Errorf("%d update error(s)", len(errs))

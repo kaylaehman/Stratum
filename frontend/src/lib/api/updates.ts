@@ -20,9 +20,26 @@ export interface UpdatesSummary {
   unknown_breakdown: UnknownBreakdownItem[]
 }
 
+/** An external management tool (Watchtower/Portainer) found on a host. */
+export interface ManagementTool {
+  name: string
+  /** True when the tool updates containers on its own (Watchtower) — an active
+   *  conflict with a Stratum-driven update, not just a second management UI. */
+  auto_updates: boolean
+}
+
+/** A host that also runs a tool whose actions can conflict with Stratum updates. */
+export interface OverlapNode {
+  node_id: string
+  node_name: string
+  managers: ManagementTool[]
+  auto_updates: boolean
+}
+
 /** Extended locally — do NOT edit the shared types/api.ts UpdatesResponse */
 export interface UpdatesResponse extends _UpdatesResponse {
   summary?: UpdatesSummary
+  overlaps?: OverlapNode[]
 }
 
 // ---- Query keys ----
