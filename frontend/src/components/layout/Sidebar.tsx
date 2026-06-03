@@ -110,7 +110,6 @@ const navGroups: NavGroup[] = [
     label: 'Operations',
     children: [
       { icon: <ArrowUpCircle size={14} />, label: 'Updates', to: '/updates' },
-      { icon: <ListChecks size={14} />, label: 'Bulk Ops', to: '/bulk' },
       { icon: <LayoutTemplate size={14} />, label: 'Templates', to: '/templates' },
       { icon: <Archive size={14} />, label: 'Backups', to: '/backups' },
       { icon: <Terminal size={14} />, label: 'Scripts', to: '/scripts', adminOnly: true },

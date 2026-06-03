@@ -17,7 +17,6 @@ import Volumes from './pages/Volumes'
 import Metrics from './pages/Metrics'
 import Network from './pages/Network'
 import Dependencies from './pages/Dependencies'
-import Bulk from './pages/Bulk'
 import Notifications from './pages/Notifications'
 import Updates from './pages/Updates'
 import Templates from './pages/Templates'
@@ -176,14 +175,7 @@ function AppRoutes() {
             </AuthGuard>
           }
         />
-        <Route
-          path="/bulk"
-          element={
-            <AuthGuard>
-              <Bulk />
-            </AuthGuard>
-          }
-        />
+        <Route path="/bulk" element={<Navigate to="/stacks" replace />} />
         <Route
           path="/notifications"
           element={
