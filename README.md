@@ -130,11 +130,11 @@ Core navigation and the diagnostics that are the reason this exists:
 Shipped and working, newer / hardening:
 
 - **Agent (gRPC over mTLS)** — real-time inotify file-watch streaming + init-system detection
-- **Agentic remediation** — propose → approve → execute host fixes, risk-classified with a positive low-risk allowlist; anything not allowlisted requires TOTP step-up; destructive needs admin
-- **Security posture score** — A–F per node composed from CVE / privileged / exposed-port / stale-key / outdated-image signals
-- **Incident timeline** — "what changed?" across the activity log, metric spikes, restarts, and file events
-- **Uptime monitoring** — HTTP/TCP/ICMP checks with history and uptime %
-- **Stacks edit & redeploy** — edit live Compose stacks with Secrets-backed env injection (never written to disk)
+- **Agentic remediation** — propose → approve → execute host fixes, risk-classified with a positive low-risk allowlist; anything not allowlisted requires TOTP step-up; destructive needs admin (`feature.remediation`)
+- **Security posture score** — A–F per node composed from CVE / privileged / exposed-port / stale-key / outdated-image signals (`feature.posture_score`)
+- **Incident timeline** — "what changed?" across the activity log, metric spikes, restarts, and file events (`feature.incident_timeline`)
+- **Uptime monitoring** — HTTP/TCP/ICMP checks with history and uptime % (`feature.uptime_monitoring`)
+- **Stacks edit & redeploy** — edit live Compose stacks with Secrets-backed env injection (never written to disk) (`feature.stacks_edit`)
 - **Automations engine** — 15 user-configurable autonomous automations (self-heal, update, security, maintenance) built on the remediation engine and existing services, each independently toggled with its own schedule; destructive ones default off and dry-run, every run audited (`feature.automations`, `backend/automation`, `/automations`)
 
 ### Planned

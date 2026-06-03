@@ -36,6 +36,7 @@ import Stacks from './pages/Stacks'
 import Incidents from './pages/Incidents'
 import Uptime from './pages/Uptime'
 import Automations from './pages/Automations'
+import { FeatureGuard } from './components/common/FeatureGuard'
 
 function SetupRedirect() {
   const navigate = useNavigate()
@@ -133,7 +134,9 @@ function AppRoutes() {
           path="/stacks"
           element={
             <AuthGuard>
-              <Stacks />
+              <FeatureGuard flag="feature.stacks_edit" name="Stacks edit & redeploy">
+                <Stacks />
+              </FeatureGuard>
             </AuthGuard>
           }
         />
@@ -141,7 +144,9 @@ function AppRoutes() {
           path="/incidents"
           element={
             <AuthGuard>
-              <Incidents />
+              <FeatureGuard flag="feature.incident_timeline" name="Incident timeline">
+                <Incidents />
+              </FeatureGuard>
             </AuthGuard>
           }
         />
@@ -149,7 +154,9 @@ function AppRoutes() {
           path="/uptime"
           element={
             <AuthGuard>
-              <Uptime />
+              <FeatureGuard flag="feature.uptime_monitoring" name="Uptime monitoring">
+                <Uptime />
+              </FeatureGuard>
             </AuthGuard>
           }
         />
@@ -285,7 +292,9 @@ function AppRoutes() {
           path="/automations"
           element={
             <AuthGuard>
-              <Automations />
+              <FeatureGuard flag="feature.automations" name="Automations">
+                <Automations />
+              </FeatureGuard>
             </AuthGuard>
           }
         />

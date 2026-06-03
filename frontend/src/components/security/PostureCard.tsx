@@ -1,5 +1,6 @@
 import { ShieldCheck, AlertTriangle, Loader } from 'lucide-react'
 import { usePosture } from '../../lib/api/security'
+import { useFeatureEnabled } from '../../lib/api/features'
 import type { PostureGrade, RemediationItem, RemediationSeverity } from '../../types/api'
 
 // ---- Grade colour helpers ----
@@ -143,7 +144,11 @@ interface PostureCardProps {
 }
 
 export function PostureCard({ nodeId }: PostureCardProps) {
-  const { data, isLoading, isError } = usePosture(nodeId, nodeId !== '')
+  const postureEnabled = useFeatureEnabled('feature.posture_score')
+  const { data, isLoading, isError } = usePosture(nodeId, nodeId !== '' && postureEnabled)
+
+  // Hidden entirely when the posture-score feature is disabled.
+  if (!postureEnabled) return null
 
   if (isLoading) {
     return (
