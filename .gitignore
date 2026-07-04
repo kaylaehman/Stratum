@@ -127,3 +127,6 @@ frontend/playwright-report/
 scripts/.auth/
 # Temporary screenshot staging area (committed PNGs live in assets/screenshots/)
 assets/screenshots/.tmp/
+
+# local secrets / editor cruft (sweep 2026-07-04)
+.claude/settings.local.json
