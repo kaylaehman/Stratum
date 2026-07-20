@@ -31,6 +31,11 @@ type diagnosticResult struct {
 // Diagnostic explains whether a container can access a host file, with a
 // step-by-step narrative and suggested fixes ("Why is this broken?").
 func (h *Handlers) Diagnostic(w http.ResponseWriter, r *http.Request) {
+	// The diagnostic stats arbitrary host paths (container-vs-host access
+	// analysis) — host reconnaissance, so operator-gated like the host-FS reads.
+	if !h.requireOperator(w, r) {
+		return
+	}
 	ctr, clients, ok := h.resolveContainer(w, r)
 	if !ok {
 		return

@@ -26,6 +26,11 @@ const topologyTimeout = 45 * time.Second
 // A 502 is only returned when the DB itself cannot be queried or the node
 // record is not found — not when Docker is merely unavailable.
 func (h *Handlers) NodeTopology(w http.ResponseWriter, r *http.Request) {
+	// Network topology is host reconnaissance — operator-gated, matching the
+	// host-FS reads (a read-only viewer has no need to map the node's network).
+	if !h.requireOperator(w, r) {
+		return
+	}
 	nodeID := chi.URLParam(r, "id")
 	_, err := h.Store.GetNode(r.Context(), nodeID)
 	if errors.Is(err, db.ErrNotFound) {
