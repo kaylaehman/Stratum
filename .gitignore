@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 *.local
+# local security audit notes — keep out of the repo
+SECURITY-AUDIT-*.md
 # Stratum runtime data dir (SQLite DB, agent CA, snapshots)
 /data/
 data/
@@ -110,6 +112,8 @@ docs/superpowers/specs/
 .claude-flow/
 .swarm/
 .hive-mind/
+.fablize/
+.remember/
 ruvector.db
 
 # Playwright e2e artifacts
