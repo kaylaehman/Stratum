@@ -55,6 +55,11 @@ type Config struct {
 	// if they resolve to an internal (non-loopback) address — e.g. a LAN-hosted
 	// Ollama. Loopback is always allowed. From STRATUM_EGRESS_ALLOW_HOSTS (CSV).
 	EgressAllowHosts []string
+
+	// AgentBinDir holds the per-arch agent binaries the backend serves to the
+	// install script. Defaults to /app/agent-bin (where the Docker image bakes
+	// them). From AGENT_BIN_DIR.
+	AgentBinDir string
 }
 
 // splitCSV parses a comma-separated env value into a trimmed, non-empty slice.
@@ -84,6 +89,11 @@ func Load() (*Config, error) {
 		SkillsDir:       os.Getenv("SKILLS_DIR"),
 		MetricsToken:    strings.TrimSpace(os.Getenv("STRATUM_METRICS_TOKEN")),
 		EgressAllowHosts: splitCSV(os.Getenv("STRATUM_EGRESS_ALLOW_HOSTS")),
+		AgentBinDir:      os.Getenv("AGENT_BIN_DIR"),
+	}
+
+	if cfg.AgentBinDir == "" {
+		cfg.AgentBinDir = "/app/agent-bin"
 	}
 
 	// SKILLS_DIR defaults to the image's library path; missing dir loads nothing.

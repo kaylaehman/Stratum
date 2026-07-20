@@ -11,6 +11,7 @@ import (
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/alertpolicy"
 	"github.com/kaylaehman/stratum/backend/auth"
+	"github.com/kaylaehman/stratum/backend/agentinstall"
 	"github.com/kaylaehman/stratum/backend/automation"
 	"github.com/kaylaehman/stratum/backend/backup"
 	"github.com/kaylaehman/stratum/backend/certs"
@@ -81,6 +82,7 @@ type Handlers struct {
 	AI             *ai.Service
 	Remediation    *remediation.Service
 	Certs          *certs.Service
+	AgentInstall   *agentinstall.Service
 	Proxy          *proxy.Service
 	DNS            *dnspkg.Service
 	Features       *features.Service
@@ -112,6 +114,9 @@ type Handlers struct {
 	// expensive external-LLM egress endpoint per client IP. Both fail open when nil.
 	LoginLimiter *keyedLimiter
 	AIAskLimiter *keyedLimiter
+	// AgentTokenLimiter throttles the token-authed agent enroll/binary endpoints
+	// per client IP (enroll is a cert-issuance oracle; binary is a bandwidth sink).
+	AgentTokenLimiter *keyedLimiter
 
 	// userMu serialises admin-count-sensitive user mutations (role change,
 	// delete) so two concurrent demotions can't both pass the last-admin guard

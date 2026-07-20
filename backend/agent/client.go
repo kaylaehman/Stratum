@@ -81,7 +81,9 @@ func (m *Manager) Get(ctx context.Context, nodeID string) (*Client, error) {
 		return nil, fmt.Errorf("agent: no TLS config available; cannot connect to agent on node %s", nodeID)
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(m.tlsCfg)))
+	// Pin ServerName to the node's stable SAN so this connection verifies the
+	// agent's specific issued cert, not merely any CA-signed cert.
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(pinnedTLS(m.tlsCfg, nodeID))))
 	if err != nil {
 		return nil, fmt.Errorf("agent: dial %s: %w", addr, err)
 	}

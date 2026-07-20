@@ -60,6 +60,14 @@ func NewRouter(d *Deps) http.Handler {
 		r.Post("/auth/login", d.Handlers.Login)
 		r.Post("/auth/refresh", d.Handlers.Refresh)
 
+		// Agent enrollment: authenticated by a single-use enrollment token (not a
+		// JWT session) that the install script carries, so these are mounted
+		// outside the mw.Auth group. Node-scoped; rate-limited in the handlers.
+		// binary = validate token (non-secret artifact); enroll = consume token
+		// and sign the CSR.
+		r.Get("/nodes/{id}/agent/binary", d.Handlers.AgentBinary)
+		r.Post("/nodes/{id}/agent/enroll", d.Handlers.AgentEnroll)
+
 		// Authenticated.
 		r.Group(func(r chi.Router) {
 			r.Use(mw.Auth(d.JWT, d.Store))
@@ -293,6 +301,9 @@ func NewRouter(d *Deps) http.Handler {
 			audited.Put("/nodes/{id}", d.Handlers.RenameNode)
 			audited.Delete("/nodes/{id}", d.Handlers.DeleteNode)
 			audited.Post("/nodes/{id}/probe", d.Handlers.ReprobeNode)
+			// Generate the hardened agent install script (mints a single-use
+			// enrollment token — credential issuance, so admin+step-up+audited).
+			audited.Post("/nodes/{id}/agent/install", d.Handlers.AgentInstallScript)
 			audited.Post("/nodes/probe-preview", d.Handlers.ProbePreview)
 			audited.Put("/nodes/{id}/fs/file", d.Handlers.FSWriteFile)
 			audited.Post("/nodes/{id}/fs/upload", d.Handlers.FSUpload)

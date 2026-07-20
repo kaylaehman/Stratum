@@ -9,7 +9,24 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/kaylaehman/stratum/backend/agentinstall"
 )
+
+// pinnedTLS returns a copy of base with ServerName set to the node's stable SAN
+// (<node-id>.stratum.internal). This is load-bearing: without it the backend
+// verifies only that the agent's cert chains to the CA, so ANY node's cert would
+// authenticate as ANY node. Pinning ServerName per dial makes each connection
+// verify it is talking to that specific node's issued cert. The SAN is stable
+// (not the node's current IP), so a re-IP'd node's cert stays valid.
+func pinnedTLS(base *tls.Config, nodeID string) *tls.Config {
+	if base == nil {
+		return nil
+	}
+	c := base.Clone()
+	c.ServerName = agentinstall.StableSAN(nodeID)
+	return c
+}
 
 // ClientTLSConfig builds a *tls.Config for the backend's outbound gRPC
 // connections to agents. certFile/keyFile are the backend's own client cert;

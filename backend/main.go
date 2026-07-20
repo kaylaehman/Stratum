@@ -20,6 +20,7 @@ import (
 
 	"github.com/kaylaehman/stratum/backend/activity"
 	"github.com/kaylaehman/stratum/backend/agent"
+	"github.com/kaylaehman/stratum/backend/agentinstall"
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/alertpolicy"
 	"github.com/kaylaehman/stratum/backend/api"
@@ -218,13 +219,15 @@ func run(logger *slog.Logger) error {
 	// A missing or invalid CA is non-fatal: agent capabilities remain disabled
 	// and SSH-only nodes continue to function unchanged.
 	var agentTLSCfg *tls.Config
+	var agentCA *certauth.CA
 	if cfg.AgentCACertPath != "" {
 		var tlsErr error
 		if cfg.AgentCAKeyPath != "" {
 			// Mint the backend's mTLS client cert from the CA at startup. The agent
 			// gRPC server enforces RequireAndVerifyClientCert, so without a client
 			// cert the handshake is refused — this is what makes mTLS actually work.
-			// The cert is in-memory and re-issued on every restart.
+			// The cert is in-memory and re-issued on every restart. The same CA is
+			// reused to sign agent enrollment CSRs (agentinstall).
 			ca, caErr := certauth.LoadCA(cfg.AgentCACertPath, cfg.AgentCAKeyPath)
 			if caErr != nil {
 				logger.Warn("agent: load CA for client-cert issuance failed; agent streaming disabled",
@@ -235,6 +238,7 @@ func run(logger *slog.Logger) error {
 				logger.Warn("agent: TLS config build failed; agent streaming disabled",
 					"ca_cert", cfg.AgentCACertPath, "error", tlsErr)
 			} else {
+				agentCA = ca
 				logger.Info("agent: mTLS enabled (backend client cert issued from CA)")
 			}
 		} else {
@@ -253,6 +257,9 @@ func run(logger *slog.Logger) error {
 	}
 	agentMgr := agent.NewManager(store, agentTLSCfg, logger)
 	agentOrch := agent.NewOrchestrator(store, agentMgr, agentTLSCfg, logger)
+	// Agent install-script generator (CSR enrollment + backend-served binary).
+	// Enabled only when the CA is loaded and binaries are baked into the image.
+	agentInstallSvc := agentinstall.New(agentCA, store, cfg.AgentBinDir, cfg.BaseURL)
 
 	fileWatchSvc := filewatch.New(store, filesSvc.Exec)
 	fileWatchSvc.SetNotify(func(ctx context.Context, trigger, title, text string) {
@@ -413,6 +420,10 @@ func run(logger *slog.Logger) error {
 		// blocking a fat-fingering legit user); AI asks throttled 1 per 3s, burst 4.
 		LoginLimiter: api.NewKeyedLimiter(2*time.Second, 8),
 		AIAskLimiter: api.NewKeyedLimiter(3*time.Second, 4),
+		// Agent enroll/binary are token-authed and internet/LAN-reachable; throttle
+		// per IP (enroll is a cert-issuance oracle if a token leaks).
+		AgentTokenLimiter: api.NewKeyedLimiter(time.Second, 10),
+		AgentInstall:      agentInstallSvc,
 	}
 
 	promReg := prommetrics.Registry(store, h)

@@ -34,6 +34,10 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/setup/admin":  true,
 		"POST /api/auth/login":   true,
 		"POST /api/auth/refresh": true,
+		// Enrollment-token-authed (not JWT); audited manually in the handler on
+		// success. Mounted outside the JWT+activity group because the install
+		// script runs on a fresh node with no session.
+		"POST /api/nodes/{id}/agent/enroll": true,
 	}
 
 	// POST routes that are read-only or ephemeral, not resource mutations, so they
@@ -72,6 +76,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 	// update here — the prompt to confirm the route is audited.
 	auditedMutating := map[string]bool{
 		"POST /api/auth/logout":                             true,
+		"POST /api/nodes/{id}/agent/install":                true,
 		"POST /api/nodes":                                   true,
 		"PUT /api/nodes/{id}":                               true,
 		"DELETE /api/nodes/{id}":                            true,

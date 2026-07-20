@@ -47,6 +47,11 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 		"POST /api/setup/admin":  true, // pre-auth: first-run admin creation
 		"POST /api/auth/login":   true,
 		"POST /api/auth/refresh": true, // uses the refresh cookie, not a bearer token
+		// Agent enrollment: authenticated by a single-use enrollment token (checked
+		// in-handler), not a JWT session — the install script runs on a fresh node
+		// with no session. Rejects a tokenless request with 401/503 via its own gate.
+		"GET /api/nodes/{id}/agent/binary":  true,
+		"POST /api/nodes/{id}/agent/enroll": true,
 	}
 
 	c := &http.Client{}

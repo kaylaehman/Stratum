@@ -42,7 +42,7 @@ func UpdateAgentCapabilities(ctx context.Context, store db.Store, tlsCfg *tls.Co
 		caps, _ := capabilities.Parse([]byte(node.CapabilitiesJSON))
 
 		pctx, cancel := context.WithTimeout(ctx, probeAgentTimeout)
-		reachable := ProbeAgent(pctx, node.Host, tlsCfg)
+		reachable := ProbeAgent(pctx, node.ID, node.Host, tlsCfg)
 		cancel()
 
 		if reachable == caps.Agent {
