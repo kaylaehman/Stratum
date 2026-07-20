@@ -312,6 +312,12 @@ func (h *Handlers) AIAsk(w http.ResponseWriter, r *http.Request) {
 	if !h.requireOperator(w, r) {
 		return
 	}
+	// Per-IP throttle: each call egresses caller-supplied infra context to an
+	// external/local LLM and can be slow and costly, so cap the request rate.
+	if !h.AIAskLimiter.Allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "rate_limited")
+		return
+	}
 	var req aiAskRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_body")

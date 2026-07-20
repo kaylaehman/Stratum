@@ -107,6 +107,12 @@ type Handlers struct {
 	// PreviewLimiter throttles the SSRF-adjacent probe-preview endpoint.
 	PreviewLimiter *rate.Limiter
 
+	// LoginLimiter throttles the unauthenticated login endpoint per client IP
+	// (brute-force / credential-stuffing defense). AIAskLimiter throttles the
+	// expensive external-LLM egress endpoint per client IP. Both fail open when nil.
+	LoginLimiter *keyedLimiter
+	AIAskLimiter *keyedLimiter
+
 	// userMu serialises admin-count-sensitive user mutations (role change,
 	// delete) so two concurrent demotions can't both pass the last-admin guard
 	// and leave zero admins. Single-process SQLite deployment, so an in-process

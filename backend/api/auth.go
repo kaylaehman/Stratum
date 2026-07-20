@@ -35,6 +35,13 @@ type userView struct {
 // Login verifies credentials, issues an access token, and sets a rotating
 // refresh cookie scoped to /api/auth.
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
+	// Per-IP throttle before any work: login is unauthenticated and a brute-force
+	// / credential-stuffing target. Keyed by client IP so one attacker can't lock
+	// out other users (a shared limiter would).
+	if !h.LoginLimiter.Allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "rate_limited")
+		return
+	}
 	var req loginRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_body")

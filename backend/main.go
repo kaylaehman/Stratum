@@ -385,6 +385,10 @@ func run(logger *slog.Logger) error {
 		StartedAt:      time.Now(),
 		SecureCookies:  strings.HasPrefix(cfg.BaseURL, "https"),
 		PreviewLimiter: rate.NewLimiter(rate.Every(2*time.Second), 5),
+		// Per-IP: ~8 quick login tries then 1 per 2s (brute-force defense without
+		// blocking a fat-fingering legit user); AI asks throttled 1 per 3s, burst 4.
+		LoginLimiter: api.NewKeyedLimiter(2*time.Second, 8),
+		AIAskLimiter: api.NewKeyedLimiter(3*time.Second, 4),
 	}
 
 	promReg := prommetrics.Registry(store, h)
