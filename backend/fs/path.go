@@ -42,3 +42,36 @@ func IsDenied(p string) bool {
 	}
 	return false
 }
+
+// sshPrivKeyNames are the conventional basenames of SSH private keys.
+var sshPrivKeyNames = map[string]struct{}{
+	"id_rsa": {}, "id_dsa": {}, "id_ecdsa": {}, "id_ed25519": {},
+}
+
+// IsSensitiveRead reports whether a path is a credential file (the shadow
+// password database, an SSH private key, or the TLS private-key store) that must
+// never be served through the file browser — regardless of role. This is a
+// narrow, read-side complement to IsDenied: unlike deniedRoots it does NOT block
+// all of /etc, so legitimate config-file browsing still works; it blocks only the
+// specific secret-bearing files. Callers pass a cleaned path.
+func IsSensitiveRead(p string) bool {
+	clean := path.Clean(p)
+	switch clean {
+	case "/etc/shadow", "/etc/gshadow", "/etc/shadow-", "/etc/gshadow-":
+		return true
+	}
+	if clean == "/etc/ssl/private" || strings.HasPrefix(clean, "/etc/ssl/private/") {
+		return true
+	}
+	base := path.Base(clean)
+	if _, ok := sshPrivKeyNames[base]; ok {
+		return true
+	}
+	// Private key material inside any .ssh directory (custom-named keys, *.pem/*.key),
+	// excluding public keys.
+	if strings.Contains(clean, "/.ssh/") && !strings.HasSuffix(base, ".pub") &&
+		(strings.HasPrefix(base, "id_") || strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".key")) {
+		return true
+	}
+	return false
+}

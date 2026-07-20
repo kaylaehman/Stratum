@@ -120,6 +120,12 @@ func (h *Handlers) RunScript(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
+	// Running an arbitrary script as root on hosts is high-risk — require a fresh
+	// TOTP step-up (fail-closed when the feature is on), matching FSDelete/DeleteNode.
+	// The frontend apiFetch 428 interceptor drives the challenge + retry.
+	if !h.requireStepUp(w, r) {
+		return
+	}
 	s, err := h.Store.GetScript(r.Context(), chi.URLParam(r, "id"))
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found")

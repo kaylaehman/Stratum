@@ -36,6 +36,12 @@ func writeFSError(w http.ResponseWriter, err error) {
 
 // FSList lists a directory.
 func (h *Handlers) FSList(w http.ResponseWriter, r *http.Request) {
+	// Host-FS reads are operator-gated (matching container-FS reads and the
+	// admin-gated write side): the node SSH user is typically root, so a lower
+	// role could otherwise read /etc/shadow, SSH keys, and other host secrets.
+	if !h.requireOperator(w, r) {
+		return
+	}
 	entries, truncated, err := h.Files.List(r.Context(), chi.URLParam(r, "id"), r.URL.Query().Get("path"))
 	if err != nil {
 		writeFSError(w, err)
@@ -48,6 +54,9 @@ func (h *Handlers) FSList(w http.ResponseWriter, r *http.Request) {
 // (case-insensitive). Read-only; bounded by the fs service's depth/result/time
 // caps. Returns {hits, truncated}.
 func (h *Handlers) FSSearch(w http.ResponseWriter, r *http.Request) {
+	if !h.requireOperator(w, r) {
+		return
+	}
 	q := r.URL.Query()
 	hits, truncated, err := h.Files.Search(r.Context(), chi.URLParam(r, "id"), q.Get("path"), q.Get("q"))
 	if err != nil {
@@ -60,6 +69,9 @@ func (h *Handlers) FSSearch(w http.ResponseWriter, r *http.Request) {
 // FSReadFile returns a file's inline preview (<=5MB) or a tooLarge flag, with a
 // Last-Modified header for lost-update protection on PUT.
 func (h *Handlers) FSReadFile(w http.ResponseWriter, r *http.Request) {
+	if !h.requireOperator(w, r) {
+		return
+	}
 	content, tooLarge, modTime, err := h.Files.Preview(r.Context(), chi.URLParam(r, "id"), r.URL.Query().Get("path"))
 	if err != nil {
 		writeFSError(w, err)
@@ -113,6 +125,9 @@ func (h *Handlers) FSWriteFile(w http.ResponseWriter, r *http.Request) {
 
 // FSDownload streams a file.
 func (h *Handlers) FSDownload(w http.ResponseWriter, r *http.Request) {
+	if !h.requireOperator(w, r) {
+		return
+	}
 	rc, err := h.Files.Download(r.Context(), chi.URLParam(r, "id"), r.URL.Query().Get("path"))
 	if err != nil {
 		writeFSError(w, err)

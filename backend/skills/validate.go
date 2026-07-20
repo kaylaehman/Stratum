@@ -20,6 +20,7 @@ package skills
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -128,6 +129,15 @@ func validateSkill(sk Skill, prefix string, seenIDs map[string]struct{}) []error
 	if sk.Category != "" {
 		if _, ok := AllowedCategories[sk.Category]; !ok {
 			errs = append(errs, fmt.Errorf("%s: unknown category %q", prefix, sk.Category))
+		}
+	}
+
+	// --- docs_url scheme ---
+	// docs_url is rendered as an anchor href in the UI; reject non-http(s) schemes
+	// so a user-authored skill can't smuggle a javascript:/data: URL (stored XSS).
+	if s := strings.TrimSpace(sk.DocsURL); s != "" {
+		if u, err := url.Parse(s); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			errs = append(errs, fmt.Errorf("%s: docs_url must be an http(s) URL", prefix))
 		}
 	}
 

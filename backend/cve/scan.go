@@ -97,7 +97,9 @@ func (s *Scanner) Scan(ctx context.Context, imageRef string) ([]Vuln, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	// --quiet suppresses progress; --scanners vuln limits to CVE scanning.
-	cmd := exec.CommandContext(ctx, s.bin, "image", "--format", "json", "--quiet", "--scanners", "vuln", imageRef)
+	// `--` ends option parsing so an image ref beginning with `-` can't be
+	// misread as a flag (defense in depth; argv already avoids shell injection).
+	cmd := exec.CommandContext(ctx, s.bin, "image", "--format", "json", "--quiet", "--scanners", "vuln", "--", imageRef)
 	cmd.Env = s.env()
 	out, err := cmd.Output()
 	if err != nil {

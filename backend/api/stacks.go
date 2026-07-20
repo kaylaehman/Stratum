@@ -138,6 +138,12 @@ func auditCreateStack(r *http.Request, nodeID, project, composePath string, crea
 // GetStackCompose returns the current compose YAML for a named stack on a node.
 // Requires docker capability; degrades to 409 Conflict if not available.
 func (h *Handlers) GetStackCompose(w http.ResponseWriter, r *http.Request) {
+	// Admin-gated: raw compose YAML routinely embeds inline secrets (DB URLs,
+	// passwords, API keys). Sibling env/config ops are already admin-gated, and
+	// ListStackEnvVars masks values — the raw compose text must not bypass that.
+	if !h.requireAdmin(w, r) {
+		return
+	}
 	nodeID := chi.URLParam(r, "id")
 	project := chi.URLParam(r, "project")
 

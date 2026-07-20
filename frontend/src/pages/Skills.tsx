@@ -1027,7 +1027,7 @@ function SkillDetailPanel({ id, onClose, onEdit, onClone, onDelete, onPromoteToR
               </div>
             )}
 
-            {skill.docs_url && (
+            {/^https?:\/\//i.test(skill.docs_url ?? '') && (
               <a
                 href={skill.docs_url}
                 target="_blank"

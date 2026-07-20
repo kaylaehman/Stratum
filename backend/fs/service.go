@@ -324,6 +324,11 @@ func (s *Service) Preview(ctx context.Context, nodeID, p string) (content []byte
 	if err != nil {
 		return nil, false, time.Time{}, err
 	}
+	// Defense in depth on top of the operator role gate: never serve credential
+	// files (shadow db, SSH/TLS private keys) through the browser, for any role.
+	if IsSensitiveRead(clean) {
+		return nil, false, time.Time{}, ErrDenied
+	}
 	prov, closer, err := s.open(ctx, nodeID)
 	if err != nil {
 		return nil, false, time.Time{}, err
@@ -356,6 +361,9 @@ func (s *Service) Download(ctx context.Context, nodeID, p string) (io.ReadCloser
 	clean, err := ValidatePath(p)
 	if err != nil {
 		return nil, err
+	}
+	if IsSensitiveRead(clean) {
+		return nil, ErrDenied
 	}
 	prov, closer, err := s.open(ctx, nodeID)
 	if err != nil {
