@@ -29,7 +29,11 @@ type terminalControl struct {
 //   - client -> server: BINARY = stdin bytes; TEXT = JSON terminalControl (resize)
 //   - server -> client: BINARY = PTY output
 func (h *Handlers) NodeTerminal(w http.ResponseWriter, r *http.Request) {
-	if !h.requireAdmin(w, r) {
+	// Admin + fresh TOTP step-up before anything else — an interactive root shell
+	// is the highest-risk action. Gated before the SSH dial so an admin who hasn't
+	// stepped up can't even probe node reachability. This is the authoritative
+	// control (returns 428 pre-upgrade); the frontend preflight is only UX.
+	if !h.requireAdminStepUp(w, r) {
 		return
 	}
 	nodeID := chi.URLParam(r, "id")

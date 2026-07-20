@@ -80,3 +80,28 @@ func (h *Handlers) requireStepUp(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
+
+// requireAdminStepUp enforces admin role AND a fresh TOTP step-up, in that order.
+// It is written as one short-circuited expression on purpose: requireAdmin writes
+// its 403 and returns false before requireStepUp runs, so there is no
+// double-write to the ResponseWriter, and a non-admin caller never learns whether
+// step-up / TOTP enrollment is required (no info leak). Do NOT rewrite this as
+// "compute both then AND" — that would double-invoke and double-write.
+func (h *Handlers) requireAdminStepUp(w http.ResponseWriter, r *http.Request) bool {
+	return h.requireAdmin(w, r) && h.requireStepUp(w, r)
+}
+
+// StepUpPreflight is a resource-agnostic gate check: it runs requireAdminStepUp
+// and returns 200 {ok:true} on success (or 403/428 on failure). The frontend
+// calls it — via apiFetch, which turns a 428 into the StepUp modal + retry —
+// BEFORE opening a step-up-gated WebSocket such as the node terminal, because a
+// browser WebSocket handshake exposes neither the HTTP status nor the body needed
+// to drive that modal. It performs no side effects (no SSH dial, no resource
+// lookup); the WebSocket handler re-checks the same gate authoritatively, so this
+// is purely a UX affordance, not the security boundary.
+func (h *Handlers) StepUpPreflight(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdminStepUp(w, r) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}

@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useAuthStore } from '../../store/auth'
+import { apiPost } from '../../lib/api'
 
 export type TerminalStatus = 'connecting' | 'connected' | 'closed' | 'error'
 
@@ -52,44 +53,83 @@ export function TerminalView({ nodeId, reconnectKey, onStatusChange }: TerminalV
       // container not laid out yet — the ResizeObserver below will fit shortly.
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${protocol}//${window.location.host}/api/nodes/${nodeId}/terminal`
-    const token = useAuthStore.getState().accessToken
-    const ws = token ? new WebSocket(url, ['bearer', token]) : new WebSocket(url)
-    ws.binaryType = 'arraybuffer'
-
+    // ws is created only after a successful step-up preflight, so the effect goes
+    // async here. `cancelled` guards every post-await action against an unmount /
+    // nodeId change that happens while the preflight is in flight.
+    let cancelled = false
+    let retriedOnce = false
+    let ws: WebSocket | null = null
     let errored = false
 
     function sendResize() {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
       }
     }
 
-    ws.onopen = () => {
-      onStatusChange?.('connected')
-      sendResize()
-      term.focus()
-    }
-    ws.onmessage = (ev) => {
-      if (ev.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(ev.data))
-      } else if (typeof ev.data === 'string') {
-        term.write(ev.data)
+    // connect opens the PTY WebSocket and wires its handlers. Called only from
+    // openTerminalSocket, i.e. after the step-up preflight has passed.
+    function connect() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const url = `${protocol}//${window.location.host}/api/nodes/${nodeId}/terminal`
+      const token = useAuthStore.getState().accessToken
+      const sock = token ? new WebSocket(url, ['bearer', token]) : new WebSocket(url)
+      sock.binaryType = 'arraybuffer'
+      ws = sock
+      errored = false
+      let opened = false
+
+      sock.onopen = () => {
+        opened = true
+        onStatusChange?.('connected')
+        sendResize()
+        term.focus()
+      }
+      sock.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(ev.data))
+        } else if (typeof ev.data === 'string') {
+          term.write(ev.data)
+        }
+      }
+      sock.onerror = () => {
+        errored = true
+      }
+      sock.onclose = () => {
+        // Closed before it ever opened: the step-up grace window may have lapsed
+        // between the preflight 200 and the WS handshake. Re-run the whole flow
+        // (preflight included) exactly once — a bare reconnect can't surface a
+        // fresh step-up challenge, since a WS handshake carries no response body.
+        if (!opened && !retriedOnce && !cancelled) {
+          retriedOnce = true
+          void openTerminalSocket()
+          return
+        }
+        onStatusChange?.(errored ? 'error' : 'closed')
+        term.write('\r\n\x1b[2m[disconnected]\x1b[0m\r\n')
       }
     }
-    ws.onerror = () => {
-      errored = true
-      onStatusChange?.('error')
-    }
-    ws.onclose = () => {
-      onStatusChange?.(errored ? 'error' : 'closed')
-      term.write('\r\n\x1b[2m[disconnected]\x1b[0m\r\n')
+
+    // openTerminalSocket runs the step-up preflight, then connects. The preflight
+    // goes through apiFetch, whose 428 handler shows the StepUp modal and retries —
+    // the only way to challenge step-up before a WebSocket that can't carry a 428.
+    async function openTerminalSocket() {
+      try {
+        await apiPost('/api/stepup/preflight', {})
+      } catch {
+        // 403 (not admin), a step-up the user dismissed, or a network error. The
+        // apiFetch interceptor already surfaced the modal for a 428; here we just
+        // report failure and do NOT open a shell.
+        if (!cancelled) onStatusChange?.('error')
+        return
+      }
+      if (cancelled) return
+      connect()
     }
 
-    // Forward keystrokes as UTF-8 binary frames.
+    // Forward keystrokes as UTF-8 binary frames (registered once; guards ws).
     const dataDisp = term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(new TextEncoder().encode(data))
       }
     })
@@ -97,7 +137,7 @@ export function TerminalView({ nodeId, reconnectKey, onStatusChange }: TerminalV
     const resizeDisp = term.onResize(() => sendResize())
 
     function sendText(text: string) {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(new TextEncoder().encode(text))
       }
     }
@@ -148,13 +188,20 @@ export function TerminalView({ nodeId, reconnectKey, onStatusChange }: TerminalV
     })
     observer.observe(container)
 
+    // Kick off: step-up preflight, then connect. Everything above is registered
+    // synchronously so it exists by the time the awaited preflight resolves.
+    void openTerminalSocket()
+
     return () => {
+      cancelled = true
       container.removeEventListener('contextmenu', onContextMenu)
       observer.disconnect()
       dataDisp.dispose()
       resizeDisp.dispose()
-      ws.onclose = null // avoid status callback after unmount
-      ws.close()
+      if (ws) {
+        ws.onclose = null // avoid status callback / retry after unmount
+        ws.close()
+      }
       term.dispose()
     }
   }, [nodeId, reconnectKey, onStatusChange])

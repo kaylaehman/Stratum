@@ -48,6 +48,7 @@ func TestNoUnauditedMutatingRoutes(t *testing.T) {
 		"POST /api/templates/{id}/render":                true, // pure string substitution; no state change
 		"POST /api/runbooks/{id}/validate":               true, // lints a runbook; no state change
 		"POST /api/nodes/{id}/proxy/cloudflare/discover": true, // read-only Cloudflare account/tunnel lookup; token used in-memory, no state change
+		"POST /api/stepup/preflight":                     true, // pure gate check (admin+step-up); no side effect, no SSH dial; the WS it precedes audits node.terminal
 	}
 
 	// Per-user preference mutations (bookmarks): user-owned state, not

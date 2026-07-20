@@ -64,6 +64,10 @@ func NewRouter(d *Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(mw.Auth(d.JWT, d.Store))
 			r.Get("/me", d.Handlers.Me)
+			// Generic step-up gate check; the frontend calls this before opening a
+			// step-up-gated WebSocket (e.g. the node terminal) so a 428 can surface
+			// the StepUp modal that a WS handshake can't. Unaudited (no side effect).
+			r.Post("/stepup/preflight", d.Handlers.StepUpPreflight)
 			r.Get("/me/2fa", d.Handlers.TwoFAStatus)
 			r.Get("/ws", d.Handlers.WebSocket)
 			// Interactive host shell over SSH (admin-gated in handler; audited).
