@@ -1,0 +1,42 @@
+# Keeps dependencies and SHA-pinned GitHub Actions current. Actions are pinned to
+# commit SHAs (supply-chain hardening) in the workflows; Dependabot bumps those
+# pins so they don't rot, and raises PRs for Go modules, npm, and base images.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /agent
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /proto
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
