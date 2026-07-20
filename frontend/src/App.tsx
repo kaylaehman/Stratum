@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from './providers/ThemeProvider'
 import { queryClient } from './lib/queryClient'
 import { AuthGuard } from './components/AuthGuard'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSetupStatus } from './hooks/useSetupStatus'
 import Login from './pages/Login'
 import Setup from './pages/Setup'
@@ -301,7 +302,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <BrowserRouter>
-          <AppRoutes />
+          <ErrorBoundary>
+            <AppRoutes />
+          </ErrorBoundary>
         </BrowserRouter>
       </ThemeProvider>
     </QueryClientProvider>

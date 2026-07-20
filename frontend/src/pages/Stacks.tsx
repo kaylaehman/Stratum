@@ -1203,18 +1203,18 @@ function NodePicker({ selected, onSelect }: NodePickerProps) {
               <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
                   <Cpu size={10} />
-                  {rec.headroom.cpu_free_pct.toFixed(0)}% CPU free
+                  {(rec.headroom?.cpu_free_pct ?? 0).toFixed(0)}% CPU free
                 </span>
                 <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
                   <MemoryStick size={10} />
-                  {formatBytes(rec.headroom.mem_free_bytes)} RAM free
+                  {formatBytes(rec.headroom?.mem_free_bytes ?? 0)} RAM free
                 </span>
               </div>
 
               {/* Reasons */}
-              {rec.reasons.length > 0 && (
+              {(rec.reasons?.length ?? 0) > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {rec.reasons.map((r) => (
+                  {(rec.reasons ?? []).map((r) => (
                     <span
                       key={r}
                       className="text-xs px-1.5 py-0.5"
