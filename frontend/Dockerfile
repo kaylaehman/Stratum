@@ -1,5 +1,5 @@
 # Build the Vite SPA and serve the static bundle with nginx.
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci || npm install
