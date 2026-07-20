@@ -84,9 +84,10 @@ func (h *Handlers) AgentInstallScript(w http.ResponseWriter, r *http.Request) {
 		e.TargetID = &nodeID
 	}
 
-	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="stratum-agent-install.sh"`)
-	_, _ = w.Write([]byte(script))
+	// JSON so the SPA (which must fetch this through apiFetch for the step-up 428
+	// flow) can read the body and offer it as a download; the token embedded in
+	// the script is single-use and short-lived.
+	writeJSON(w, http.StatusOK, map[string]any{"script": script})
 }
 
 // AgentBinary streams the agent binary for the requested arch. Authenticated by

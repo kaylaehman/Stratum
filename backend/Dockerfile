@@ -17,6 +17,20 @@ RUN go mod download
 COPY backend/ ./
 RUN go build -trimpath -ldflags="-s -w" -o /out/stratum .
 
+# Build the per-host agent for both linux arches so the backend can serve either
+# to the install script (the target node's arch is detected at install time).
+# Separate stage: the agent is its own module. GOWORK=off, and the agent's
+# `replace => ../proto` resolves /proto from /src, mirroring the backend stage.
+FROM golang:1.26 AS agent-build
+ENV GOWORK=off CGO_ENABLED=0 GOOS=linux
+WORKDIR /src
+COPY proto/ /proto/
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
+COPY agent/ ./
+RUN GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/agent-bin/stratum-agent-linux-amd64 . \
+ && GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /out/agent-bin/stratum-agent-linux-arm64 .
+
 # Optional Trivy stage. The aquasec/trivy image is multi-arch; BuildKit resolves
 # the platform from TARGETPLATFORM, so the COPY in app-trivy lands the correct
 # amd64/arm64 binary. BuildKit skips unreferenced stages, so the default build
@@ -26,6 +40,9 @@ FROM aquasec/trivy:${TRIVY_VERSION} AS trivy
 # Shared runtime image (no Trivy). Basis for both variants below.
 FROM gcr.io/distroless/static-debian12:nonroot AS app-base
 COPY --from=build /out/stratum /stratum
+# Per-arch agent binaries served to the install script; AGENT_BIN_DIR defaults
+# to /app/agent-bin.
+COPY --from=agent-build /out/agent-bin /app/agent-bin
 # Container-troubleshooting skill library (reference data). Build context is the
 # repo root, so assets/skills is available; SKILLS_DIR defaults to /app/skills.
 COPY assets/skills /app/skills

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Server, Box, Terminal, Plus, RefreshCw, Pencil, Trash2, Check, X, Loader, Layers } from 'lucide-react'
+import { Server, Box, Terminal, Plus, RefreshCw, Pencil, Trash2, Check, X, Loader, Layers, Download } from 'lucide-react'
 import { AppShell } from '../components/layout/AppShell'
 import { AddNodeWizard } from '../components/nodes/AddNodeWizard'
 import { EditDockerModal } from '../components/nodes/EditDockerModal'
 import { useNodes, useDeleteNode, useRenameNode, useReprobeNode } from '../lib/api/nodes'
+import { fetchAgentInstallScript } from '../lib/api/agent'
 import { ApiError } from '../lib/api'
 import { useDrainPlan, useDrainExecute } from '../lib/api/orchestration'
 import { useCan } from '../lib/roles'
@@ -382,6 +383,25 @@ function RowActions({ node, onEditDocker, onDrain }: { node: NodeView; onEditDoc
   const [mode, setMode] = useState<'idle' | 'rename' | 'delete'>('idle')
   const reprobe = useReprobeNode()
   const { isAdmin } = useCan()
+  const [installing, setInstalling] = useState(false)
+
+  async function handleInstallAgent() {
+    setInstalling(true)
+    try {
+      const script = await fetchAgentInstallScript(node.id)
+      const blob = new Blob([script], { type: 'text/x-shellscript' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'stratum-agent-install.sh'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      // apiFetch surfaced the step-up modal or an error toast already.
+    } finally {
+      setInstalling(false)
+    }
+  }
 
   if (mode === 'rename') {
     return <RenameInline node={node} onDone={() => setMode('idle')} />
@@ -405,6 +425,11 @@ function RowActions({ node, onEditDocker, onDrain }: { node: NodeView; onEditDoc
       {isAdmin && (
         <ActionButton label="Drain node (ordered stop)" danger onClick={onDrain}>
           <Layers size={12} />
+        </ActionButton>
+      )}
+      {isAdmin && (
+        <ActionButton label="Install agent (download script)" loading={installing} onClick={() => void handleInstallAgent()}>
+          <Download size={12} />
         </ActionButton>
       )}
       <ActionButton label="Rename" onClick={() => setMode('rename')}>
