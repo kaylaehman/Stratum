@@ -165,6 +165,10 @@ PGP is not currently required; plain-text email is fine.
 | Authentication | JWT (RS256 or HS256), configurable expiry |
 | Secrets at rest | AES-256-GCM, key from `ENCRYPTION_KEY` / `ENCRYPTION_KEY_FILE` |
 | Agent channel | gRPC over mTLS (CA-issued certs) |
+| Proxmox TLS | Certificate verification **on** by default; `InsecureSkipVerify` is per-node opt-in for homelab self-signed certs and must be enabled explicitly per endpoint |
+| AI egress | Dial-time SSRF guard blocks private/link-local/metadata addresses; loopback (local Ollama) allowed, LAN hosts via `STRATUM_EGRESS_ALLOW_HOSTS` |
+| Metrics endpoint | `/metrics` requires `STRATUM_METRICS_TOKEN` bearer, or loopback-only when unset |
+| Brute-force defense | Per-IP rate limit on login and AI-ask |
 | Remediation gating | Positive allowlist + TOTP step-up (fail-closed) |
 | Audit trail | Append-only activity log, all mutations |
 | CVE scanning | Trivy (preferred) or Grype, per image digest |
