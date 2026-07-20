@@ -25,8 +25,8 @@ export default {
         'status-muted': 'var(--status-muted)',
       },
       fontFamily: {
-        sans: ['"DM Sans"', 'sans-serif'],
-        mono: ['"Space Mono"', 'monospace'],
+        sans: ['"IBM Plex Sans"', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'monospace'],
       },
       fontSize: {
         base: ['0.875rem', { lineHeight: '1.5' }],

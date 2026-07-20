@@ -383,7 +383,7 @@ export function FileEditor({ nodeId, dirPath, entry, onClose }: FileEditorProps)
                 editable={true}
                 basicSetup={{ lineNumbers: true, foldGutter: true }}
                 theme="dark"
-                style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+                style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace" }}
               />
             )}
           </div>

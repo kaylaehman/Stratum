@@ -12,6 +12,8 @@
 
 # Stratum
 
+<p align="center"><em>A <a href="https://kaelabs.dev">KAE Labs</a> project — an independent studio for applied data, AI, and software.</em></p>
+
 Self-hosted, unified infrastructure management for the messy middle — bridging hypervisors, VMs, bare Linux servers, and Docker containers into one pane of glass. Built for homelabs and small teams where no single tool (Portainer, Cockpit, the Proxmox UI) covers the full stack.
 
 Navigate host → VM → container → filesystem → file permissions in a single UI, with deep diagnostic tooling for the permission conflicts, bind-mount weirdness, and silent access failures that eat hours of debugging time.

@@ -71,7 +71,7 @@ function CronEditor({ user, jobs, nodeId, onClose }: CronEditorProps) {
           editable={!isPending}
           basicSetup={{ lineNumbers: true, foldGutter: false }}
           theme="dark"
-          style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+          style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace" }}
         />
       </div>
       {errorMsg && (

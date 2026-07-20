@@ -18,9 +18,10 @@
   --text-muted: #4a5268;
   --text-inverse: #0b0e13;
 
-  --accent: #00c2cc;
-  --accent-dim: #007a82;
-  --accent-glow: rgba(0, 194, 204, 0.15);
+  /* KAE Labs accent — cobalt (#2E4BD8). Single signal color across the UI. */
+  --accent: #2e4bd8;
+  --accent-dim: #1f36a3;
+  --accent-glow: rgba(46, 75, 216, 0.15);
 
   --status-ok: #22c97a;
   --status-warn: #f0a020;
@@ -35,17 +36,26 @@ html,
 body {
   background-color: var(--bg-base);
   color: var(--text-primary);
-  font-family: 'DM Sans', sans-serif;
+  /* KAE Labs type system: IBM Plex Sans for body/UI. */
+  font-family: 'IBM Plex Sans', sans-serif;
   font-size: 1rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Space Grotesk for display headings, per the KAE brand system. */
+h1,
+h2,
+.font-display {
+  font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  letter-spacing: -0.01em;
+}
+
 code,
 pre,
 .font-mono {
-  font-family: 'Space Mono', monospace;
+  font-family: 'IBM Plex Mono', monospace;
 }
 
 * {
@@ -110,7 +120,7 @@ pre,
 .assistant-md a { color: var(--accent); text-decoration: underline; }
 .assistant-md strong { color: var(--text-primary); font-weight: 600; }
 .assistant-md code {
-  font-family: 'Space Mono', monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.78em;
   background: var(--bg-base);
   border: 1px solid var(--border-subtle);

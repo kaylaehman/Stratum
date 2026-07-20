@@ -460,7 +460,7 @@ export function LogViewer({ initialContainer }: LogViewerProps) {
         className="flex-1 overflow-auto"
         style={{
           backgroundColor: 'var(--bg-base)',
-          fontFamily: "'Space Mono', monospace",
+          fontFamily: "'IBM Plex Mono', monospace",
         }}
       >
         {selectedContainers.length === 0 ? (

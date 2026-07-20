@@ -660,7 +660,7 @@ function ScriptEditor({ script, isAdmin, onClose, onSaved, onDelete, onRun }: Sc
             editable={isAdmin}
             basicSetup={{ lineNumbers: true, foldGutter: false }}
             theme="dark"
-            style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+            style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace" }}
           />
         </div>
         <p className="text-xs mt-1.5" style={{ color: 'var(--text-muted)' }}>

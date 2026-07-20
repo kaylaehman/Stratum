@@ -581,7 +581,7 @@ function RenderPanel({ templateId, templateName, vars, isAdmin, onDeploy, onClos
                   editable={false}
                   basicSetup={{ lineNumbers: true }}
                   theme="dark"
-                  style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+                  style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace" }}
                 />
               </div>
             </div>
@@ -1242,7 +1242,7 @@ function TemplateEditor({ templateId, isAdmin, onClose, onSaved }: TemplateEdito
               editable={canEdit}
               basicSetup={{ lineNumbers: true, foldGutter: true }}
               theme="dark"
-              style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+              style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace" }}
             />
           </div>
         </div>

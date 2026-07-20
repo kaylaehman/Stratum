@@ -873,7 +873,7 @@ function StackEditModal({ stack, isAdmin, secretGroups, onClose }: StackEditModa
                     editable={isAdmin}
                     basicSetup={{ lineNumbers: true }}
                     theme="dark"
-                    style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+                    style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace" }}
                   />
                 </div>
               </div>
@@ -1013,7 +1013,7 @@ function StackEditModal({ stack, isAdmin, secretGroups, onClose }: StackEditModa
                       whiteSpace: 'pre-wrap',
                       maxHeight: '120px',
                       overflowY: 'auto',
-                      fontFamily: "'Space Mono', monospace",
+                      fontFamily: "'IBM Plex Mono', monospace",
                     }}
                   >
                     {deployOutput}
@@ -1610,7 +1610,7 @@ function CreateStackModal({ secretGroups, templates, onClose, onCreated }: Creat
                     extensions={langExt ? [langExt] : []}
                     basicSetup={{ lineNumbers: true }}
                     theme="dark"
-                    style={{ fontSize: '12px', fontFamily: "'Space Mono', monospace" }}
+                    style={{ fontSize: '12px', fontFamily: "'IBM Plex Mono', monospace" }}
                     placeholder={'services:\n  app:\n    image: nginx:latest\n    ports:\n      - "80:80"'}
                   />
                 </div>
@@ -1774,7 +1774,7 @@ function CreateStackModal({ secretGroups, templates, onClose, onCreated }: Creat
                       whiteSpace: 'pre-wrap',
                       maxHeight: '120px',
                       overflowY: 'auto',
-                      fontFamily: "'Space Mono', monospace",
+                      fontFamily: "'IBM Plex Mono', monospace",
                     }}
                   >
                     {deployOutput}

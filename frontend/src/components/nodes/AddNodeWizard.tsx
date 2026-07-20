@@ -40,7 +40,7 @@ const INPUT_STYLE: React.CSSProperties = {
   width: '100%',
   padding: '6px 10px',
   fontSize: '12px',
-  fontFamily: 'Space Mono, monospace',
+  fontFamily: 'IBM Plex Mono, monospace',
   outline: 'none',
 }
 
