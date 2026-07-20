@@ -275,3 +275,19 @@ func (s *Service) issueToken(ctx context.Context, nodeID, createdBy string) (str
 func (s *Service) Purge(ctx context.Context) (int64, error) {
 	return s.tokens.PurgeExpiredEnrollTokens(ctx)
 }
+
+// Run purges used/expired enrollment tokens hourly until ctx is done, so the
+// agent_enroll_tokens table can't grow unbounded from unused install-script
+// generations.
+func (s *Service) Run(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			_, _ = s.Purge(ctx)
+		}
+	}
+}

@@ -165,6 +165,7 @@ PGP is not currently required; plain-text email is fine.
 | Authentication | JWT (RS256 or HS256), configurable expiry |
 | Secrets at rest | AES-256-GCM, key from `ENCRYPTION_KEY` / `ENCRYPTION_KEY_FILE` |
 | Agent channel | gRPC over mTLS (CA-issued certs) |
+| Agent enrollment | CSR flow — the agent generates its key on its own host; the backend signs the CSR (proof-of-possession, ECDSA P-256, backend-controlled SAN). Single-use, hashed, node-scoped, 15-min enrollment token; hardened non-root systemd install. Per-dial ServerName pinning to `<node-id>.stratum.internal` so a cert can't impersonate another node |
 | Proxmox TLS | Certificate verification **on** by default; `InsecureSkipVerify` is per-node opt-in for homelab self-signed certs and must be enabled explicitly per endpoint |
 | AI egress | Dial-time SSRF guard blocks private/link-local/metadata addresses; loopback (local Ollama) allowed, LAN hosts via `STRATUM_EGRESS_ALLOW_HOSTS` |
 | Metrics endpoint | `/metrics` requires `STRATUM_METRICS_TOKEN` bearer, or loopback-only when unset |

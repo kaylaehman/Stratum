@@ -439,6 +439,7 @@ func run(logger *slog.Logger) error {
 	go chatSvc.Run(ctx)                             // inbound chat-command poller (no-op until enabled+configured)
 	go uptimeSvc.Run(ctx)                           // uptime monitor checker loop
 	go automationEngine.Run(ctx)                    // automation engine tick loop (60s); stops on shutdown
+	go agentInstallSvc.Run(ctx)                     // hourly purge of used/expired agent enrollment tokens
 	go func() {
 		t := time.NewTicker(24 * time.Hour)
 		defer t.Stop()
