@@ -50,6 +50,23 @@ type Config struct {
 	// When empty, /metrics is restricted to loopback callers (secure default:
 	// never exposed on a public interface without an explicit token).
 	MetricsToken string
+
+	// EgressAllowHosts are hostnames the SSRF-guarded AI transport may reach even
+	// if they resolve to an internal (non-loopback) address — e.g. a LAN-hosted
+	// Ollama. Loopback is always allowed. From STRATUM_EGRESS_ALLOW_HOSTS (CSV).
+	EgressAllowHosts []string
+}
+
+// splitCSV parses a comma-separated env value into a trimmed, non-empty slice.
+// Returns nil for an empty/blank input.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Load reads configuration from the environment and validates it.
@@ -66,6 +83,7 @@ func Load() (*Config, error) {
 		AdminPassword:   os.Getenv("STRATUM_ADMIN_PASSWORD"),
 		SkillsDir:       os.Getenv("SKILLS_DIR"),
 		MetricsToken:    strings.TrimSpace(os.Getenv("STRATUM_METRICS_TOKEN")),
+		EgressAllowHosts: splitCSV(os.Getenv("STRATUM_EGRESS_ALLOW_HOSTS")),
 	}
 
 	// SKILLS_DIR defaults to the image's library path; missing dir loads nothing.

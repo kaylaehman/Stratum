@@ -199,7 +199,7 @@ func run(logger *slog.Logger) error {
 	twoFASvc := twofa.New(store, cipher)
 	recreateSvc := recreate.New(store, recreate.ClientProvider(dockerForNode))
 	stacksSvc := stacks.New(store, filesSvc, cipher)
-	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL)
+	aiSvc := ai.New(store, cipher, cfg.AnthropicKey, cfg.OllamaBaseURL, cfg.EgressAllowHosts)
 	proxySvc := proxy.New(store, cipher)
 	proxySvc.WithFiles(filesSvc)
 	dnsSvc := dnspkg.New(store, cipher)

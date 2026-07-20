@@ -13,6 +13,7 @@ import (
 
 	"github.com/kaylaehman/stratum/backend/crypto"
 	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/kaylaehman/stratum/backend/netguard"
 )
 
 // httpTimeout bounds a single provider call (the API handler also applies a
@@ -32,12 +33,16 @@ type Service struct {
 }
 
 // New wires the service. envClaudeKey/envOllamaURL are optional defaults from
-// the process environment.
-func New(store db.Store, cipher *crypto.Cipher, envClaudeKey, envOllamaURL string) *Service {
+// the process environment. egressAllow lists hostnames permitted to resolve to
+// an internal address (e.g. a LAN-hosted Ollama); loopback is always allowed.
+func New(store db.Store, cipher *crypto.Cipher, envClaudeKey, envOllamaURL string, egressAllow []string) *Service {
 	return &Service{
-		store:        store,
-		cipher:       cipher,
-		http:         &http.Client{Timeout: httpTimeout},
+		store: store,
+		cipher: cipher,
+		// SSRF-hardened transport: the provider base URL is config-influenced, so
+		// block egress to metadata/internal ranges at dial time while keeping a
+		// local Ollama (loopback) working. See netguard.
+		http:         &http.Client{Timeout: httpTimeout, Transport: netguard.Transport(egressAllow)},
 		envClaudeKey: envClaudeKey,
 		envOllamaURL: strings.TrimSpace(envOllamaURL),
 	}
