@@ -130,7 +130,7 @@ func buildTestServer(t *testing.T) (*httptest.Server, string, appdb.Store) {
 		Backups:        backup.New(store, filesSvc.Exec),
 		TwoFA:          twofa.New(store, cipher),
 		Recreate:       recreate.New(store, recreate.ClientProvider(noDocker)),
-		AI:             ai.New(store, cipher, "", ""),
+		AI:             ai.New(store, cipher, "", "", nil),
 		Certs:          certs.New(store, filesSvc.Exec, time.Minute),
 		Proxy:          proxy.New(store, cipher),
 		DNS:            dnspkg.New(store, cipher),
