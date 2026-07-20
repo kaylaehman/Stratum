@@ -50,3 +50,17 @@ func ClientTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 
 	return tlsCfg, nil
 }
+
+// ClientTLSConfigWithCert builds the backend's outbound mTLS config using an
+// already-issued client certificate (e.g. minted from the CA at startup by
+// certauth) rather than loading one from disk. The agent's gRPC server enforces
+// tls.RequireAndVerifyClientCert, so this client cert is what makes the
+// connection mutual — without it the handshake is refused by the agent.
+func ClientTLSConfigWithCert(caFile string, clientCert tls.Certificate) (*tls.Config, error) {
+	cfg, err := ClientTLSConfig("", "", caFile)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Certificates = []tls.Certificate{clientCert}
+	return cfg, nil
+}

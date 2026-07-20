@@ -19,7 +19,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/prommetrics"
 	"github.com/kaylaehman/stratum/backend/agent"
 	"github.com/kaylaehman/stratum/backend/ai"
 	"github.com/kaylaehman/stratum/backend/alertpolicy"
@@ -27,14 +26,21 @@ import (
 	"github.com/kaylaehman/stratum/backend/auth"
 	"github.com/kaylaehman/stratum/backend/automation"
 	"github.com/kaylaehman/stratum/backend/backup"
+	"github.com/kaylaehman/stratum/backend/certauth"
+	"github.com/kaylaehman/stratum/backend/certs"
+	"github.com/kaylaehman/stratum/backend/chatbot"
 	"github.com/kaylaehman/stratum/backend/config"
 	"github.com/kaylaehman/stratum/backend/configversion"
 	"github.com/kaylaehman/stratum/backend/crypto"
+	"github.com/kaylaehman/stratum/backend/cve"
 	"github.com/kaylaehman/stratum/backend/db"
 	"github.com/kaylaehman/stratum/backend/db/sqlite"
 	"github.com/kaylaehman/stratum/backend/depgraph"
+	dnspkg "github.com/kaylaehman/stratum/backend/dns"
 	"github.com/kaylaehman/stratum/backend/docker"
 	"github.com/kaylaehman/stratum/backend/drexport"
+	"github.com/kaylaehman/stratum/backend/features"
+	"github.com/kaylaehman/stratum/backend/filewatch"
 	"github.com/kaylaehman/stratum/backend/forecast"
 	"github.com/kaylaehman/stratum/backend/fs"
 	"github.com/kaylaehman/stratum/backend/hub"
@@ -46,25 +52,20 @@ import (
 	"github.com/kaylaehman/stratum/backend/nodes"
 	"github.com/kaylaehman/stratum/backend/orchestration"
 	"github.com/kaylaehman/stratum/backend/permissions"
-	"github.com/kaylaehman/stratum/backend/proxy"
+	"github.com/kaylaehman/stratum/backend/placement"
+	"github.com/kaylaehman/stratum/backend/prommetrics"
 	"github.com/kaylaehman/stratum/backend/proxmox"
+	"github.com/kaylaehman/stratum/backend/proxy"
+	"github.com/kaylaehman/stratum/backend/push"
 	"github.com/kaylaehman/stratum/backend/recreate"
 	"github.com/kaylaehman/stratum/backend/remediation"
-	"github.com/kaylaehman/stratum/backend/certs"
-	"github.com/kaylaehman/stratum/backend/chatbot"
-	"github.com/kaylaehman/stratum/backend/cve"
-	dnspkg "github.com/kaylaehman/stratum/backend/dns"
-	"github.com/kaylaehman/stratum/backend/features"
-	"github.com/kaylaehman/stratum/backend/filewatch"
-	"github.com/kaylaehman/stratum/backend/placement"
-	"github.com/kaylaehman/stratum/backend/push"
-	"github.com/kaylaehman/stratum/backend/sso"
 	"github.com/kaylaehman/stratum/backend/scheduler"
 	"github.com/kaylaehman/stratum/backend/secrets"
 	"github.com/kaylaehman/stratum/backend/security"
 	"github.com/kaylaehman/stratum/backend/server"
-	"github.com/kaylaehman/stratum/backend/stacks"
 	"github.com/kaylaehman/stratum/backend/skills"
+	"github.com/kaylaehman/stratum/backend/sso"
+	"github.com/kaylaehman/stratum/backend/stacks"
 	"github.com/kaylaehman/stratum/backend/topology"
 	"github.com/kaylaehman/stratum/backend/twofa"
 	"github.com/kaylaehman/stratum/backend/updates"
@@ -219,10 +220,33 @@ func run(logger *slog.Logger) error {
 	var agentTLSCfg *tls.Config
 	if cfg.AgentCACertPath != "" {
 		var tlsErr error
-		agentTLSCfg, tlsErr = agent.ClientTLSConfig("", "", cfg.AgentCACertPath)
-		if tlsErr != nil {
-			logger.Warn("agent: TLS config build failed; agent streaming disabled",
-				"ca_cert", cfg.AgentCACertPath, "error", tlsErr)
+		if cfg.AgentCAKeyPath != "" {
+			// Mint the backend's mTLS client cert from the CA at startup. The agent
+			// gRPC server enforces RequireAndVerifyClientCert, so without a client
+			// cert the handshake is refused — this is what makes mTLS actually work.
+			// The cert is in-memory and re-issued on every restart.
+			ca, caErr := certauth.LoadCA(cfg.AgentCACertPath, cfg.AgentCAKeyPath)
+			if caErr != nil {
+				logger.Warn("agent: load CA for client-cert issuance failed; agent streaming disabled",
+					"error", caErr)
+			} else if clientCert, issErr := ca.IssueClientCert("stratum-backend", 365*24*time.Hour); issErr != nil {
+				logger.Warn("agent: issue backend client cert failed; agent streaming disabled", "error", issErr)
+			} else if agentTLSCfg, tlsErr = agent.ClientTLSConfigWithCert(cfg.AgentCACertPath, clientCert); tlsErr != nil {
+				logger.Warn("agent: TLS config build failed; agent streaming disabled",
+					"ca_cert", cfg.AgentCACertPath, "error", tlsErr)
+			} else {
+				logger.Info("agent: mTLS enabled (backend client cert issued from CA)")
+			}
+		} else {
+			// CA cert without the CA key: we can verify agents but cannot present a
+			// client cert. Agents that RequireAndVerifyClientCert will refuse us.
+			logger.Warn("agent: AGENT_CA_KEY_PATH not set; backend cannot present a client cert — " +
+				"agent streaming will fail against agents requiring mutual auth. Set AGENT_CA_KEY_PATH.")
+			agentTLSCfg, tlsErr = agent.ClientTLSConfig("", "", cfg.AgentCACertPath)
+			if tlsErr != nil {
+				logger.Warn("agent: TLS config build failed; agent streaming disabled",
+					"ca_cert", cfg.AgentCACertPath, "error", tlsErr)
+			}
 		}
 	} else {
 		logger.Info("agent: AGENT_CA_CERT_PATH not set; agent streaming disabled")
@@ -416,7 +440,7 @@ func run(logger *slog.Logger) error {
 			}
 		}
 	}()
-	go uptimeSvc.RunPrune(ctx, 90*24*time.Hour)     // prune results older than 90 days
+	go uptimeSvc.RunPrune(ctx, 90*24*time.Hour) // prune results older than 90 days
 	// Agent streaming: probe existing nodes for agent reachability, then start
 	// the watch-file orchestrator. Both are no-ops when agentTLSCfg is nil
 	// (AGENT_CA_CERT_PATH not configured), so SSH-only nodes are unaffected.
