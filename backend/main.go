@@ -392,7 +392,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	promReg := prommetrics.Registry(store, h)
-	router := server.NewRouter(&server.Deps{Handlers: handlers, JWT: jwt, Store: store, PromRegistry: promReg})
+	router := server.NewRouter(&server.Deps{Handlers: handlers, JWT: jwt, Store: store, PromRegistry: promReg, MetricsToken: cfg.MetricsToken})
 	srv := server.New(fmt.Sprintf(":%d", cfg.Port), router, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -21,9 +21,13 @@ type Deps struct {
 	JWT       *auth.JWT
 	Store     db.Store
 	// PromRegistry is the Prometheus registry for Stratum's own metrics.
-	// When non-nil, GET /metrics is registered as a public, unauthenticated
-	// Prometheus scrape endpoint.  When nil the route is omitted.
+	// When non-nil, GET /metrics is registered as a Prometheus scrape endpoint,
+	// guarded by MetricsToken (bearer token when set, else loopback-only).
+	// When nil the route is omitted.
 	PromRegistry *prometheus.Registry
+	// MetricsToken, when set, is the bearer token required to scrape /metrics.
+	// Empty means loopback-only access. See metricsGuard.
+	MetricsToken string
 }
 
 // NewRouter builds the chi router with the middleware order mandated by the
@@ -39,13 +43,15 @@ func NewRouter(d *Deps) http.Handler {
 	// Public, unauthenticated.
 	r.Get("/health", d.Handlers.Health)
 
-	// Prometheus scrape endpoint — top-level, outside /api, no auth required.
-	// Mount only when a registry is provided; omitting keeps the route absent in
-	// test setups that do not configure Prometheus.
+	// Prometheus scrape endpoint — top-level, outside /api. Guarded by
+	// metricsGuard (bearer token when STRATUM_METRICS_TOKEN is set, else
+	// loopback-only). Mount only when a registry is provided; omitting keeps the
+	// route absent in test setups that do not configure Prometheus.
 	if d.PromRegistry != nil {
-		r.Get("/metrics", promhttp.HandlerFor(d.PromRegistry, promhttp.HandlerOpts{
+		metricsHandler := promhttp.HandlerFor(d.PromRegistry, promhttp.HandlerOpts{
 			EnableOpenMetrics: true,
-		}).ServeHTTP)
+		})
+		r.Get("/metrics", metricsGuard(d.MetricsToken, metricsHandler).ServeHTTP)
 	}
 
 	r.Route("/api", func(r chi.Router) {

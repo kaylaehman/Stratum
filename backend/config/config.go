@@ -45,6 +45,11 @@ type Config struct {
 	// Optional first-run admin seed (CI/automation escape hatch). Empty unless set.
 	AdminUser     string
 	AdminPassword string
+
+	// MetricsToken, when set, is the bearer token required to scrape GET /metrics.
+	// When empty, /metrics is restricted to loopback callers (secure default:
+	// never exposed on a public interface without an explicit token).
+	MetricsToken string
 }
 
 // Load reads configuration from the environment and validates it.
@@ -60,6 +65,7 @@ func Load() (*Config, error) {
 		AdminUser:       os.Getenv("STRATUM_ADMIN_USER"),
 		AdminPassword:   os.Getenv("STRATUM_ADMIN_PASSWORD"),
 		SkillsDir:       os.Getenv("SKILLS_DIR"),
+		MetricsToken:    strings.TrimSpace(os.Getenv("STRATUM_METRICS_TOKEN")),
 	}
 
 	// SKILLS_DIR defaults to the image's library path; missing dir loads nothing.
