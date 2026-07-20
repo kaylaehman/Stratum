@@ -104,3 +104,89 @@ func TestLoadCA_RejectsNonCA(t *testing.T) {
 		t.Error("LoadCA accepted a non-CA certificate, want error")
 	}
 }
+
+func makeCSR(t *testing.T, key *ecdsa.PrivateKey, subjectCN string, sans []string) *x509.CertificateRequest {
+	t.Helper()
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: subjectCN},
+		DNSNames: sans,
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csr, err := x509.ParseCertificateRequest(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return csr
+}
+
+func TestSignCSR_UsesBackendIdentityNotCSR(t *testing.T) {
+	certPath, keyPath := writeTestCA(t)
+	ca, err := LoadCA(certPath, keyPath)
+	if err != nil {
+		t.Fatalf("LoadCA: %v", err)
+	}
+
+	// A hostile requester asks for someone else's identity + a CA cert.
+	attackerKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csr := makeCSR(t, attackerKey, "some-other-node", []string{"victim-node.stratum.internal"})
+
+	// The backend signs with ITS chosen identity for the real node.
+	const wantSAN = "node-abc.stratum.internal"
+	certPEM, err := ca.SignCSR(csr, "stratum-agent", []string{wantSAN}, time.Hour)
+	if err != nil {
+		t.Fatalf("SignCSR: %v", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if leaf.Subject.CommonName != "stratum-agent" {
+		t.Errorf("CN = %q; backend value must win, not the CSR's", leaf.Subject.CommonName)
+	}
+	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != wantSAN {
+		t.Errorf("SAN = %v; must be the backend's %q, not the CSR's victim SAN", leaf.DNSNames, wantSAN)
+	}
+	if leaf.IsCA {
+		t.Error("issued leaf is a CA — CSR must not be able to request IsCA")
+	}
+	// The public key must be the requester's (proof-of-possession preserved)...
+	if !leaf.PublicKey.(*ecdsa.PublicKey).Equal(&attackerKey.PublicKey) {
+		t.Error("issued cert's public key is not the CSR's public key")
+	}
+	// ...and it must verify for ServerAuth against the CA at the backend-set SAN.
+	pool := x509.NewCertPool()
+	pool.AddCert(ca.cert)
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:     pool,
+		DNSName:   wantSAN,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}); err != nil {
+		t.Errorf("issued leaf failed ServerAuth verification at %q: %v", wantSAN, err)
+	}
+}
+
+func TestSignCSR_RejectsTamperedSignature(t *testing.T) {
+	certPath, keyPath := writeTestCA(t)
+	ca, _ := LoadCA(certPath, keyPath)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csr := makeCSR(t, key, "n", nil)
+	// Corrupt the CSR's self-signature — proof-of-possession must then fail.
+	csr.Signature[len(csr.Signature)-1] ^= 0xff
+	if _, err := ca.SignCSR(csr, "stratum-agent", []string{"n.stratum.internal"}, time.Hour); err == nil {
+		t.Error("SignCSR accepted a CSR with a broken self-signature")
+	}
+}
+
+func TestSignCSR_RejectsNonP256(t *testing.T) {
+	certPath, keyPath := writeTestCA(t)
+	ca, _ := LoadCA(certPath, keyPath)
+	key, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader) // wrong curve
+	csr := makeCSR(t, key, "n", nil)
+	if _, err := ca.SignCSR(csr, "stratum-agent", []string{"n.stratum.internal"}, time.Hour); err == nil {
+		t.Error("SignCSR accepted a non-P256 (P-384) key")
+	}
+}

@@ -93,6 +93,56 @@ func (c *CA) issue(commonName string, ttl time.Duration, eku x509.ExtKeyUsage) (
 	}, nil
 }
 
+// SignCSR issues a leaf certificate for the public key carried in csr, using
+// backend-controlled identity. It is the enrollment primitive: an agent generates
+// its own key on its host, sends a CSR, and never transmits the private key.
+//
+// SECURITY: nothing from the CSR is trusted except its public key. The Subject,
+// SANs, requested extensions, EKU, and BasicConstraints in the CSR are all
+// ignored; the CA sets commonName, dnsSANs (the node's stable identity), the
+// ServerAuth EKU, a fresh serial, and the validity window itself. The CSR's
+// self-signature is verified first (proof the requester holds the private key),
+// and only ECDSA P-256 keys are accepted.
+func (c *CA) SignCSR(csr *x509.CertificateRequest, commonName string, dnsSANs []string, ttl time.Duration) ([]byte, error) {
+	if csr == nil {
+		return nil, errors.New("certauth: nil CSR")
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, fmt.Errorf("certauth: CSR self-signature invalid: %w", err)
+	}
+	pub, ok := csr.PublicKey.(*ecdsa.PublicKey)
+	if !ok || pub.Curve != elliptic.P256() {
+		return nil, errors.New("certauth: CSR public key must be ECDSA P-256")
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, fmt.Errorf("certauth: serial: %w", err)
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: commonName},
+		DNSNames:              dnsSANs,
+		NotBefore:             now.Add(-5 * time.Minute),
+		NotAfter:              now.Add(ttl),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, pub, c.key)
+	if err != nil {
+		return nil, fmt.Errorf("certauth: sign CSR: %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
+}
+
+// CACertPEM returns the CA certificate in PEM form. It is public material, safe to
+// embed in an agent install bundle so the agent can verify the backend.
+func (c *CA) CACertPEM() []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.cert.Raw})
+}
+
 func parseCert(pemBytes []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
