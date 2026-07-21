@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 func (s *Store) InsertResourceSample(ctx context.Context, r appdb.ResourceSample) error {

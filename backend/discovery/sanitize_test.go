@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/discovery"
+	"github.com/KAE-Labs/stratum/backend/discovery"
 )
 
 func TestSanitizeStripsHostAndCredentialContext(t *testing.T) {

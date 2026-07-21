@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 func strp(s string) *string { return &s }

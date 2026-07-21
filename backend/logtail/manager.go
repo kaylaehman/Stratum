@@ -6,8 +6,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/hub"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/hub"
 )
 
 // ErrUnauthorized is returned by Subscribe when the Authorizer denies access.

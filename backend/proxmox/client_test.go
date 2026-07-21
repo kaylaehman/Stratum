@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/proxmox"
+	"github.com/KAE-Labs/stratum/backend/proxmox"
 )
 
 const (

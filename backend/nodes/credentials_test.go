@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/nodes"
 )
 
 func testCipher(t *testing.T, b byte) *crypto.Cipher {

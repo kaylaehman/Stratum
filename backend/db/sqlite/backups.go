@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const backupColumns = `id, node_id, kind, target, dest_path, size_bytes, status, error, started_at, finished_at`

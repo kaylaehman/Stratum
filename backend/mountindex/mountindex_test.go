@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
-	"github.com/kaylaehman/stratum/backend/docker"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 func setup(t *testing.T) (*Index, appdb.Store) {

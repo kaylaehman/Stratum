@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/proxmox"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/proxmox"
 )
 
 // triggerBackupFailed is the webhook trigger key fired on backup errors.

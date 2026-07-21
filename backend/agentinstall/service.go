@@ -27,8 +27,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/kaylaehman/stratum/backend/certauth"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/certauth"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 //go:embed templates/install.sh.tmpl

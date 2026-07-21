@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/sshkeys"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/sshkeys"
 )
 
 // ListSSHKeys audits authorized_keys across a node's users over SSH. Admin-gated

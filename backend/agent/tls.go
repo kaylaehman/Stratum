@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kaylaehman/stratum/backend/agentinstall"
+	"github.com/KAE-Labs/stratum/backend/agentinstall"
 )
 
 // pinnedTLS returns a copy of base with ServerName set to the node's stable SAN

@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // ContainerProxyStatus is the API view for one container's reverse-proxy state.

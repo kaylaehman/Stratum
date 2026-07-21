@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/volumes"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/volumes"
 )
 
 // volumeListNodeTimeout bounds a single node's volume listing. The VolumeList

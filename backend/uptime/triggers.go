@@ -1,6 +1,6 @@
 package uptime
 
-import "github.com/kaylaehman/stratum/backend/webhooks"
+import "github.com/KAE-Labs/stratum/backend/webhooks"
 
 // TriggerUptimeDown is the webhook trigger key fired on UP→DOWN transitions.
 const TriggerUptimeDown = "uptime.down"

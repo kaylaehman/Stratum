@@ -1,6 +1,6 @@
 package security
 
-import "github.com/kaylaehman/stratum/backend/db"
+import "github.com/KAE-Labs/stratum/backend/db"
 
 // Flag is one security finding with a stable identity (Type+Key) used for
 // acknowledgement matching, plus plain-language risk text.

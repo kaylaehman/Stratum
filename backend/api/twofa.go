@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/middleware"
-	"github.com/kaylaehman/stratum/backend/twofa"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/twofa"
 )
 
 // TwoFAStatus reports whether the calling user has 2FA enabled.

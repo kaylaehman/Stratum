@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 func (s *Store) GetDNSConfig(ctx context.Context, nodeID string) (appdb.DNSConfig, error) {

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // generateSelfSigned writes a self-signed cert+key PEM pair to dir and returns

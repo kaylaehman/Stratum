@@ -8,11 +8,11 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/nodeconn"
-	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/nodeconn"
+	"github.com/KAE-Labs/stratum/backend/permissions"
 )
 
 // resolveContainer loads the container row + its node's docker client, enforcing

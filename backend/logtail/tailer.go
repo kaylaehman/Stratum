@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // tailClient is the subset of docker.Client used by tailer (allows stub in tests).

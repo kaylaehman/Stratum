@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func TestRenderSubstitutesAndDefaults(t *testing.T) {

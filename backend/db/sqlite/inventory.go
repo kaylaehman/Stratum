@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const vmColumns = `id, node_id, kind, proxmox_vmid, proxmox_node, name, status, os_type, stale, gone_since, last_seen`

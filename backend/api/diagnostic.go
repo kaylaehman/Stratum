@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/diagnostic"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/KAE-Labs/stratum/backend/diagnostic"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/permissions"
 )
 
 type diagnosticBody struct {

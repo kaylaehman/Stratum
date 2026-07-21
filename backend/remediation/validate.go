@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // LintError is a single lint violation discovered while validating a runbook.

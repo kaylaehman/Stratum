@@ -5,7 +5,7 @@
 // the docker clients; this package stays dependency-light and unit-testable.
 package bulk
 
-import "github.com/kaylaehman/stratum/backend/db"
+import "github.com/KAE-Labs/stratum/backend/db"
 
 // Actions.
 const (

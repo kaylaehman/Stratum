@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // errNoDocker is the sentinel returned by the stub provider when docker is unavailable.

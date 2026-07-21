@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/activity"
 )
 
 // NodeDNS returns the detected DNS tool for a node, its records (when listable +

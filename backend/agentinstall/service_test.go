@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/certauth"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/certauth"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // --- test doubles ----------------------------------------------------------

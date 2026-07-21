@@ -3,7 +3,7 @@ package remediation
 import (
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func TestValidateRunbook_EmptyStep(t *testing.T) {

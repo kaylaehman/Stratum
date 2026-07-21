@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const mountColumns = `id, node_id, container_id, type, source, normalized_source, volume_name, destination, rw`

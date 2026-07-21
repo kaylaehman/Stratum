@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const agentMemoryColumns = `id, scope, scope_id, key, value, source, confirmed, created_at, updated_at`

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const webhookColumns = `id, name, url, provider, triggers, enabled, created_at`

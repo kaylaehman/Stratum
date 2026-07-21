@@ -9,9 +9,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/kaylaehman/stratum/agent/initdetect"
-	"github.com/kaylaehman/stratum/agent/watch"
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	"github.com/KAE-Labs/stratum/agent/initdetect"
+	"github.com/KAE-Labs/stratum/agent/watch"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 // agentVersion is stamped at build time via -ldflags; falls back to "dev".

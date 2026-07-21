@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/auth"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/auth"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/middleware"
 )
 
 const (

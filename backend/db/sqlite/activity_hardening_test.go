@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
 )
 
 // newStoreWithDB returns both the Store and the raw *sql.DB so a test can attempt

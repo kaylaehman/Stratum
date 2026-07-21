@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/nodeconn"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/nodeconn"
 )
 
 // topologyTimeout bounds the N+1 network inspects so a slow daemon can't hold

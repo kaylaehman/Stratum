@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // stubExpiryStore is an in-memory SecretExpiryStore for tests.

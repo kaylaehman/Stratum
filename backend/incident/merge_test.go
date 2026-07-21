@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/incident"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/incident"
 )
 
 // stubStore satisfies incident.Store with in-memory data.

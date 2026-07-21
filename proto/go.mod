@@ -1,4 +1,4 @@
-module github.com/kaylaehman/stratum/proto
+module github.com/KAE-Labs/stratum/proto
 
 go 1.24.0
 

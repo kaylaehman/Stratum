@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/incident"
+	"github.com/KAE-Labs/stratum/backend/incident"
 )
 
 // IncidentTimeline handles GET /api/incidents/timeline.

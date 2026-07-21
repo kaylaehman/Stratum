@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const imageUpdateColumns = `container_id, node_id, image, status, current_digest, latest_digest, unknown_reason, checked_at`

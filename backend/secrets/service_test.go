@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func TestParseEnv(t *testing.T) {

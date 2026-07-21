@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // ClientProvider yields a docker client for a node (to resolve image digests and

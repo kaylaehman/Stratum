@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/google/uuid"
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/db"
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/db"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 // streamBackoff is the reconnection schedule for WatchFiles streams.

@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/activity"
 )
 
 // CertList returns all discovered certificates across nodes (admin), sorted by

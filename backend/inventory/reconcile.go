@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func vmKey(v db.VM) string  { return strconv.Itoa(v.ProxmoxVMID) + "/" + v.Kind }

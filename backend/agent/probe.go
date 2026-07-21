@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 // agentPort is the default TCP port the agent gRPC server listens on.

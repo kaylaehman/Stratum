@@ -10,9 +10,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	dnspkg "github.com/kaylaehman/stratum/backend/dns"
-	proxypkg "github.com/kaylaehman/stratum/backend/proxy"
-	volumespkg "github.com/kaylaehman/stratum/backend/volumes"
+	dnspkg "github.com/KAE-Labs/stratum/backend/dns"
+	proxypkg "github.com/KAE-Labs/stratum/backend/proxy"
+	volumespkg "github.com/KAE-Labs/stratum/backend/volumes"
 )
 
 // DNSQuerier provides per-node DNS status (records). *dns.Service satisfies this.

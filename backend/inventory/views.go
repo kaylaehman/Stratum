@@ -3,7 +3,7 @@ package inventory
 import (
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // VMView is the JSON representation of a Proxmox guest in deltas and the tree.

@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/activity"
 )
 
 // Activity wraps mutating routes and writes one append-only audit row per

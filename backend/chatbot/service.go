@@ -8,9 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kaylaehman/stratum/backend/ai"
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/ai"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // Service owns the chat-bot config and (when enabled + configured) the inbound

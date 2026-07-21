@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func sampleAt(min int, cpu float64, mem, limit int64) db.ResourceSample {

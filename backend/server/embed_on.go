@@ -8,7 +8,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/embedspa"
+	"github.com/KAE-Labs/stratum/backend/embedspa"
 )
 
 // mountSPA installs the SPA catch-all for the embed build.

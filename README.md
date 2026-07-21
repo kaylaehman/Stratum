@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/license-AGPLv3-blue.svg"></a>
   <img alt="Status" src="https://img.shields.io/badge/status-beta-yellow.svg">
-  <a href="https://github.com/kaylaehman/Stratum/pkgs/container/stratum-backend"><img alt="GHCR" src="https://img.shields.io/badge/images-ghcr.io-2496ED.svg"></a>
+  <a href="https://github.com/KAE-Labs/Stratum/pkgs/container/stratum-backend"><img alt="GHCR" src="https://img.shields.io/badge/images-ghcr.io-2496ED.svg"></a>
   <img alt="Go" src="https://img.shields.io/badge/go-1.26-00ADD8.svg">
   <img alt="React" src="https://img.shields.io/badge/react-19-61DAFB.svg">
 </p>
@@ -63,8 +63,8 @@ One command against the published images — no build step.
 
 ```bash
 # 1. Grab the compose file and the env template
-curl -O https://raw.githubusercontent.com/kaylaehman/Stratum/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/kaylaehman/Stratum/main/.env.example
+curl -O https://raw.githubusercontent.com/KAE-Labs/Stratum/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/KAE-Labs/Stratum/main/.env.example
 cp .env.example .env
 
 # 2. Set the two required secrets in .env
@@ -77,8 +77,8 @@ docker compose up -d
 
 The UI is on <http://localhost:8080>. The images are multi-arch (amd64 + arm64) and published to GHCR:
 
-- `ghcr.io/kaylaehman/stratum-backend`
-- `ghcr.io/kaylaehman/stratum-frontend`
+- `ghcr.io/kae-labs/stratum-backend`
+- `ghcr.io/kae-labs/stratum-frontend`
 
 Pin a release in production (recommended): `STRATUM_TAG=v0.1.0 docker compose up -d`.
 

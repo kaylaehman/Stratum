@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 // Store implements appdb.Store over a *sql.DB.

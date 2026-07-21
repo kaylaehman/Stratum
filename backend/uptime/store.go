@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // Store is a subset of db.Store covering only uptime operations.

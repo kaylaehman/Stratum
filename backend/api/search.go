@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/middleware"
 )
 
 // searchGroupLimit caps how many hits per category are returned.

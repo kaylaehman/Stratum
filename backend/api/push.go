@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/middleware"
-	"github.com/kaylaehman/stratum/backend/push"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/push"
 )
 
 // VAPIDKey returns the server's VAPID public key for the frontend.

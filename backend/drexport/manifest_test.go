@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/drexport"
-	dnspkg "github.com/kaylaehman/stratum/backend/dns"
-	proxypkg "github.com/kaylaehman/stratum/backend/proxy"
-	volumespkg "github.com/kaylaehman/stratum/backend/volumes"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/drexport"
+	dnspkg "github.com/KAE-Labs/stratum/backend/dns"
+	proxypkg "github.com/KAE-Labs/stratum/backend/proxy"
+	volumespkg "github.com/KAE-Labs/stratum/backend/volumes"
 )
 
 // knownSecretValue is a value that must NEVER appear in any output format.

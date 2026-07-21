@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // capsEnvelope is the shape of capabilities_json in the DB (mirrors the private

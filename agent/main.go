@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"gopkg.in/yaml.v3"
 
-	"github.com/kaylaehman/stratum/agent/agentsrv"
+	"github.com/KAE-Labs/stratum/agent/agentsrv"
 )
 
 // Config mirrors /etc/stratum-agent/config.yaml.

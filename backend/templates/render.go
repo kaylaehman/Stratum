@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // tokenRe matches {{ NAME }} with optional surrounding whitespace.

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // pollInterval is how often the orchestrator re-scans the node list to start

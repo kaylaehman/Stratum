@@ -3,7 +3,7 @@ package security
 import (
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // --- CapRisk ---

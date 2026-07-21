@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
 )
 
 func newStore(t *testing.T) *sqlite.Store {

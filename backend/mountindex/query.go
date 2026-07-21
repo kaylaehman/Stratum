@@ -3,8 +3,8 @@ package mountindex
 import (
 	"context"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // MountView is a container's mount, annotated with the shared flag.

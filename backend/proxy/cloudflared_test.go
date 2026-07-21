@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // sampleConfig is a realistic cloudflared config.yml with several ingress

@@ -3,7 +3,7 @@ package configversion
 import (
 	"context"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // Store is the narrow persistence interface this package needs.

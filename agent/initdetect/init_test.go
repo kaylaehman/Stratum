@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 // TestDetectSystemdViaRunDir simulates a host that has /run/systemd/private.

@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/permissions"
 )
 
 // ClientProvider yields a docker client for a node.

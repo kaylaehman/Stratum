@@ -14,9 +14,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/totp"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/totp"
 )
 
 // ErrInvalidCode is returned when a TOTP/recovery code doesn't verify.

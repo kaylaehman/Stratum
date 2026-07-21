@@ -6,7 +6,7 @@ package diagnostic
 import (
 	"strconv"
 
-	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/KAE-Labs/stratum/backend/permissions"
 )
 
 // EffectiveAccess is the FINAL, ACL-reconciled access decision. The narrative

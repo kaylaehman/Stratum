@@ -3,7 +3,7 @@ package proxy
 import (
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func TestParseTargetURL(t *testing.T) {

@@ -4,7 +4,7 @@ package stratum.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/kaylaehman/stratum/proto/gen/stratum/v1;stratumv1";
+option go_package = "github.com/KAE-Labs/stratum/proto/gen/stratum/v1;stratumv1";
 
 // AgentService is the gRPC contract between the Stratum backend and the
 // per-host agent.

@@ -3,10 +3,10 @@ package api
 import (
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/auth"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/features"
-	"github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/auth"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/features"
+	"github.com/KAE-Labs/stratum/backend/middleware"
 )
 
 // requireRole gates a handler to a minimum role (Feature 30). On failure it

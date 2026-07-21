@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const imageScanColumns = `image_digest, image, scanned_at, critical, high, medium, low, unknown`

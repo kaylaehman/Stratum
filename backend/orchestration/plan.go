@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/depgraph"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/depgraph"
 )
 
 // Step is one unit of work in an execution plan.

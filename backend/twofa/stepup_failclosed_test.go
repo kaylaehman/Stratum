@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/totp"
+	"github.com/KAE-Labs/stratum/backend/totp"
 )
 
 // --- fail-CLOSED: unenrolled users never pass the step-up gate -------------

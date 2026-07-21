@@ -9,11 +9,11 @@ import (
 	"time"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/auth"
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
-	mw "github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/auth"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
+	mw "github.com/KAE-Labs/stratum/backend/middleware"
 )
 
 func newStore(t *testing.T) *sqlite.Store {

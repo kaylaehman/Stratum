@@ -1,6 +1,6 @@
 package remediation
 
-import "github.com/kaylaehman/stratum/backend/webhooks"
+import "github.com/KAE-Labs/stratum/backend/webhooks"
 
 func init() {
 	webhooks.Register(webhooks.TriggerDef{

@@ -12,10 +12,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/mountindex"
-	"github.com/kaylaehman/stratum/backend/nodeconn"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/mountindex"
+	"github.com/KAE-Labs/stratum/backend/nodeconn"
 )
 
 // ClientProvider yields a docker client for a node.

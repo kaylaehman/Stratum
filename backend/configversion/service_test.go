@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/kaylaehman/stratum/backend/configversion"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/configversion"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // --- in-memory Store stub ---

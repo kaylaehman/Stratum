@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/placement"
+	"github.com/KAE-Labs/stratum/backend/placement"
 )
 
 const epsilon = 1e-9

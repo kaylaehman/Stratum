@@ -18,8 +18,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/google/uuid"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // keepSnapshots is the per-container rollback retention (CLAUDE: "last 10").

@@ -36,8 +36,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/metrics"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/metrics"
 )
 
 // SourceType identifies which data source produced a timeline entry.

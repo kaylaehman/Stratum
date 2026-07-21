@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 func (s *Store) UpsertWOLConfig(ctx context.Context, c appdb.WOLConfig) error {

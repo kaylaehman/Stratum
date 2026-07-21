@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kaylaehman/stratum/backend/auth"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/auth"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 type ctxKey string

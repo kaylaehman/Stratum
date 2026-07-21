@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 // fakeStore is a minimal db.Store implementation for cursor/paging unit tests.

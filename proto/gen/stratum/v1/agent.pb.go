@@ -500,7 +500,7 @@ const file_stratum_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"DetectInit\x12\x1d.stratum.v1.DetectInitRequest\x1a\x1e.stratum.v1.DetectInitResponseB\xa3\x01\n" +
 	"\x0ecom.stratum.v1B\n" +
-	"AgentProtoP\x01Z<github.com/kaylaehman/stratum/proto/gen/stratum/v1;stratumv1\xa2\x02\x03SXX\xaa\x02\n" +
+	"AgentProtoP\x01Z<github.com/KAE-Labs/stratum/proto/gen/stratum/v1;stratumv1\xa2\x02\x03SXX\xaa\x02\n" +
 	"Stratum.V1\xca\x02\n" +
 	"Stratum\\V1\xe2\x02\x16Stratum\\V1\\GPBMetadata\xea\x02\vStratum::V1b\x06proto3"
 

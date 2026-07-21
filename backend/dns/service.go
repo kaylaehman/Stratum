@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 const httpTimeout = 15 * time.Second

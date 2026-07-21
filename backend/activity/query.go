@@ -8,7 +8,7 @@ import (
 
 	"context"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // ErrBadCursor is returned when a cursor string cannot be decoded.

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/hub"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/hub"
 )
 
 // ---------------------------------------------------------------------------

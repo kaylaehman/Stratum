@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 func marshalVars(v []appdb.TemplateVar) string {

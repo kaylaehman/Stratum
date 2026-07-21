@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/nodeconn"
-	"github.com/kaylaehman/stratum/backend/proxmox"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/nodeconn"
+	"github.com/KAE-Labs/stratum/backend/proxmox"
 )
 
 // DefaultStepTimeout is the per-step execution deadline.

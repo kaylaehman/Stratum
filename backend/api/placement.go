@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/placement"
+	"github.com/KAE-Labs/stratum/backend/placement"
 )
 
 // RecommendPlacement handles GET /api/placement/recommend.

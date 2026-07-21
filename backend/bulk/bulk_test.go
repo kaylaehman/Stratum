@@ -3,7 +3,7 @@ package bulk
 import (
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func TestValid(t *testing.T) {

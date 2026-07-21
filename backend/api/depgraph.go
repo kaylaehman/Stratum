@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/depgraph"
-	"github.com/kaylaehman/stratum/backend/nodeconn"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/depgraph"
+	"github.com/KAE-Labs/stratum/backend/nodeconn"
 )
 
 // depgraphTimeout bounds the network + mount-index calls. 45s matches the

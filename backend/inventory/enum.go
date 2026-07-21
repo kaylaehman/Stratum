@@ -4,9 +4,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/proxmox"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/proxmox"
 )
 
 // enumProxmox enumerates the guests on ONLY the cluster member this Stratum node

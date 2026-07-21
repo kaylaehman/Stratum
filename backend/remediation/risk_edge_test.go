@@ -17,7 +17,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/activity"
 )
 
 // ---------------------------------------------------------------------------

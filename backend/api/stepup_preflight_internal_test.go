@@ -17,8 +17,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/auth"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/auth"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 func TestRequireAdminStepUp_NonAdmin_403_ShortCircuits(t *testing.T) {

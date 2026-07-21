@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
 )
 
 func TestMergeCaps(t *testing.T) {

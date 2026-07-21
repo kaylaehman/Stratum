@@ -12,7 +12,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // MetricName identifies which resource is being projected.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // warnDays mirrors the certs package convention: notify when a secret is

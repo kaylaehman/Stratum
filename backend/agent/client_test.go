@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	"github.com/KAE-Labs/stratum/backend/db"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 // dbNode is a test helper that builds a minimal db.Node from a host string.

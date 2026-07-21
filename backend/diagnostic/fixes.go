@@ -3,7 +3,7 @@ package diagnostic
 import (
 	"fmt"
 
-	appssh "github.com/kaylaehman/stratum/backend/ssh"
+	appssh "github.com/KAE-Labs/stratum/backend/ssh"
 )
 
 // SuggestedFix is a concrete, copy-pasteable remediation. Commands are

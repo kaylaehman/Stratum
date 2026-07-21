@@ -3,7 +3,7 @@ package uptime
 import (
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // UptimePct computes the percentage of up/degraded results within a window.

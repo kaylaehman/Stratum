@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/proxmox"
-	"github.com/kaylaehman/stratum/backend/ssh"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/proxmox"
+	"github.com/KAE-Labs/stratum/backend/ssh"
 )
 
 // probeTimeout bounds each independent sub-probe.

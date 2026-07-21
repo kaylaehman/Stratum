@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/fs"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/fs"
 )
 
 // httpTimeout bounds a single admin-API call to a proxy tool.

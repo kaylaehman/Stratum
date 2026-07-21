@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/netguard"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/netguard"
 )
 
 // httpTimeout bounds a single provider call (the API handler also applies a

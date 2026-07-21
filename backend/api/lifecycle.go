@@ -7,8 +7,8 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // lifecycleTimeout bounds a single lifecycle call (stop can take the daemon's

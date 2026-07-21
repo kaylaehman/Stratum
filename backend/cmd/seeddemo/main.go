@@ -23,11 +23,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kaylaehman/stratum/backend/auth"
-	"github.com/kaylaehman/stratum/backend/crypto"
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
-	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/KAE-Labs/stratum/backend/auth"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
+	"github.com/KAE-Labs/stratum/backend/nodes"
 )
 
 // demoTOTPSecret is a well-known base32 TOTP seed used only in demo DBs.

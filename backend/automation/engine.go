@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/webhooks"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/webhooks"
 )
 
 // Handler is a function that performs one automation run. It should return a

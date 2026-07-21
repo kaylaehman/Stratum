@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/coder/websocket"
-	"github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/middleware"
 )
 
 // clientSubscribablePrefixes are the topic prefixes a WS client may self-join

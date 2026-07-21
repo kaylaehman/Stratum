@@ -3,7 +3,7 @@ package drexport
 import (
 	"context"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // NodeReader provides the node slice needed by the service.

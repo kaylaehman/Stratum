@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const snapshotColumns = `id, container_id, node_id, container_name, reason, image_ref, image_digest, spec_json, created_at`

@@ -15,12 +15,12 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/nodes"
-	"github.com/kaylaehman/stratum/backend/proxmox"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/nodes"
+	"github.com/KAE-Labs/stratum/backend/proxmox"
 )
 
 // Clients are the transport clients for one node. Either may be nil when the

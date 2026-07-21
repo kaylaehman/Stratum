@@ -9,7 +9,7 @@ import (
 	"github.com/pkg/sftp"
 	cssh "golang.org/x/crypto/ssh"
 
-	appssh "github.com/kaylaehman/stratum/backend/ssh"
+	appssh "github.com/KAE-Labs/stratum/backend/ssh"
 )
 
 // sftpProvider implements FileProvider over a live SSH client using the

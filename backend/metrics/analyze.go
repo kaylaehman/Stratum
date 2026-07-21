@@ -3,7 +3,7 @@ package metrics
 import (
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // Spike thresholds (Feature 9): CPU above 80%, or RAM above 90% of the limit.

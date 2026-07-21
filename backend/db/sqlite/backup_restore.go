@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const backupVerifyColumns = `id, node_id, backup_id, archive_path, scratch_dir,

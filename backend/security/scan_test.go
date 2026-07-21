@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 func TestScanPrivilegedDoesNotReadCapAdd(t *testing.T) {

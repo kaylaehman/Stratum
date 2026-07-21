@@ -3,8 +3,8 @@ package diagnostic
 import (
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/permissions"
 )
 
 func TestReconcileNoACLPassthrough(t *testing.T) {

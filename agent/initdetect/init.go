@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 // osExecutable and osStatFile are variables so tests can replace them without

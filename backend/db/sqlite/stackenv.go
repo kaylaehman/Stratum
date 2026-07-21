@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 // UpsertStackEnvVar inserts or replaces one env-var row for (node, project, key).

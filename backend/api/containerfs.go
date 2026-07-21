@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/fs"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/fs"
 )
 
 // containerListCap bounds entries returned for one container directory.

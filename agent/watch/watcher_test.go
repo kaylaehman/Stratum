@@ -7,7 +7,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 func noopLogger() *slog.Logger {

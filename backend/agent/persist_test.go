@@ -9,7 +9,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	stratumv1 "github.com/kaylaehman/stratum/proto/gen/stratum/v1"
+	stratumv1 "github.com/KAE-Labs/stratum/proto/gen/stratum/v1"
 )
 
 func TestPersistEvents(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/fs"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/fs"
 )
 
 // --- fake fileIO ---

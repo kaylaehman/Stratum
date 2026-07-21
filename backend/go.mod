@@ -1,4 +1,4 @@
-module github.com/kaylaehman/stratum/backend
+module github.com/KAE-Labs/stratum/backend
 
 go 1.25.7
 
@@ -10,7 +10,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/kaylaehman/stratum/proto v0.0.0-00010101000000-000000000000
+	github.com/KAE-Labs/stratum/proto v0.0.0-00010101000000-000000000000
 	github.com/pkg/sftp v1.13.10
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/prometheus/client_golang v1.23.2
@@ -72,4 +72,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/kaylaehman/stratum/proto => ../proto
+replace github.com/KAE-Labs/stratum/proto => ../proto

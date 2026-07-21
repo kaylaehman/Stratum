@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 // portStoreStub is a minimal in-memory stub for the db.Store methods used by

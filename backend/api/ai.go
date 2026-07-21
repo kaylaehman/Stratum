@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/ai"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/ai"
 )
 
 // AIConfigGet returns the non-secret AI provider configuration (admin).

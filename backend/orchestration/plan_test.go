@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/depgraph"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/depgraph"
 )
 
 // fakeStore implements StoreReader for tests.

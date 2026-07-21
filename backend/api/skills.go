@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/skills"
+	"github.com/KAE-Labs/stratum/backend/skills"
 )
 
 // skillSummary is the list-view projection of a skill (no issue/step bodies).

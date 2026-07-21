@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const certColumns = `id, node_id, source, domain, sans, issuer, path, not_before, not_after, last_checked`

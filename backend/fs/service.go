@@ -12,11 +12,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/nodes"
-	"github.com/kaylaehman/stratum/backend/permissions"
-	appssh "github.com/kaylaehman/stratum/backend/ssh"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/nodes"
+	"github.com/KAE-Labs/stratum/backend/permissions"
+	appssh "github.com/KAE-Labs/stratum/backend/ssh"
 )
 
 // DefaultUploadMax is the default per-upload byte cap (STRATUM_UPLOAD_MAX_BYTES).

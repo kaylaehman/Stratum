@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/fs"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/fs"
 )
 
 // composeFilenames is the ordered list of filenames the service tries when

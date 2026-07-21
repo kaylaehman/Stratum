@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
-	"github.com/kaylaehman/stratum/backend/nodes"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
+	"github.com/KAE-Labs/stratum/backend/nodes"
 )
 
 func newService(t *testing.T) (*nodes.Service, appdb.Store) {

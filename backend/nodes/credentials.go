@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/crypto"
 )
 
 // Auth method identifiers.

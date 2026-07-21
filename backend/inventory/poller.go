@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/hub"
-	"github.com/kaylaehman/stratum/backend/nodeconn"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/hub"
+	"github.com/KAE-Labs/stratum/backend/nodeconn"
 )
 
 // NotifyFunc is called when a container OOM/health event is detected.

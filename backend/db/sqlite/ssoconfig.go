@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
 )
 
 const ssoColumns = `id, node_id, container_name, enabled, method, provider_url, client_id, client_secret_encrypted, allowed_groups, session_duration_secs, updated_at`

@@ -1,6 +1,6 @@
 package security
 
-import "github.com/kaylaehman/stratum/backend/docker"
+import "github.com/KAE-Labs/stratum/backend/docker"
 
 // Interface classes for a published port's host bind address.
 const (

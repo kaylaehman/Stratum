@@ -4,11 +4,11 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/capabilities"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/hub"
-	"github.com/kaylaehman/stratum/backend/logtail"
-	"github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/capabilities"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/hub"
+	"github.com/KAE-Labs/stratum/backend/logtail"
+	"github.com/KAE-Labs/stratum/backend/middleware"
 )
 
 type logsBody struct {

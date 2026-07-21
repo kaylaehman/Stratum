@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/auth"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/features"
-	"github.com/kaylaehman/stratum/backend/middleware"
+	"github.com/KAE-Labs/stratum/backend/auth"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/features"
+	"github.com/KAE-Labs/stratum/backend/middleware"
 )
 
 // --- helpers ----------------------------------------------------------------

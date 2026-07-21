@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/metrics"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/metrics"
 )
 
 // metricsRange maps a range selector to a lookback duration. Default 1h.

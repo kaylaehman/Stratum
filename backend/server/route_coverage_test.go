@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kaylaehman/stratum/backend/api"
-	"github.com/kaylaehman/stratum/backend/server"
+	"github.com/KAE-Labs/stratum/backend/api"
+	"github.com/KAE-Labs/stratum/backend/server"
 )
 
 // TestNoUnauditedMutatingRoutes is the structural write-coverage guarantee

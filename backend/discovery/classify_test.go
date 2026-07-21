@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/ssh"
+	"github.com/KAE-Labs/stratum/backend/ssh"
 )
 
 func TestParseOSType(t *testing.T) {

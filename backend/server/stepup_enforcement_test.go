@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/features"
-	"github.com/kaylaehman/stratum/backend/totp"
+	"github.com/KAE-Labs/stratum/backend/features"
+	"github.com/KAE-Labs/stratum/backend/totp"
 )
 
 // bodyError decodes a JSON {"error": "..."} response body.

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
 )
 
 // newStore opens a migrated temp-file SQLite store for a test.

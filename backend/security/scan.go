@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // SecurityFlags is a container's classified security posture.

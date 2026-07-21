@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/webhooks"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/webhooks"
 )
 
 // fakeStore returns a fixed webhook list for Notify fan-out tests.

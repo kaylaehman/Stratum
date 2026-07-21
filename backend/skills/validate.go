@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kaylaehman/stratum/backend/remediation"
+	"github.com/KAE-Labs/stratum/backend/remediation"
 )
 
 // AllowedCategories is the exhaustive enum derived from the on-disk category

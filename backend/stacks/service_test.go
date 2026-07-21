@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/stacks"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/stacks"
 )
 
 // --- fakes ---

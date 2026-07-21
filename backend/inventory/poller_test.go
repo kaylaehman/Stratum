@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/db/sqlite"
-	"github.com/kaylaehman/stratum/backend/hub"
-	"github.com/kaylaehman/stratum/backend/nodeconn"
-	"github.com/kaylaehman/stratum/backend/nodes"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db/sqlite"
+	"github.com/KAE-Labs/stratum/backend/hub"
+	"github.com/KAE-Labs/stratum/backend/nodeconn"
+	"github.com/KAE-Labs/stratum/backend/nodes"
 )
 
 func TestAcquireSkipIfBusy(t *testing.T) {

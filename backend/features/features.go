@@ -8,7 +8,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // FlagActionStepUp gates step-up 2FA enforcement on destructive actions. When

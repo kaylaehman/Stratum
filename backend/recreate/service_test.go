@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/docker"
 )
 
 // mismatchStore returns a snapshot belonging to a fixed (node, name).

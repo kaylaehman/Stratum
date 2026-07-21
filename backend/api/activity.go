@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/activity"
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // parseOptString returns a *string from a query param, nil if empty.

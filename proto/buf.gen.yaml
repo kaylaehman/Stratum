@@ -4,7 +4,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/kaylaehman/stratum/proto/gen
+      value: github.com/KAE-Labs/stratum/proto/gen
 plugins:
   - local: protoc-gen-go
     out: gen

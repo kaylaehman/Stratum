@@ -3,8 +3,8 @@ package diagnostic
 import (
 	"fmt"
 
-	"github.com/kaylaehman/stratum/backend/docker"
-	"github.com/kaylaehman/stratum/backend/permissions"
+	"github.com/KAE-Labs/stratum/backend/docker"
+	"github.com/KAE-Labs/stratum/backend/permissions"
 )
 
 // Step status values.

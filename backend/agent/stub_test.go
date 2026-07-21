@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/kaylaehman/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/db"
 )
 
 // stubStore implements db.Store for unit tests.  Only the methods exercised by

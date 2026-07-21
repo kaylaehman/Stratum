@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	appdb "github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/crypto"
+	appdb "github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/crypto"
 )
 
 // newTestCipher creates a Cipher for tests using a fixed 32-byte key.

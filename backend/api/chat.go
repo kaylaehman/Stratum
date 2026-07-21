@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/kaylaehman/stratum/backend/activity"
+	"github.com/KAE-Labs/stratum/backend/activity"
 )
 
 // ChatConfigGet returns the non-secret chat-bot config (admin).

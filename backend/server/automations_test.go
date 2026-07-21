@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/kaylaehman/stratum/backend/automation"
+	"github.com/KAE-Labs/stratum/backend/automation"
 )
 
 func TestListAutomations_AdminOnly(t *testing.T) {

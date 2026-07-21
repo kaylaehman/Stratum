@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kaylaehman/stratum/backend/crypto"
-	"github.com/kaylaehman/stratum/backend/db"
-	"github.com/kaylaehman/stratum/backend/totp"
+	"github.com/KAE-Labs/stratum/backend/crypto"
+	"github.com/KAE-Labs/stratum/backend/db"
+	"github.com/KAE-Labs/stratum/backend/totp"
 )
 
 // memStore is a minimal db.Store for the 2FA flow.
