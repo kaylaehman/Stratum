@@ -39,10 +39,21 @@ export function Topbar({ user, onLogout, onSearchOpen, onMenuToggle }: TopbarPro
       {/* Brand — logo block is w-52 on desktop; auto-width on mobile to save space. */}
       <div className="flex items-center w-auto md:w-52 shrink-0">
         <span className="flex items-center gap-2 select-none" aria-label="Stratum">
-          <svg width={26} height={26} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-            <path d="M16 4 27 10 16 16 5 10Z" fill="#2E4BD8" />
-            <path d="M5 13.6 16 19.6 27 13.6" stroke="#2E4BD8" strokeWidth={2.3} strokeLinejoin="round" strokeLinecap="round" />
-            <path d="M5 17.2 16 23.2 27 17.2" stroke="#2E4BD8" strokeWidth={2.3} strokeLinejoin="round" strokeLinecap="round" />
+          <svg width={28} height={28} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+            <defs>
+              <filter id="strmHeaderGlow" x="-40%" y="-40%" width="180%" height="180%">
+                <feGaussianBlur stdDeviation={1.3} result="b" />
+                <feMerge>
+                  <feMergeNode in="b" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <g filter="url(#strmHeaderGlow)" stroke="#2E4BD8" strokeWidth={2.4} strokeLinejoin="round">
+              <path d="M32 7 50 16 32 25 14 16Z" fill="#2E4BD8" fillOpacity={0.16} />
+              <path d="M32 24 50 33 32 42 14 33Z" fill="#2E4BD8" fillOpacity={0.16} />
+              <path d="M32 41 50 50 32 59 14 50Z" fill="#2E4BD8" fillOpacity={0.16} />
+            </g>
           </svg>
           <span
             style={{
