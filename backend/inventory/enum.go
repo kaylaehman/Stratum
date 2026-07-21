@@ -136,6 +136,7 @@ func rawToDBContainers(cs []docker.ContainerInfo, nodeID string) []db.Container 
 			ImageID:        c.ImageID,
 			Status:         c.State,
 			ComposeProject: c.ComposeProject,
+			ComposeService: c.ComposeService,
 		})
 	}
 	return out

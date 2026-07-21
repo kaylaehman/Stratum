@@ -159,6 +159,21 @@ func TestResolveTargetNameMatchWithoutPorts(t *testing.T) {
 	}
 }
 
+// TestResolveTargetComposeServiceName is the regression test for tunnels routing
+// to Compose containers by their SERVICE alias: the ingress host "jellyfin" must
+// match a container whose full Name is "media-jellyfin-1" via its compose service
+// name — otherwise every Compose container behind a tunnel resolves to nothing
+// and the proxy rule only shows at host level.
+func TestResolveTargetComposeServiceName(t *testing.T) {
+	containers := []db.Container{
+		{ID: "inv-jelly", NodeID: "node-1", Name: "media-jellyfin-1", ComposeProject: "media", ComposeService: "jellyfin"},
+	}
+	got := resolveTarget("http://jellyfin:8096", "node-1", containers, nil)
+	if got == nil || got.ContainerID != "inv-jelly" || got.MatchKind != MatchContainerName {
+		t.Errorf("resolveTarget = %+v, want compose-service match on 'jellyfin'", got)
+	}
+}
+
 // TestResolveTargetCrossNodeHostIP is the primary regression test for the bug:
 // a cloudflared tunnel on node-A with a rule pointing at http://192.168.20.9:5006
 // should resolve to the container on node-B whose host publishes port 5006 and

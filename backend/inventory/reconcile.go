@@ -103,6 +103,7 @@ func reconcileContainers(ctx context.Context, store db.Store, nodeID string, enu
 			en.ID = cur.ID
 			changed := cur.Status != en.Status || cur.Name != en.Name || cur.Image != en.Image ||
 				cur.ImageID != en.ImageID || cur.ComposeProject != en.ComposeProject ||
+				cur.ComposeService != en.ComposeService ||
 				cur.Stale || cur.GoneSince != nil
 			en.Stale = false
 			en.GoneSince = nil

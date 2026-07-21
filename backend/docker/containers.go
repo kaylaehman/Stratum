@@ -32,6 +32,7 @@ type ContainerInfo struct {
 	ImageID        string // local content-addressable image ID (sha256:...), NOT a repo digest
 	State          string // "running" | "exited" | "paused" | "restarting" | "dead" | "created"
 	ComposeProject string // label "com.docker.compose.project" (or "")
+	ComposeService string // label "com.docker.compose.service" (or "")
 
 	// HealthStatus is "healthy" | "unhealthy" | "starting" | "" (none/unknown).
 	// Parsed from the human-readable Status field in the Docker list summary.
@@ -59,6 +60,7 @@ func mapSummary(s container.Summary) ContainerInfo {
 		ImageID:        s.ImageID,
 		State:          s.State,
 		ComposeProject: s.Labels["com.docker.compose.project"],
+		ComposeService: s.Labels["com.docker.compose.service"],
 		HealthStatus:   parseHealthStatus(s.Status),
 	}
 }

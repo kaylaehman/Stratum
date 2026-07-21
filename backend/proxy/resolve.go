@@ -152,7 +152,7 @@ func resolveTargetWithNodes(targetURL, tunnelNodeID string, containers []db.Cont
 		}
 		// Cross-node name match: any other node.
 		for i := range containers {
-			if containers[i].NodeID != tunnelNodeID && strings.EqualFold(containers[i].Name, ep.host) {
+			if containers[i].NodeID != tunnelNodeID && nameOrService(containers[i], ep.host) {
 				return &ResolvedTarget{NodeID: containers[i].NodeID, ContainerID: containers[i].ID, Name: containers[i].Name, MatchKind: MatchContainerName}
 			}
 		}
@@ -175,16 +175,25 @@ func resolveTargetWithNodes(targetURL, tunnelNodeID string, containers []db.Cont
 	return nil
 }
 
-// containerByName returns the container on nodeID whose Name equals host
-// (case-insensitive), or nil. Docker container/service names are the host part
-// of intra-network URLs like "http://jellyfin:8096".
+// containerByName returns the container on nodeID whose Name OR Compose service
+// name equals host (case-insensitive), or nil. The host part of an intra-network
+// URL like "http://jellyfin:8096" is usually the Compose SERVICE name (a network
+// alias), which differs from the container's full name ("project-jellyfin-1") —
+// so matching only Name misses every Compose-managed container behind a tunnel.
 func containerByName(nodeID, host string, containers []db.Container) *db.Container {
 	for i := range containers {
-		if containers[i].NodeID == nodeID && strings.EqualFold(containers[i].Name, host) {
+		if containers[i].NodeID == nodeID && nameOrService(containers[i], host) {
 			return &containers[i]
 		}
 	}
 	return nil
+}
+
+// nameOrService reports whether host matches the container's name or its Compose
+// service name (case-insensitive).
+func nameOrService(c db.Container, host string) bool {
+	return strings.EqualFold(c.Name, host) ||
+		(c.ComposeService != "" && strings.EqualFold(c.ComposeService, host))
 }
 
 // containerByPublishedPort returns the container on nodeID that publishes

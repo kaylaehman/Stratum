@@ -128,6 +128,7 @@ type Container struct {
 	ImageID        string
 	Status         string
 	ComposeProject string
+	ComposeService string // label com.docker.compose.service (the proxy-target alias)
 	Stale          bool
 	GoneSince      *time.Time
 	LastSeen       time.Time

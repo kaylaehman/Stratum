@@ -66,7 +66,7 @@ func (s *Store) DeleteVM(ctx context.Context, id string) error {
 	return nil
 }
 
-const containerColumns = `id, node_id, docker_id, name, image, image_id, status, compose_project, stale, gone_since, last_seen`
+const containerColumns = `id, node_id, docker_id, name, image, image_id, status, compose_project, stale, gone_since, last_seen, compose_service`
 
 func (s *Store) UpsertContainer(ctx context.Context, c appdb.Container) error {
 	if c.LastSeen.IsZero() {
@@ -74,13 +74,15 @@ func (s *Store) UpsertContainer(ctx context.Context, c appdb.Container) error {
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO containers (`+containerColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(node_id, docker_id) DO UPDATE SET
 		   name=excluded.name, image=excluded.image, image_id=excluded.image_id,
 		   status=excluded.status, compose_project=excluded.compose_project,
+		   compose_service=excluded.compose_service,
 		   stale=excluded.stale, gone_since=excluded.gone_since, last_seen=excluded.last_seen`,
 		c.ID, c.NodeID, c.DockerID, c.Name, c.Image, nullableEmpty(c.ImageID), c.Status,
-		nullableEmpty(c.ComposeProject), boolToInt(c.Stale), nullTSText(c.GoneSince), tsText(c.LastSeen))
+		nullableEmpty(c.ComposeProject), boolToInt(c.Stale), nullTSText(c.GoneSince), tsText(c.LastSeen),
+		nullableEmpty(c.ComposeService))
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert container: %w", err)
 	}
@@ -96,13 +98,14 @@ func (s *Store) ListContainersByNode(ctx context.Context, nodeID string) ([]appd
 	var out []appdb.Container
 	for rows.Next() {
 		var c appdb.Container
-		var imageID, composeProject, goneSince, lastSeen sql.NullString
+		var imageID, composeProject, composeService, goneSince, lastSeen sql.NullString
 		var stale int
-		if err := rows.Scan(&c.ID, &c.NodeID, &c.DockerID, &c.Name, &c.Image, &imageID, &c.Status, &composeProject, &stale, &goneSince, &lastSeen); err != nil {
+		if err := rows.Scan(&c.ID, &c.NodeID, &c.DockerID, &c.Name, &c.Image, &imageID, &c.Status, &composeProject, &stale, &goneSince, &lastSeen, &composeService); err != nil {
 			return nil, fmt.Errorf("sqlite: scan container: %w", err)
 		}
 		c.ImageID = imageID.String
 		c.ComposeProject = composeProject.String
+	c.ComposeService = composeService.String
 		c.Stale = stale != 0
 		if c.GoneSince, err = scanNullTS(goneSince); err != nil {
 			return nil, err
@@ -117,10 +120,10 @@ func (s *Store) ListContainersByNode(ctx context.Context, nodeID string) ([]appd
 
 func (s *Store) GetContainer(ctx context.Context, id string) (appdb.Container, error) {
 	var c appdb.Container
-	var imageID, composeProject, goneSince, lastSeen sql.NullString
+	var imageID, composeProject, composeService, goneSince, lastSeen sql.NullString
 	var stale int
 	err := s.db.QueryRowContext(ctx, `SELECT `+containerColumns+` FROM containers WHERE id = ?`, id).
-		Scan(&c.ID, &c.NodeID, &c.DockerID, &c.Name, &c.Image, &imageID, &c.Status, &composeProject, &stale, &goneSince, &lastSeen)
+		Scan(&c.ID, &c.NodeID, &c.DockerID, &c.Name, &c.Image, &imageID, &c.Status, &composeProject, &stale, &goneSince, &lastSeen, &composeService)
 	if errors.Is(err, sql.ErrNoRows) {
 		return appdb.Container{}, appdb.ErrNotFound
 	}
@@ -129,6 +132,7 @@ func (s *Store) GetContainer(ctx context.Context, id string) (appdb.Container, e
 	}
 	c.ImageID = imageID.String
 	c.ComposeProject = composeProject.String
+	c.ComposeService = composeService.String
 	c.Stale = stale != 0
 	if c.GoneSince, err = scanNullTS(goneSince); err != nil {
 		return appdb.Container{}, err
