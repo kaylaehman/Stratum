@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Stratum">
+  <!-- Stacked strata: three isometric layers in cobalt shades. -->
+  <path d="M16 4.3 27 8.7 16 13.1 5 8.7Z" fill="#6478E6"/>
+  <path d="M16 11.3 27 15.7 16 20.1 5 15.7Z" fill="#2E4BD8"/>
+  <path d="M16 18.3 27 22.7 16 27.1 5 22.7Z" fill="#1E2F94"/>
+</svg>

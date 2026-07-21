@@ -38,7 +38,24 @@ export function Topbar({ user, onLogout, onSearchOpen, onMenuToggle }: TopbarPro
 
       {/* Brand — logo block is w-52 on desktop; auto-width on mobile to save space. */}
       <div className="flex items-center w-auto md:w-52 shrink-0">
-        <img src="/logo.png?v=2" alt="Stratum" height={28} style={{ height: 28, width: 'auto', display: 'block' }} />
+        <span className="flex items-center gap-2 select-none" aria-label="Stratum">
+          <svg width={26} height={26} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path d="M16 4.3 27 8.7 16 13.1 5 8.7Z" fill="#6478E6" />
+            <path d="M16 11.3 27 15.7 16 20.1 5 15.7Z" fill="#2E4BD8" />
+            <path d="M16 18.3 27 22.7 16 27.1 5 22.7Z" fill="#1E2F94" />
+          </svg>
+          <span
+            style={{
+              fontFamily: "'Space Grotesk', 'IBM Plex Sans', sans-serif",
+              fontWeight: 600,
+              fontSize: '17px',
+              letterSpacing: '-0.02em',
+              color: 'var(--text-primary)',
+            }}
+          >
+            Stratum
+          </span>
+        </span>
       </div>
 
       {/* Search trigger button */}

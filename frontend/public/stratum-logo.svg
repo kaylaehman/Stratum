@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 32" fill="none" role="img" aria-label="Stratum">
+  <!-- Stacked strata mark -->
+  <path d="M16 4.3 27 8.7 16 13.1 5 8.7Z" fill="#6478E6"/>
+  <path d="M16 11.3 27 15.7 16 20.1 5 15.7Z" fill="#2E4BD8"/>
+  <path d="M16 18.3 27 22.7 16 27.1 5 22.7Z" fill="#1E2F94"/>
+  <!-- Wordmark in cobalt (reads on both light and dark backgrounds) -->
+  <text x="40" y="22" font-family="'Space Grotesk','IBM Plex Sans',system-ui,-apple-system,Segoe UI,sans-serif"
+        font-size="20" font-weight="600" letter-spacing="-0.02em" fill="#2E4BD8">Stratum</text>
+</svg>
