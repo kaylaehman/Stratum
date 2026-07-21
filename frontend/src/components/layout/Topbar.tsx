@@ -39,21 +39,14 @@ export function Topbar({ user, onLogout, onSearchOpen, onMenuToggle }: TopbarPro
       {/* Brand — logo block is w-52 on desktop; auto-width on mobile to save space. */}
       <div className="flex items-center w-auto md:w-52 shrink-0">
         <span className="flex items-center gap-2 select-none" aria-label="Stratum">
-          <svg width={28} height={28} viewBox="0 0 64 64" fill="none" aria-hidden="true">
-            <defs>
-              <filter id="strmHeaderGlow" x="-40%" y="-40%" width="180%" height="180%">
-                <feGaussianBlur stdDeviation={1.3} result="b" />
-                <feMerge>
-                  <feMergeNode in="b" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-            <g filter="url(#strmHeaderGlow)" stroke="#2E4BD8" strokeWidth={2.4} strokeLinejoin="round">
-              <path d="M32 7 50 16 32 25 14 16Z" fill="#2E4BD8" fillOpacity={0.16} />
-              <path d="M32 24 50 33 32 42 14 33Z" fill="#2E4BD8" fillOpacity={0.16} />
-              <path d="M32 41 50 50 32 59 14 50Z" fill="#2E4BD8" fillOpacity={0.16} />
-            </g>
+          <svg width={24} height={24} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M17.4 10L21 12L17.4 14M17.4 10L12 13L6.6 10M17.4 10L21 8L12 3L3 8L6.6 10M6.6 10L3 12L6.6 14M17.4 14L21 16L12 21L3 16L6.6 14M17.4 14L12 17L6.6 14"
+              stroke="#2E4BD8"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
           <span
             style={{
