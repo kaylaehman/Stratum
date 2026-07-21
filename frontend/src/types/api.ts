@@ -78,7 +78,7 @@ export interface ApiError {
 // Node types
 
 export type NodeType = 'proxmox' | 'standalone' | 'ssh'
-export type NodeStatus = 'ok' | 'unreachable' | 'error' | 'unknown'
+export type NodeStatus = 'ok' | 'degraded' | 'unreachable' | 'error' | 'unknown'
 export type ProxmoxAuthStatus = 'confirmed' | 'unauthed' | 'marker_only' | 'none'
 export type CredentialMethod = 'ssh_key' | 'ssh_password'
 

@@ -57,6 +57,7 @@ function StatCard({ icon, label, value, status = 'muted' }: StatCardProps) {
 // statusMeta maps a node status to a dot color + label.
 const statusMeta: Record<NodeStatus, { color: string; label: string }> = {
   ok: { color: 'var(--status-ok)', label: 'online' },
+  degraded: { color: 'var(--status-warn)', label: 'degraded (SSH down)' },
   unreachable: { color: 'var(--status-error)', label: 'unreachable' },
   error: { color: 'var(--status-error)', label: 'error' },
   unknown: { color: 'var(--text-muted)', label: 'unknown' },

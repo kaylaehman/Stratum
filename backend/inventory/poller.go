@@ -42,7 +42,10 @@ type CycleMessage struct {
 // sanitized error category when it isn't. Injected so the poller can confirm
 // SSH-reachable nodes without the inventory package depending on the SSH/probe
 // stack directly.
-type ReachabilityFunc func(ctx context.Context, n db.Node) (reachable bool, lastErr string)
+// ReachabilityFunc returns a status ("ok" | "degraded" | "unreachable" |
+// "unknown") and a sanitized last-error. "degraded" means a management API is up
+// but SSH (host-level ops) is down.
+type ReachabilityFunc func(ctx context.Context, n db.Node) (status, lastErr string)
 
 // Poller refreshes inventory for every node on an interval and broadcasts
 // deltas over the hub. One poll per node runs at a time (skip-if-busy).
@@ -206,16 +209,25 @@ func (p *Poller) pollNode(ctx context.Context, n db.Node) {
 	// nodes (nor a node whose Docker/Proxmox transport is down while SSH is up).
 	// Probe SSH so those nodes are correctly "ok", and record why when they're
 	// not — without this they sat "unreachable" with an empty last_error.
+	// Map to a tri-state status. The fast enum path (Docker/Proxmox) only knows
+	// "reachable"; the SSH-inclusive probe fallback can additionally report
+	// "degraded" (API up, SSH down).
+	status := "unreachable"
 	var lastErr string
-	if !reachable && p.reach != nil {
-		if ok, le := p.reach(ctx, n); ok {
-			reachable = true
-		} else {
-			lastErr = le
+	if reachable {
+		status = "ok"
+	} else if p.reach != nil {
+		switch st, le := p.reach(ctx, n); st {
+		case "ok":
+			status = "ok"
+		case "degraded":
+			status, lastErr = "degraded", le
+		default:
+			lastErr = le // status stays "unreachable"
 		}
 	}
 
-	p.updateNodeStatus(ctx, n, reachable, lastErr)
+	p.updateNodeStatus(ctx, n, status, lastErr)
 
 	seq := p.seq.next(n.ID)
 	for i := range deltas {
@@ -227,21 +239,23 @@ func (p *Poller) pollNode(ctx context.Context, n db.Node) {
 	}
 }
 
-func (p *Poller) updateNodeStatus(ctx context.Context, n db.Node, reachable bool, lastErr string) {
-	newStatus := "unreachable"
+func (p *Poller) updateNodeStatus(ctx context.Context, n db.Node, status, lastErr string) {
+	// "ok" and "degraded" both count as reached (the node responded on some path).
+	reached := status == "ok" || status == "degraded"
 	newLastErr := lastErr
-	if reachable {
-		newStatus = "ok"
-		newLastErr = ""
+	if status == "ok" {
+		newLastErr = "" // degraded keeps its SSH error as last_error
+	}
+	if reached {
 		now := time.Now()
 		n.LastSeen = &now
 	}
 	// Avoid a write storm on a persistently-down node, but still write if the
 	// recorded error category changed (so last_error reflects the live reason).
-	if n.Status == newStatus && n.LastError == newLastErr && !reachable {
+	if n.Status == status && n.LastError == newLastErr && !reached {
 		return
 	}
-	n.Status = newStatus
+	n.Status = status
 	n.LastError = newLastErr
 	if err := p.store.UpdateNode(ctx, n); err != nil {
 		p.logger.Warn("inventory: update node status", "node", n.ID, "error", err)

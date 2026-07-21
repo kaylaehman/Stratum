@@ -46,14 +46,21 @@ func TestUpdateNodeStatus_RecordsReachabilityAndError(t *testing.T) {
 
 	// Unreachable with a sanitized SSH error category → persisted (no more empty
 	// last_error on a down node).
-	p.updateNodeStatus(ctx, n, false, "ssh_detect_failed")
+	p.updateNodeStatus(ctx, n, "unreachable", "ssh_detect_failed")
 	n, _ = st.GetNode(ctx, "n1")
 	if n.Status != "unreachable" || n.LastError != "ssh_detect_failed" {
 		t.Fatalf("after unreachable: status=%q last_error=%q", n.Status, n.LastError)
 	}
 
+	// Degraded (API up, SSH down) → persisted with the SSH error + last_seen stamped.
+	p.updateNodeStatus(ctx, n, "degraded", "ssh_unreachable")
+	n, _ = st.GetNode(ctx, "n1")
+	if n.Status != "degraded" || n.LastError != "ssh_unreachable" || n.LastSeen == nil {
+		t.Fatalf("after degraded: status=%q last_error=%q last_seen=%v", n.Status, n.LastError, n.LastSeen)
+	}
+
 	// Reachable → ok, error cleared, last_seen stamped.
-	p.updateNodeStatus(ctx, n, true, "")
+	p.updateNodeStatus(ctx, n, "ok", "")
 	n, _ = st.GetNode(ctx, "n1")
 	if n.Status != "ok" || n.LastError != "" || n.LastSeen == nil {
 		t.Fatalf("after reachable: status=%q last_error=%q last_seen=%v", n.Status, n.LastError, n.LastSeen)
@@ -102,8 +109,8 @@ func TestPollNode_DockerHealthySSHFailing_OkAndEnumerates(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// SSH plane is DOWN: the reachability fallback reports unreachable.
-	p.SetReachability(func(context.Context, appdb.Node) (bool, string) {
-		return false, "ssh_unreachable"
+	p.SetReachability(func(context.Context, appdb.Node) (status, lastErr string) {
+		return "unreachable", "ssh_unreachable"
 	})
 
 	// Docker plane is UP: the injected enumerator returns one container.

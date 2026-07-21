@@ -24,6 +24,7 @@ function NodeTypeIcon({ type }: { type: NodeType }) {
 
 const STATUS_COLOR: Record<NodeStatus, string> = {
   ok: 'var(--status-ok)',
+  degraded: 'var(--status-info)',
   unreachable: 'var(--status-warn)',
   error: 'var(--status-error)',
   unknown: 'var(--status-muted)',

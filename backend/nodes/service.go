@@ -344,10 +344,10 @@ func (s *Service) Reprobe(ctx context.Context, id string) (NodeView, error) {
 // poller uses this so SSH-only nodes (and nodes whose Docker/Proxmox transport
 // is down but SSH is up) are correctly marked reachable instead of always
 // "unreachable" with an empty last_error.
-func (s *Service) ProbeReachability(ctx context.Context, n db.Node) (reachable bool, lastErr string) {
+func (s *Service) ProbeReachability(ctx context.Context, n db.Node) (status, lastErr string) {
 	creds, err := OpenCredentials(s.cipher, n.CredentialsEncrypted)
 	if err != nil {
-		return false, ""
+		return "", ""
 	}
 	in := ConnInput{
 		Host:               n.Host,
@@ -358,8 +358,8 @@ func (s *Service) ProbeReachability(ctx context.Context, n db.Node) (reachable b
 		DockerEndpoint:     n.DockerEndpoint,
 		PinnedHostKey:      n.SSHHostKey,
 	}
-	status, le, _ := deriveStatus(discovery.Probe(ctx, in.target()))
-	return status == "ok", le
+	st, le, _ := deriveStatus(discovery.Probe(ctx, in.target()))
+	return st, le
 }
 
 // List returns all nodes (no secrets).
@@ -403,10 +403,19 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 }
 
 func deriveStatus(r discovery.Result) (status, lastErr string, lastSeen *time.Time) {
+	apiOK := r.DockerVersion != "" || r.ProxmoxAuthStatus == discovery.PVEStatusConfirmed
+	sshErr := r.PerProbeError["ssh"]
 	// Reachable if any probe succeeded.
-	reachable := r.ReachableSSH || r.DockerVersion != "" || r.ProxmoxAuthStatus == discovery.PVEStatusConfirmed
-	if reachable {
+	if r.ReachableSSH || apiOK {
 		now := time.Now()
+		// Degraded: a management API (Docker/Proxmox) is reachable, but SSH was
+		// attempted and failed. Host-level ops (terminal, host FS browse, scripts)
+		// need SSH, so surface "degraded" + the SSH error instead of a flat "ok"
+		// that hides the outage — or a misleading "unreachable" while VMs/containers
+		// still enumerate.
+		if apiOK && !r.ReachableSSH && sshErr != "" {
+			return "degraded", sshErr, &now
+		}
 		return "ok", "", &now
 	}
 	// Pick a representative sanitized error if present.
