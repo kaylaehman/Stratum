@@ -40,9 +40,9 @@ export function Topbar({ user, onLogout, onSearchOpen, onMenuToggle }: TopbarPro
       <div className="flex items-center w-auto md:w-52 shrink-0">
         <span className="flex items-center gap-2 select-none" aria-label="Stratum">
           <svg width={26} height={26} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-            <path d="M16 4.3 27 8.7 16 13.1 5 8.7Z" fill="#6478E6" />
-            <path d="M16 11.3 27 15.7 16 20.1 5 15.7Z" fill="#2E4BD8" />
-            <path d="M16 18.3 27 22.7 16 27.1 5 22.7Z" fill="#1E2F94" />
+            <path d="M16 4 27 10 16 16 5 10Z" fill="#2E4BD8" />
+            <path d="M5 13.6 16 19.6 27 13.6" stroke="#2E4BD8" strokeWidth={2.3} strokeLinejoin="round" strokeLinecap="round" />
+            <path d="M5 17.2 16 23.2 27 17.2" stroke="#2E4BD8" strokeWidth={2.3} strokeLinejoin="round" strokeLinecap="round" />
           </svg>
           <span
             style={{
