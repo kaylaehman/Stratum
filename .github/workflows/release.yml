@@ -1,54 +1,68 @@
 name: Release
 
-# Cut a release by pushing a semver tag:
-#   git tag v0.1.0 && git push origin v0.1.0
-# This builds multi-arch (amd64 + arm64) images, pushes them to GHCR as
-# ghcr.io/kae-labs/stratum-{backend,frontend}, and opens a GitHub Release.
+# Releases are CUT AUTOMATICALLY — no manual tagging. After CI passes on main,
+# this reads the conventional-commit messages since the last tag and computes the
+# next semver (feat -> minor; fix/security/perf -> patch; BREAKING CHANGE -> major;
+# chore/docs/ci/style/test/refactor -> NO release), tags it, builds + pushes the
+# multi-arch images to GHCR, and opens the GitHub Release. Gated on green CI so a
+# broken main can never ship.
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
-  contents: write # create the GitHub Release
+  contents: write # push the tag + create the GitHub Release
   packages: write # push images to GHCR
 
 jobs:
+  tag:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.new_tag }}
+      version: ${{ steps.tag.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - id: tag
+        uses: mathieudutour/github-tag-action@d28fa2ccfbd16e871a4bdf35e11b3ad1bd56c0c1 # v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag_prefix: v
+          default_bump: false # no release unless feat/fix/security/perf/BREAKING
+          custom_release_rules: security:patch:Security,perf:patch:Performance
+
   images:
+    needs: tag
+    if: ${{ needs.tag.outputs.tag }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - name: backend
             dockerfile: backend/Dockerfile
-            target: app # slim image (no Trivy); set TRIVY_PATH or use app-trivy for bundled CVE scan
+            target: app
             image: ghcr.io/kae-labs/stratum-backend
           - name: frontend
             dockerfile: frontend/Dockerfile
-            target: "" # default (final) stage
+            target: ""
             image: ghcr.io/kae-labs/stratum-frontend
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Derive image tags
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ${{ matrix.image }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
       - name: Build and push (amd64 + arm64)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -57,36 +71,21 @@ jobs:
           target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ${{ matrix.image }}:${{ needs.tag.outputs.version }}
+            ${{ matrix.image }}:latest
 
   release:
-    needs: images
+    needs: [tag, images]
+    if: ${{ needs.tag.outputs.tag }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 0 # full history so release notes diff against the previous tag
+          fetch-depth: 0
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: ${{ needs.tag.outputs.tag }}
           generate_release_notes: true
-          body: |
-            ## Stratum ${{ github.ref_name }}
-
-            Self-hosted unified infrastructure management. Pull the published images:
-
-            ```bash
-            curl -O https://raw.githubusercontent.com/KAE-Labs/Stratum/${{ github.ref_name }}/docker-compose.yml
-            curl -O https://raw.githubusercontent.com/KAE-Labs/Stratum/${{ github.ref_name }}/.env.example
-            cp .env.example .env   # then set JWT_SECRET + ENCRYPTION_KEY
-            STRATUM_TAG=${{ github.ref_name }} docker compose up -d
-            ```
-
-            Images (multi-arch amd64/arm64):
-            - `ghcr.io/kae-labs/stratum-backend:${{ github.ref_name }}`
-            - `ghcr.io/kae-labs/stratum-frontend:${{ github.ref_name }}`
